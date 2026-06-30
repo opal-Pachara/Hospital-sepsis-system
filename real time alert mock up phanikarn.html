@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ระบบแจ้งเตือนภาวะติดเชื้อในกระแสเลือด — ห้องอุบัติเหตุและฉุกเฉิน โรงพยาบาลบางคล้า</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+:root {
+  --bg-main:#eef2f7;--bg-card:#fff;--bg-sidebar:#f1f5f9;
+  --border:#dde3ed;--border-light:#c8d3e0;
+  --accent-blue:#2563eb;--text-primary:#1e293b;--text-secondary:#475569;--text-muted:#94a3b8;
+  --red-alert:#dc2626;--orange-alert:#ea580c;--green-alert:#16a34a;--teal:#0891b2;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Sarabun','TH Sarabun New',sans-serif;background:var(--bg-main);color:var(--text-primary);height:100vh;display:flex;flex-direction:column;overflow:hidden;font-size:14px}
+
+.header{background:#fff;border-bottom:2px solid #dde3ed;padding:8px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;position:relative;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.header::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#2563eb,#0891b2,#2563eb)}
+.header-left{display:flex;align-items:center;gap:14px}
+.hospital-logo{width:44px;height:44px;background:linear-gradient(135deg,#2563eb,#0891b2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:900;box-shadow:0 2px 8px rgba(37,99,235,.3)}
+.hospital-name .main{font-size:15px;font-weight:700;color:#1e293b}
+.hospital-name .sub{font-size:11px;color:var(--text-secondary)}
+.header-center{position:absolute;left:50%;transform:translateX(-50%);text-align:center}
+.system-title{font-size:16px;font-weight:700;color:#2563eb;letter-spacing:.3px}
+.system-sub{font-size:10px;color:var(--text-muted)}
+.header-right{display:flex;align-items:center;gap:14px}
+.clock .time{font-size:20px;font-weight:700;color:#2563eb;font-variant-numeric:tabular-nums}
+.clock .date{font-size:10px;color:var(--text-secondary)}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--green-alert);box-shadow:0 0 6px rgba(22,163,74,.5);animation:pulse-green 2s infinite}
+@keyframes pulse-green{0%,100%{opacity:1}50%{opacity:.5}}
+.online-badge{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--green-alert)}
+
+.main-layout{display:flex;flex:1;overflow:hidden}
+
+/* SIDEBAR */
+.sidebar{width:260px;background:var(--bg-sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
+.sidebar-header{padding:10px 14px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.sidebar-title{font-size:12px;font-weight:700;color:#1e293b;text-transform:uppercase;letter-spacing:1px}
+.patient-count{background:#2563eb;color:#fff;border-radius:10px;padding:1px 8px;font-size:11px;font-weight:700}
+.sidebar-filter{padding:8px 10px;border-bottom:1px solid var(--border);display:flex;gap:4px;flex-wrap:wrap}
+.filter-btn{padding:3px 10px;border-radius:20px;border:1px solid;font-size:10px;font-weight:600;cursor:pointer;background:transparent;transition:all .2s;font-family:inherit}
+.filter-btn.all{border-color:var(--accent-blue);color:var(--accent-blue)}
+.filter-btn.all.active{background:var(--accent-blue);color:#fff}
+.filter-btn.red{border-color:var(--red-alert);color:var(--red-alert)}
+.patient-list{flex:1;overflow-y:auto}
+.patient-card{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;position:relative;background:#fff}
+.patient-card.active{background:#eff6ff;border-left:3px solid #2563eb}
+.patient-card .alert-bar{position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:0 2px 2px 0}
+.alert-bar.critical{background:#dc2626}
+.pc-top{display:flex;justify-content:space-between;align-items:flex-start;margin-left:8px}
+.pc-hn{font-size:12px;font-weight:700}
+.pc-badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:10px}
+.badge-critical{background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;animation:blink-badge 1s infinite}
+@keyframes blink-badge{0%,100%{opacity:1}50%{opacity:.5}}
+.pc-info{font-size:10px;color:var(--text-secondary);margin-left:8px;margin-top:3px}
+.pc-scores{display:flex;gap:8px;margin-left:8px;margin-top:5px}
+.score-chip{font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;white-space:nowrap}
+.score-chip.news-high{background:#fef2f2;color:#dc2626;border:1px solid #fca5a5}
+.score-chip.news-medium{background:#fff7ed;color:#c2410c;border:1px solid #fdba74}
+.score-chip.news-low{background:#f0fdf4;color:#16a34a;border:1px solid #86efac}
+.score-chip.news-incomplete{background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1;font-weight:600;font-size:9px}
+.pc-missing{font-size:9px;color:#94a3b8;margin-left:8px;margin-top:2px}
+.pc-time{font-size:9px;color:var(--text-muted);margin-left:8px;margin-top:3px}
+.refresh-bar{padding:5px 14px;border-bottom:1px solid var(--border);background:#f8fafc;display:flex;align-items:center;justify-content:space-between}
+.refresh-label{font-size:9px;color:#64748b}
+.refresh-dot{width:6px;height:6px;border-radius:50%;background:#22c55e;animation:pulse-green 2s infinite;display:inline-block;margin-right:4px}
+
+/* MAIN CONTENT */
+.main-content{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.content-top{display:flex;flex:1;overflow:hidden}
+.detail-panel{order:2;width:460px;flex-shrink:0;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px;border-left:1px solid var(--border)}
+.detail-panel::-webkit-scrollbar{width:4px}
+.detail-panel::-webkit-scrollbar-thumb{background:var(--border-light);border-radius:2px}
+
+.patient-info-bar{background:#fff;border:1px solid #dde3ed;border-radius:12px;padding:10px 14px 10px 18px;display:flex;flex-direction:column;gap:5px;position:relative;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.patient-info-bar::before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;background:linear-gradient(to bottom,#dc2626,#ea580c);border-radius:12px 0 0 12px}
+.pib-avatar{display:none}
+.pib-row1{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pib-hn{font-size:15px;font-weight:800;color:#1e293b}
+.pib-detail{font-size:11px;color:var(--text-secondary)}
+.pib-row2{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.pib-badges{display:flex;gap:6px;flex-wrap:wrap}
+.pib-badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;white-space:nowrap}
+.pib-badge.gender{background:#eff6ff;border-color:#93c5fd;color:#2563eb}
+.pib-badge.age{background:#ecfeff;border-color:#67e8f9;color:#0891b2}
+.pib-time{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.pib-time .label{font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px}
+.pib-time .value{font-size:12px;font-weight:700;color:#ea580c;font-variant-numeric:tabular-nums}
+.alert-level-badge{padding:4px 10px;border-radius:8px;font-size:11px;font-weight:800;text-align:center;background:#fef2f2;border:2px solid #dc2626;color:#dc2626;animation:pulse-red 1.5s infinite;white-space:nowrap;flex-shrink:0}
+@keyframes pulse-red{0%,100%{border-color:#dc2626;box-shadow:0 0 0 0 rgba(220,38,38,.25)}50%{border-color:#f87171;box-shadow:0 0 8px 2px rgba(220,38,38,.12)}}
+
+.section-card{background:#fff;border:1px solid #dde3ed;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.section-card-header{padding:10px 14px;background:#f8fafc;border-bottom:1px solid #dde3ed;display:flex;align-items:center;gap:8px;justify-content:space-between}
+.section-card-title{font-size:12px;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:1px;display:flex;align-items:center;gap:6px}
+.section-card-body{padding:12px 14px}
+
+.vitals-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.vital-item{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 8px;text-align:center;position:relative}
+.vital-item.abnormal{border-color:#fca5a5;background:#fef2f2}
+.vital-item.warning{border-color:#fdba74;background:#fff7ed}
+.vital-label{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.vital-value{font-size:20px;font-weight:800;margin:4px 0 2px;font-variant-numeric:tabular-nums}
+.vital-unit{font-size:9px;color:var(--text-secondary)}
+.vital-score-tag{position:absolute;top:4px;right:4px;font-size:9px;font-weight:800;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.vst-0{background:#dcfce7;color:#16a34a}.vst-1{background:#fef9c3;color:#ca8a04}.vst-2{background:#ffedd5;color:#ea580c}.vst-3{background:#fee2e2;color:#dc2626}
+
+.score-section{display:flex;flex-direction:column;gap:10px}
+.score-box{flex:1;background:#fff;border-radius:10px;overflow:hidden;border:1px solid #dde3ed}
+.score-box-header{padding:8px 12px;background:#f8fafc;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dde3ed}
+.score-box-name{font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5px;line-height:1.3}
+.score-total{font-size:28px;font-weight:900;line-height:1}
+.score-label{font-size:9px;font-weight:600;margin-top:2px}
+.score-row{display:flex;align-items:center;padding:5px 12px;border-bottom:1px solid #f1f5f9;font-size:11px}
+.score-row:last-child{border-bottom:none}
+.score-row-param{flex:1;color:#475569}
+.score-row-value{width:90px;text-align:center;font-weight:600}
+.score-row-ref{width:72px;text-align:center;font-size:9px;color:#94a3b8}
+.score-row-pts{width:40px;text-align:center;font-weight:800;font-size:13px;padding:2px 6px;border-radius:6px}
+.pts-0{color:#16a34a}.pts-1{color:#ca8a04}.pts-2{color:#ea580c}.pts-3{color:#dc2626}
+.score-row.highlight{background:#fef2f2}
+.rule-box{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 12px}
+.rule-box-title{font-size:10px;font-weight:700;color:#0891b2;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.rule-logic{font-size:11px;color:#475569;line-height:1.6}
+.rule-logic .highlight{color:#2563eb;font-weight:700}
+.rule-logic .critical{color:#dc2626;font-weight:700}
+
+/* RIGHT PANEL */
+.right-panel{order:1;flex:1;min-width:0;border-right:1px solid var(--border);background:var(--bg-sidebar);display:flex;flex-direction:column;overflow:hidden}
+.countdown-banner{background:linear-gradient(135deg,#1e293b,#0f3460);padding:8px 14px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;border-bottom:1px solid #334155}
+.countdown-banner.warning{background:linear-gradient(135deg,#7c2d12,#b91c1c)}
+.countdown-banner.expired{background:#7f1d1d}
+.cd-label{font-size:9px;color:rgba(255,255,255,.6);letter-spacing:1px;text-transform:uppercase}
+.cd-time{font-size:22px;font-weight:900;color:#fff;font-variant-numeric:tabular-nums;line-height:1.1}
+.cd-target{font-size:9px;color:rgba(255,255,255,.6);text-align:right}
+.cd-target-val{font-size:11px;font-weight:700;color:#fbbf24;text-align:right}
+
+.rp-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
+.rp-tab{flex:1;padding:9px 6px;text-align:center;font-size:11px;font-weight:600;cursor:pointer;color:#94a3b8;border-bottom:2px solid transparent;transition:all .2s;background:transparent;border-left:none;border-right:none;border-top:none;font-family:inherit}
+.rp-tab.active{color:#2563eb;border-bottom-color:#2563eb}
+.rp-content{flex:1;overflow-y:auto}
+.rp-content::-webkit-scrollbar{width:4px}
+.rp-content::-webkit-scrollbar-thumb{background:var(--border-light);border-radius:2px}
+
+.checklist-section{padding:8px 12px}
+.cl-section-title{font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:1px;padding:5px 0;margin-bottom:5px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:6px}
+.cl-item{display:flex;align-items:flex-start;gap:9px;padding:7px 8px;border-radius:8px;margin-bottom:3px;transition:background .2s;cursor:pointer}
+.cl-item:hover{background:#eff6ff}
+.cl-item.done{background:#f0fdf4}
+.cl-item.no-click{cursor:default}
+.cl-item.no-click:hover{background:transparent}
+.cl-checkbox{width:18px;height:18px;border-radius:5px;border:2px solid #cbd5e1;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;transition:all .2s;background:#fff}
+.cl-checkbox.checked{background:#16a34a;border-color:#16a34a}
+.cl-checkbox.checked::after{content:'✓';color:#fff;font-size:11px;font-weight:900}
+.cl-text{flex:1;min-width:0}
+.cl-title{font-size:11px;font-weight:600;color:#1e293b}
+.cl-title.done-text{color:#94a3b8;text-decoration:line-through}
+.cl-sub{font-size:9px;color:#94a3b8;margin-top:2px}
+.cl-urgent{font-size:9px;color:#dc2626;font-weight:700;margin-top:2px}
+.cl-progress{background:#f8fafc;border-radius:8px;padding:8px 12px;margin:6px 12px;border:1px solid #e2e8f0}
+.cl-progress-label{font-size:10px;color:#475569;margin-bottom:5px;display:flex;justify-content:space-between}
+.progress-bar{height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden}
+.progress-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,#2563eb,#0891b2);transition:width .5s}
+
+.cl-input-wrap{margin-top:6px}
+.cl-input-lbl{font-size:9px;color:#64748b;margin-bottom:3px;display:block}
+.cl-input-field{width:100%;padding:5px 8px;border:1.5px solid #e2e8f0;border-radius:6px;font-size:11px;font-family:inherit;color:#1e293b;background:#f8fafc}
+.cl-input-field:focus{outline:none;border-color:#2563eb;background:#fff}
+
+.doc-confirm-btn{margin-top:7px;padding:7px 12px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;width:100%;display:flex;align-items:center;justify-content:center;gap:6px;transition:background .2s}
+.doc-confirm-btn:hover{background:#1d4ed8}
+.doc-confirmed-time{font-size:10px;color:#16a34a;font-weight:700;margin-top:5px}
+
+.assess-table-wrap{margin:4px 0 8px;border:1px solid #dde3ed;border-radius:8px;overflow:hidden;background:#fff}
+.at-head{display:grid;grid-template-columns:30px 1fr 46px 64px;background:#eff6ff;border-bottom:1px solid #bfdbfe;padding:5px 8px;font-size:9px;font-weight:700;color:#2563eb;letter-spacing:.5px;text-transform:uppercase;gap:4px}
+.at-row{display:grid;grid-template-columns:30px 1fr 46px 64px;padding:6px 8px;border-bottom:1px solid #f1f5f9;align-items:center;font-size:10px;gap:4px}
+.at-row:last-child{border-bottom:none}
+.at-row.at-done{background:#f0fdf4}
+.at-row.at-due{background:#fff7ed;animation:blink-row 2s infinite}
+@keyframes blink-row{0%,100%{background:#fff7ed}50%{background:#fef3c7}}
+.at-num{font-size:10px;color:#94a3b8;font-weight:700}
+.at-time{font-size:10px;color:#1e293b;font-weight:600;text-align:center}
+.at-time small{color:#94a3b8;font-size:9px;font-weight:400;display:block}
+.at-news{text-align:center;font-weight:800;font-size:11px}
+.at-news.high{color:#dc2626}.at-news.med{color:#ea580c}.at-news.low{color:#16a34a}.at-news.none{color:#94a3b8}
+.at-btn{padding:3px 6px;border-radius:6px;font-size:9px;font-weight:700;cursor:pointer;border:1px solid;font-family:inherit;text-align:center}
+.at-btn.due{background:#dc2626;color:#fff;border-color:#dc2626;animation:pulse-btn 1.5s infinite}
+.at-btn.open{background:#eff6ff;color:#2563eb;border-color:#93c5fd}
+.at-btn.view{background:#f0fdf4;color:#16a34a;border-color:#86efac;cursor:default}
+@keyframes pulse-btn{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+.at-footer{padding:6px 8px;background:#eff6ff;border-top:1px solid #bfdbfe;font-size:9px;color:#0891b2;text-align:center;font-weight:600}
+
+.discharge-section{padding:10px 12px;border-top:2px dashed #e2e8f0;margin-top:4px}
+.discharge-btn{width:100%;padding:8px;background:transparent;border:2px solid #64748b;border-radius:8px;font-size:12px;font-weight:700;color:#64748b;cursor:pointer;font-family:inherit;transition:all .2s}
+.discharge-btn:hover{background:#1e293b;color:#fff;border-color:#1e293b}
+.discharge-btn.done-discharge{background:#16a34a;color:#fff;border-color:#16a34a;cursor:default}
+
+/* Timeline */
+.timeline-wrap{padding:10px 12px}
+.tl-item{display:flex;gap:10px;padding:5px 0;position:relative}
+.tl-item::before{content:'';position:absolute;left:14px;top:22px;bottom:-5px;width:1px;background:#e2e8f0}
+.tl-item:last-child::before{display:none}
+.tl-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:4px;position:relative;z-index:1}
+.tl-content{flex:1}
+.tl-time{font-size:9px;color:#94a3b8}
+.tl-text{font-size:11px;color:#475569;margin-top:2px;line-height:1.4}
+.tl-copy-bar{padding:10px 12px;border-top:1px solid var(--border);background:#f8fafc;flex-shrink:0}
+.copy-btn{width:100%;padding:9px;background:#1e293b;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;transition:background .2s}
+.copy-btn:hover{background:#0f172a}
+.copy-btn.copied{background:#16a34a}
+.copy-note{font-size:10px;color:#94a3b8;text-align:center;margin-top:5px}
+
+/* STATUS BAR */
+.status-bar{background:var(--bg-sidebar);border-top:1px solid var(--border);padding:5px 16px;display:flex;align-items:center;gap:20px;font-size:10px;color:var(--text-muted);flex-shrink:0}
+.sb-item{display:flex;align-items:center;gap:5px}
+.sb-dot{width:6px;height:6px;border-radius:50%}
+.demo-bar{background:#fff;border-top:1px solid var(--border);padding:6px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;font-size:11px}
+.demo-lbl{color:var(--text-muted);font-size:10px}
+.demo-btn{padding:4px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:inherit;transition:all .2s}
+.demo-btn.red{border-color:var(--red-alert);color:var(--red-alert);background:#fef2f2}
+.demo-btn.red:hover{background:var(--red-alert);color:#fff}
+.demo-btn.orange{border-color:var(--orange-alert);color:var(--orange-alert);background:#fff7ed}
+.demo-btn.orange:hover{background:var(--orange-alert);color:#fff}
+
+/* POPUP — ALERT */
+.popup-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;z-index:1000;animation:fadeIn .2s}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideUp{from{transform:translateY(30px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes shake{0%,100%{transform:rotate(0)}25%{transform:rotate(-8deg)}75%{transform:rotate(8deg)}}
+.popup-box{background:#fff;border:2px solid #dc2626;border-radius:16px;width:480px;box-shadow:0 8px 32px rgba(220,38,38,.15);animation:slideUp .3s;overflow:hidden}
+.popup-header{background:linear-gradient(135deg,#fef2f2,#fee2e2);padding:14px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #fca5a5}
+.popup-alarm-icon{width:44px;height:44px;background:#dc2626;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;animation:shake .5s infinite;box-shadow:0 4px 12px rgba(220,38,38,.4)}
+.popup-title{font-size:17px;font-weight:900;color:#dc2626}
+.popup-subtitle{font-size:11px;color:#475569;margin-top:3px}
+.popup-close{background:#fee2e2;border:1px solid #fca5a5;color:#dc2626;border-radius:8px;padding:5px 9px;cursor:pointer;font-size:16px;font-family:inherit}
+.popup-close:hover{background:#dc2626;color:#fff}
+.popup-body{padding:14px 18px}
+.popup-pt-row{background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:14px;margin-bottom:12px}
+.popup-hn{font-size:15px;font-weight:800}
+.popup-demo{font-size:11px;color:#475569;margin-top:2px}
+.popup-score-block{background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:16px;margin-bottom:12px}
+.psb-val{font-size:40px;font-weight:900;color:#dc2626;line-height:1}
+.psb-info .psb-lbl{font-size:10px;color:#94a3b8}
+.psb-info .psb-desc{font-size:12px;font-weight:700;color:#dc2626;margin-top:2px}
+.psb-info .psb-params{font-size:10px;color:#475569;margin-top:4px;line-height:1.5}
+.popup-alert-msg{background:#fff7ed;border-left:3px solid #ea580c;border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:12px;font-size:11px;color:#475569;line-height:1.7}
+.btn-primary{width:100%;padding:11px;background:#dc2626;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:background .2s}
+.btn-primary:hover{background:#b91c1c}
+
+/* POPUP — REMINDER */
+.reminder-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:1500}
+.reminder-box{background:#fff;border:2px solid #ea580c;border-radius:14px;width:360px;box-shadow:0 8px 24px rgba(234,88,12,.2);animation:slideUp .3s;overflow:hidden}
+.reminder-header{background:linear-gradient(135deg,#fff7ed,#fed7aa);padding:13px 18px;border-bottom:1px solid #fdba74;display:flex;align-items:center;gap:12px}
+.reminder-bell{width:40px;height:40px;background:#ea580c;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;animation:shake .6s infinite}
+.reminder-body{padding:14px 18px}
+
+/* POPUP — ASSESSMENT FORM */
+.assess-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:2000}
+.assess-box{background:#fff;border-radius:14px;width:460px;max-height:92vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.15);border:1px solid #e2e8f0}
+.assess-header{padding:13px 18px;background:linear-gradient(135deg,#eff6ff,#dbeafe);border-bottom:1px solid #bfdbfe;display:flex;align-items:center;gap:12px}
+.assess-icon{width:38px;height:38px;background:#2563eb;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.assess-body{padding:14px 18px}
+.vgi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.vgi-item{display:flex;flex-direction:column;gap:4px}
+.vgi-lbl{font-size:11px;font-weight:600;color:#475569}
+.vgi-lbl small{font-size:9px;color:#94a3b8;font-weight:400}
+.vgi-input{padding:7px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:15px;font-weight:700;color:#1e293b;font-family:inherit;font-variant-numeric:tabular-nums;width:100%}
+.vgi-input:focus{outline:none;border-color:#2563eb}
+.vgi-select{padding:7px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#1e293b;font-family:inherit;background:#fff;width:100%;cursor:pointer}
+.vgi-select:focus{outline:none;border-color:#2563eb}
+.news-live{background:linear-gradient(135deg,#1e293b,#0f3460);border-radius:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.nl-score{font-size:40px;font-weight:900;color:#fff;font-variant-numeric:tabular-nums;line-height:1}
+.nl-right{text-align:right}
+.nl-lbl{font-size:9px;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:1px}
+.nl-risk{font-size:12px;font-weight:800;margin-top:3px}
+.nl-bd{font-size:9px;color:rgba(255,255,255,.45);margin-top:4px;line-height:1.6}
+.assess-actions{display:flex;gap:8px}
+.btn-save{flex:2;padding:10px;background:#2563eb;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
+.btn-save:hover{background:#1d4ed8}
+.btn-cancel{flex:1;padding:10px;background:transparent;border:1px solid #cbd5e1;border-radius:8px;color:#475569;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.divider{height:1px;background:var(--border);margin:4px 0}
+</style>
+</head>
+<body>
+
+<!-- ALERT POPUP -->
+<div class="popup-overlay" id="alertPopup" style="display:none">
+  <div class="popup-box">
+    <div class="popup-header">
+      <div class="popup-alarm-icon">🚨</div>
+      <div style="flex:1">
+        <div class="popup-title">🔴 แจ้งเตือน — เสี่ยงติดเชื้อในกระแสเลือด</div>
+        <div class="popup-subtitle">ระบบตรวจพบคะแนน NEWS เกินเกณฑ์ — ต้องประเมินทันที</div>
+      </div>
+      <button class="popup-close" onclick="closeAlertPopup()">✕</button>
+    </div>
+    <div class="popup-body">
+      <div class="popup-pt-row">
+        <div style="font-size:26px">👤</div>
+        <div>
+          <div class="popup-hn">HN 2568-04271</div>
+          <div class="popup-demo">เพศชาย · อายุ 68 ปี · เวลาคัดกรอง 14:32:07</div>
+        </div>
+        <div style="margin-left:auto;text-align:center">
+          <div style="font-size:11px;font-weight:700;color:#dc2626;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:4px 8px;line-height:1.4">🔴 เสี่ยง<br>ติดเชื้อในกระแสเลือด</div>
+        </div>
+      </div>
+      <div class="popup-score-block">
+        <div class="psb-val">12</div>
+        <div class="psb-info">
+          <div class="psb-lbl">NEWS Score</div>
+          <div class="psb-desc">⚠ HIGH RISK — เสี่ยงติดเชื้อในกระแสเลือด</div>
+          <div class="psb-params">RR 28/นาที (+3) · SpO₂ 91% (+3) · SBP 88 mmHg (+3)<br>HR 118/นาที (+2) · Temp 38.9°C (+1) · AVPU: A (+0)</div>
+        </div>
+      </div>
+      <div class="popup-alert-msg">
+        <strong>เกณฑ์:</strong> NEWS ≥ 5 → เสี่ยงติดเชื้อในกระแสเลือด<br>
+        <strong>ขั้นตอนต่อไป:</strong> ประเมินซ้ำที่จุดคัดแยก → นำเข้าห้อง ER → รายงานแพทย์เวรทันที
+      </div>
+      <button class="btn-primary" onclick="acknowledgeAlert()">✅ รับทราบ — เริ่มกระบวนการดูแลภาวะติดเชื้อในกระแสเลือด</button>
+    </div>
+  </div>
+</div>
+
+<!-- REMINDER POPUP -->
+<div class="reminder-overlay" id="reminderPopup" style="display:none">
+  <div class="reminder-box">
+    <div class="reminder-header">
+      <div class="reminder-bell">🔔</div>
+      <div style="flex:1">
+        <div style="font-size:16px;font-weight:900;color:#ea580c" id="reminder-title">ถึงเวลาประเมินสัญญาณชีพ</div>
+        <div style="font-size:11px;color:#475569;margin-top:3px" id="reminder-sub">ประเมินครั้งที่ 1 (ทุก 15 นาที)</div>
+      </div>
+      <button style="background:#fff7ed;border:1px solid #fdba74;color:#ea580c;border-radius:8px;padding:5px 9px;cursor:pointer;font-size:14px;font-family:inherit" onclick="closeReminder()">✕</button>
+    </div>
+    <div class="reminder-body">
+      <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:#475569;line-height:1.7">
+        <strong>HN 2568-04271</strong> — ถึงเวลาประเมินสัญญาณชีพซ้ำ<br>
+        กรุณากรอกข้อมูลสัญญาณชีพเพื่อคำนวณ NEWS score อัตโนมัติ
+      </div>
+      <div style="display:flex;gap:8px">
+        <button style="flex:2;padding:10px;background:#ea580c;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit" onclick="openAssessFromReminder()">📝 บันทึกสัญญาณชีพ</button>
+        <button style="flex:1;padding:10px;background:transparent;border:1px solid #cbd5e1;border-radius:8px;color:#475569;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit" onclick="closeReminder()">เลื่อนออกไป</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ASSESSMENT FORM POPUP -->
+<div class="assess-overlay" id="assessPopup" style="display:none">
+  <div class="assess-box">
+    <div class="assess-header">
+      <div class="assess-icon">📊</div>
+      <div style="flex:1">
+        <div style="font-size:15px;font-weight:800;color:#1e293b" id="assess-title">บันทึกสัญญาณชีพ</div>
+        <div style="font-size:10px;color:#475569;margin-top:2px" id="assess-sub">HN 2568-04271</div>
+      </div>
+      <button style="background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;border-radius:8px;padding:5px 9px;cursor:pointer;font-size:14px;font-family:inherit" onclick="closeAssessPopup()">✕</button>
+    </div>
+    <div class="assess-body">
+      <div class="vgi-grid">
+        <div class="vgi-item">
+          <label class="vgi-lbl">อัตราการหายใจ (RR) <small>ครั้ง/นาที</small></label>
+          <input class="vgi-input" id="ai-rr" type="number" min="1" max="60" placeholder="--" oninput="calcLiveNEWS()">
+        </div>
+        <div class="vgi-item">
+          <label class="vgi-lbl">O₂ Saturation (SpO₂) <small>%</small></label>
+          <input class="vgi-input" id="ai-spo2" type="number" min="50" max="100" placeholder="--" oninput="calcLiveNEWS()">
+        </div>
+        <div class="vgi-item">
+          <label class="vgi-lbl">BP Systolic (SBP) <small>mmHg</small></label>
+          <input class="vgi-input" id="ai-sbp" type="number" min="40" max="300" placeholder="--" oninput="calcLiveNEWS()">
+        </div>
+        <div class="vgi-item">
+          <label class="vgi-lbl">BP Diastolic (DBP) <small>mmHg</small></label>
+          <input class="vgi-input" id="ai-dbp" type="number" min="20" max="200" placeholder="--">
+        </div>
+        <div class="vgi-item">
+          <label class="vgi-lbl">ชีพจร (P) <small>ครั้ง/นาที</small></label>
+          <input class="vgi-input" id="ai-hr" type="number" min="20" max="250" placeholder="--" oninput="calcLiveNEWS()">
+        </div>
+        <div class="vgi-item">
+          <label class="vgi-lbl">อุณหภูมิ (BT) <small>°C</small></label>
+          <input class="vgi-input" id="ai-bt" type="number" min="30" max="43" step="0.1" placeholder="--" oninput="calcLiveNEWS()">
+        </div>
+        <div class="vgi-item" style="grid-column:1/-1">
+          <label class="vgi-lbl">ระดับความรู้สึกตัว (AVPU)</label>
+          <select class="vgi-select" id="ai-avpu" onchange="calcLiveNEWS()">
+            <option value="">-- เลือก --</option>
+            <option value="A">A — Alert (รู้สึกตัวดี)</option>
+            <option value="V">V — Voice (ตอบสนองต่อเสียง)</option>
+            <option value="P">P — Pain (ตอบสนองต่อความเจ็บปวด)</option>
+            <option value="U">U — Unresponsive (ไม่ตอบสนอง)</option>
+          </select>
+        </div>
+      </div>
+      <div class="news-live">
+        <div>
+          <div class="nl-lbl">NEWS Score (คำนวณอัตโนมัติ)</div>
+          <div class="nl-score" id="nl-score">--</div>
+        </div>
+        <div class="nl-right">
+          <div class="nl-lbl">ระดับความเสี่ยง</div>
+          <div class="nl-risk" id="nl-risk" style="color:#94a3b8">กรอกข้อมูลเพื่อคำนวณ</div>
+          <div class="nl-bd" id="nl-bd"></div>
+        </div>
+      </div>
+      <div class="assess-actions">
+        <button class="btn-save" onclick="saveAssessment()">💾 บันทึกการประเมิน</button>
+        <button class="btn-cancel" onclick="closeAssessPopup()">ยกเลิก</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-left">
+    <div class="hospital-logo">🏥</div>
+    <div class="hospital-name">
+      <div class="main">โรงพยาบาลบางคล้า</div>
+      <div class="sub">ห้องอุบัติเหตุและฉุกเฉิน · จังหวัดฉะเชิงเทรา</div>
+    </div>
+  </div>
+  <div class="header-center">
+    <div class="system-title">ระบบแจ้งเตือนภาวะติดเชื้อในกระแสเลือด (RTSAS)</div>
+    <div class="system-sub">Real-Time Sepsis Alert System · Rule-Based · Transparent · Auditable</div>
+  </div>
+  <div class="header-right">
+    <div class="online-badge"><div class="status-dot"></div><span>ออนไลน์</span></div>
+    <div class="clock">
+      <div class="time" id="clock">--:--:--</div>
+      <div class="date" id="dateDisplay">--</div>
+    </div>
+  </div>
+</div>
+
+<div class="main-layout">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">📋 รายชื่อผู้ป่วย</span>
+      <span class="patient-count">3</span>
+    </div>
+    <div class="refresh-bar">
+      <span class="refresh-label"><span class="refresh-dot"></span>รีเฟรชทุก 10 วินาที</span>
+      <span class="refresh-label" id="last-refresh">อัปเดต 14:35:20</span>
+    </div>
+    <div class="sidebar-filter">
+      <button class="filter-btn all active">ทั้งหมด 3</button>
+      <button class="filter-btn red">🔴 เสี่ยง 1</button>
+    </div>
+    <div class="patient-list">
+
+      <!-- Patient 1: Sepsis Alert (active) -->
+      <div class="patient-card active">
+        <div class="alert-bar critical"></div>
+        <div class="pc-top">
+          <div class="pc-hn">HN 2568-04271</div>
+          <span class="pc-badge badge-critical">🔴 เสี่ยงติดเชื้อ</span>
+        </div>
+        <div class="pc-info">♂ ชาย · 68 ปี · ห้อง 3</div>
+        <div class="pc-scores"><span class="score-chip news-high">NEWS 12 — HIGH RISK</span></div>
+        <div class="pc-time">🕐 14:32 · กำลังดูแล</div>
+      </div>
+
+      <!-- Patient 2: Data complete, low risk -->
+      <div class="patient-card">
+        <div class="alert-bar" style="background:#22c55e"></div>
+        <div class="pc-top">
+          <div class="pc-hn">HN 2568-04198</div>
+          <span class="pc-badge" style="background:#f0fdf4;color:#16a34a;border:1px solid #86efac">🟢 ปกติ</span>
+        </div>
+        <div class="pc-info">♀ หญิง · 52 ปี · ห้อง 1</div>
+        <div class="pc-scores"><span class="score-chip news-low">NEWS 3 — LOW RISK</span></div>
+        <div class="pc-time">🕐 14:18 · รอผล Lab</div>
+      </div>
+
+      <!-- Patient 3: Incomplete data, can't calculate -->
+      <div class="patient-card">
+        <div class="alert-bar" style="background:#94a3b8"></div>
+        <div class="pc-top">
+          <div class="pc-hn">HN 2568-04315</div>
+          <span class="pc-badge" style="background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1">⚪ รอประเมิน</span>
+        </div>
+        <div class="pc-info">♂ ชาย · 75 ปี · ห้อง 5</div>
+        <div class="pc-scores"><span class="score-chip news-incomplete">⚠ คำนวณ NEWS ไม่ได้</span></div>
+        <div class="pc-missing">ขาดข้อมูล: SpO₂, อัตราหายใจ</div>
+        <div class="pc-time">🕐 14:41 · เพิ่งรับเข้า</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MAIN CONTENT -->
+  <div class="main-content">
+    <div class="content-top">
+
+      <!-- DETAIL PANEL -->
+      <div class="detail-panel">
+
+        <div class="patient-info-bar">
+          <!-- Row 1: HN + Alert badge -->
+          <div class="pib-row1">
+            <div class="pib-hn">HN 2568-04271</div>
+            <div class="alert-level-badge">เสี่ยงติดเชื้อในกระแสเลือด — ต้องประเมินทันที</div>
+          </div>
+          <!-- Row 2: Detail -->
+          <div class="pib-detail">คัดกรอง: 14:32:07 น. &nbsp;·&nbsp; ห้องตรวจ 3 · Bed 3A</div>
+          <!-- Row 3: Badges + ER time -->
+          <div class="pib-row2">
+            <div class="pib-badges">
+              <span class="pib-badge gender">♂ ชาย</span>
+              <span class="pib-badge age">68 ปี</span>
+              <span class="pib-badge">ไข้ · ไอ · หายใจลำบาก</span>
+            </div>
+            <div class="pib-time">
+              <span class="label">เวลาใน ER</span>
+              <span class="value" id="er-elapsed">00:00 นาที</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-card-header">
+            <div class="section-card-title"><span>📊</span> สัญญาณชีพ — ณ เวลา 14:32:07 น.</div>
+            <div style="font-size:10px;color:var(--text-muted)">🔵 ตัวเลขในวงกลม = คะแนน NEWS</div>
+          </div>
+          <div class="section-card-body">
+            <div class="vitals-grid">
+              <div class="vital-item abnormal"><div class="vital-score-tag vst-3">3</div><div class="vital-label">RR</div><div class="vital-value" style="color:#ef4444">28</div><div class="vital-unit">ครั้ง/นาที</div></div>
+              <div class="vital-item abnormal"><div class="vital-score-tag vst-3">3</div><div class="vital-label">SpO₂</div><div class="vital-value" style="color:#ef4444">91</div><div class="vital-unit">%</div></div>
+              <div class="vital-item warning"><div class="vital-score-tag vst-1">1</div><div class="vital-label">Temp</div><div class="vital-value" style="color:#eab308">38.9</div><div class="vital-unit">°C</div></div>
+              <div class="vital-item abnormal"><div class="vital-score-tag vst-3">3</div><div class="vital-label">SBP</div><div class="vital-value" style="color:#ef4444">88</div><div class="vital-unit">mmHg</div></div>
+              <div class="vital-item warning"><div class="vital-score-tag vst-2">2</div><div class="vital-label">HR</div><div class="vital-value" style="color:#f97316">118</div><div class="vital-unit">ครั้ง/นาที</div></div>
+              <div class="vital-item"><div class="vital-score-tag vst-0">0</div><div class="vital-label">AVPU</div><div class="vital-value" style="color:#22c55e;font-size:16px;margin-top:6px">A</div><div class="vital-unit">Alert</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-card-header">
+            <div class="section-card-title"><span>🔍</span> การคำนวณ NEWS — Transparent Rule-Based</div>
+            <div style="font-size:9px;color:#0891b2;background:#ecfeff;padding:3px 8px;border-radius:6px;border:1px solid #a5f3fc">✅ ตรวจสอบย้อนกลับได้</div>
+          </div>
+          <div class="section-card-body">
+            <div class="score-section">
+              <div class="score-box">
+                <div class="score-box-header">
+                  <div><div class="score-box-name">National Early Warning Score (NEWS)</div><div style="font-size:9px;color:var(--text-muted);margin-top:2px">Royal College of Physicians, 2017</div></div>
+                  <div style="text-align:right"><div class="score-total" style="color:#ef4444">12</div><div class="score-label" style="color:#dc2626">⚠ HIGH RISK</div></div>
+                </div>
+                <div class="score-row" style="background:#eff6ff;font-size:9px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #bfdbfe">
+                  <span class="score-row-param">พารามิเตอร์</span><span class="score-row-value">ค่าที่วัดได้</span><span class="score-row-ref">เกณฑ์ปกติ</span><span class="score-row-pts">คะแนน</span>
+                </div>
+                <div class="score-row highlight"><span class="score-row-param">🫁 อัตราการหายใจ (RR)</span><span class="score-row-value">28 ครั้ง/นาที</span><span class="score-row-ref">12–20</span><span class="score-row-pts pts-3">+3</span></div>
+                <div class="score-row highlight"><span class="score-row-param">💉 SpO₂</span><span class="score-row-value">91%</span><span class="score-row-ref">≥ 96%</span><span class="score-row-pts pts-3">+3</span></div>
+                <div class="score-row"><span class="score-row-param">🌡️ อุณหภูมิร่างกาย</span><span class="score-row-value">38.9°C</span><span class="score-row-ref">36.1–38.0</span><span class="score-row-pts pts-1">+1</span></div>
+                <div class="score-row highlight"><span class="score-row-param">❤️ SBP</span><span class="score-row-value">88 mmHg</span><span class="score-row-ref">111–219</span><span class="score-row-pts pts-3">+3</span></div>
+                <div class="score-row"><span class="score-row-param">🫀 ชีพจร (HR)</span><span class="score-row-value">118 ครั้ง/นาที</span><span class="score-row-ref">51–90</span><span class="score-row-pts pts-2">+2</span></div>
+                <div class="score-row"><span class="score-row-param">🧠 ระดับความรู้สึกตัว</span><span class="score-row-value">A (Alert)</span><span class="score-row-ref">Alert</span><span class="score-row-pts pts-0">+0</span></div>
+                <div style="padding:8px 12px;background:#fef2f2;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #fca5a5">
+                  <span style="font-size:11px;color:var(--text-secondary);font-weight:600">รวม NEWS Score</span>
+                  <span style="font-size:22px;font-weight:900;color:#ef4444">12 / 18</span>
+                </div>
+              </div>
+              <div>
+                <div class="rule-box">
+                  <div class="rule-box-title"><span>🔎</span> Logic การแจ้งเตือน</div>
+                  <div class="rule-logic">
+                    <span class="highlight">IF</span> NEWS ≥ 5<br>
+                    <span class="highlight">→</span> <span class="critical">เสี่ยงติดเชื้อในกระแสเลือด 🔴</span><br><br>
+                    NEWS = <span class="highlight">12</span> (≥ 5 ✓)<br>
+                    <div style="margin-top:6px;padding:4px 8px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;color:#dc2626;font-weight:700;text-align:center;font-size:12px">🔴 เสี่ยงติดเชื้อในกระแสเลือด</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /detail-panel -->
+
+      <!-- RIGHT PANEL -->
+      <div class="right-panel">
+
+        <!-- 60-min Countdown (hidden until doctor confirms) -->
+        <div class="countdown-banner" id="countdownBanner" style="display:none">
+          <div>
+            <div class="cd-label">⏱ เวลาที่เหลือ — เป้าหมายยาปฏิชีวนะ</div>
+            <div class="cd-time" id="cdTime">60:00</div>
+          </div>
+          <div>
+            <div class="cd-target">แพทย์ยืนยัน</div>
+            <div class="cd-target-val" id="cdConfirmTime">--:--</div>
+            <div class="cd-target" style="margin-top:3px">เป้าหมาย ยา ≤ 60 นาที</div>
+          </div>
+        </div>
+
+        <div class="rp-tabs">
+          <button class="rp-tab active" onclick="switchTab(this,'checklist')">☑ Checklist</button>
+          <button class="rp-tab" onclick="switchTab(this,'timeline')">📅 Timeline</button>
+        </div>
+
+        <!-- ===== CHECKLIST ===== -->
+        <div class="rp-content" id="tab-checklist">
+
+          <div class="cl-progress">
+            <div class="cl-progress-label"><span>ความคืบหน้า Sepsis Bundle</span><span id="progress-text">0/7 รายการ</span></div>
+            <div class="progress-bar"><div class="progress-fill" id="progress-bar" style="width:0%"></div></div>
+          </div>
+
+          <!-- PHASE 1 -->
+          <div class="checklist-section">
+            <div class="cl-section-title">📍 การตอบสนองเบื้องต้นหลังแจ้งเตือน</div>
+
+            <div class="cl-item done no-click" id="cl-alert">
+              <div class="cl-checkbox checked"></div>
+              <div class="cl-text">
+                <div class="cl-title done-text">ระบบแจ้งเตือน — NEWS = 12 (≥ 5)</div>
+                <div class="cl-sub" id="alert-time-sub">✅ แจ้งเตือน 14:32:07 น.</div>
+              </div>
+            </div>
+
+            <div class="cl-item" id="cl-triage" onclick="toggleSimple('cl-triage','cb-triage','ct-triage','ประเมินอาการผู้ป่วยซ้ำที่จุดคัดแยก','ประเมินอาการผู้ป่วยซ้ำที่จุดคัดแยก','#6366f1')">
+              <div class="cl-checkbox" id="cb-triage"></div>
+              <div class="cl-text">
+                <div class="cl-title" id="ct-triage">ประเมินอาการผู้ป่วยซ้ำที่จุดคัดแยก</div>
+                <div class="cl-urgent" id="cu-triage">🔴 ยังไม่ดำเนินการ</div>
+              </div>
+            </div>
+
+            <div class="cl-item" id="cl-er" onclick="toggleSimple('cl-er','cb-er','ct-er','นำผู้ป่วยเข้ารับการรักษาในห้องอุบัติเหตุและฉุกเฉิน','นำผู้ป่วยเข้ารับการรักษาในห้องอุบัติเหตุและฉุกเฉิน','#3b82f6')">
+              <div class="cl-checkbox" id="cb-er"></div>
+              <div class="cl-text">
+                <div class="cl-title" id="ct-er">นำผู้ป่วยเข้ารับการรักษาในห้องอุบัติเหตุและฉุกเฉิน</div>
+                <div class="cl-urgent" id="cu-er">🔴 ยังไม่ดำเนินการ</div>
+              </div>
+            </div>
+
+            <div class="cl-item" id="cl-report" onclick="toggleSimple('cl-report','cb-report','ct-report','รายงานแพทย์เวรทันที','รายงานแพทย์เวรทันที','#f97316')">
+              <div class="cl-checkbox" id="cb-report"></div>
+              <div class="cl-text">
+                <div class="cl-title" id="ct-report">รายงานแพทย์เวรทันที</div>
+                <div class="cl-urgent" id="cu-report">🔴 ยังไม่ดำเนินการ</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider" style="margin:0 12px"></div>
+
+          <!-- PHASE 2: Doctor Confirmation -->
+          <div class="checklist-section">
+            <div class="cl-section-title">🩺 การยืนยันการวินิจฉัย — เริ่มนับ 60 นาที</div>
+            <div class="cl-item no-click" id="cl-doctor">
+              <div class="cl-checkbox" id="cb-doctor"></div>
+              <div class="cl-text">
+                <div class="cl-title" id="ct-doctor">แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด</div>
+                <div id="doctor-pre">
+                  <div style="font-size:9px;color:#94a3b8;margin-top:3px">เมื่อแพทย์ยืนยัน — ระบบเริ่มจับเวลา 60 นาที<br>และสร้างตารางประเมินสัญญาณชีพอัตโนมัติ</div>
+                  <button class="doc-confirm-btn" id="docConfirmBtn" onclick="doctorConfirm()">⏱ บันทึก: แพทย์ยืนยันภาวะติดเชื้อ</button>
+                </div>
+                <div id="doctor-post" style="display:none">
+                  <div class="doc-confirmed-time">✅ ยืนยัน <span id="confirm-time-display">--:--</span> น. — เริ่มนับเวลา 60 นาทีแล้ว</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider" style="margin:0 12px"></div>
+
+          <!-- PHASE 3: Sepsis Bundle -->
+          <div class="checklist-section">
+            <div class="cl-section-title">💊 Sepsis Bundle — ดำเนินการภายใน 60 นาที</div>
+
+            <!-- Blood Culture 1 -->
+            <div class="cl-item" id="cl-bc1" onclick="toggleWithInput(event,'cl-bc1','cb-bc1','ct-bc1','bc1','เจาะเลือดเพาะเชื้อ ครั้งที่ 1','เจาะเลือดเพาะเชื้อ ครั้งที่ 1 ตำแหน่ง: ','#8b5cf6')">
+              <div class="cl-checkbox" id="cb-bc1"></div>
+              <div class="cl-text">
+                <div class="cl-title" id="ct-bc1">เจาะเลือดเพาะเชื้อ ครั้งที่ 1 <span style="font-size:9px;color:#ea580c;font-weight:700">(ก่อนให้ยาปฏิชีวนะ)</span></div>
+                <div class="cl-urgent" id="cu-bc1">🔴 ยังไม่ดำเนินการ</div>
+                <div class="cl-input-wrap" onclick="event.stopPropagation()">
+                  <label class="cl-input-lbl">ตำแหน่งที่เจาะ:</label>
+                  <input class="cl-input-field" id="bc1-site" type="text" placeholder="เช่น หลอดเลือดดำแขนซ้าย">
+                </div>
+              </div>
+            </div>
+
+            <!-- Blood Culture 2 -->
+            <div class="cl-item" id="cl-bc2" onclick="toggleWithInput(event,'cl-bc2','cb-bc2','ct-bc2','bc2','เจาะเลือดเพาะเชื้อ ครั้งที่ 2','เจาะเลือดเพาะเชื้อ ครั้งที่ 2 ตำแหน่ง: ','#8b5cf6')">
+              <div class="cl-checkbox" id="cb-bc2"></div>
+              <div class="cl-text">
+                <div class="cl-title" id="ct-bc2">เจาะเลือดเพาะเชื้อ ครั้งที่ 2 <span style="font-size:9px;color:#ea580c;font-weight:700">(ก่อนให้ยาปฏิชีวนะ)</span></div>
+                <div class="cl-urgent" id="cu-bc2">🔴 ยังไม่ดำเนินการ</div>
+                <div class="cl-input-wrap" onclick="event.stopPropagation()">
+                  <label class="cl-input-lbl">ตำแหน่งที่เจาะ:</label>
+                  <input class="cl-input-field" id="bc2-site" type="text" placeholder="เช่น หลอดเลือดดำแขนขวา / สาย IV">
+                </div>
+              </div>
+            </div>
+
+            <!-- IV Fluid -->
+            <div class="cl-item" id="cl-iv" onclick="toggleWithInput(event,'cl-iv','cb-iv','ct-iv','iv','ให้สารน้ำทางหลอดเลือดดำ','ให้สารน้ำทางหลอดเลือดดำ: ','#0891b2')">
+              <div class="cl-checkbox" id="cb-iv"></div>
+              <div class="cl-text">
+                <div class="cl-title" id="ct-iv">ให้สารน้ำทางหลอดเลือดดำ</div>
+                <div class="cl-urgent" id="cu-iv">🔴 ยังไม่ดำเนินการ</div>
+                <div class="cl-input-wrap" onclick="event.stopPropagation()">
+                  <label class="cl-input-lbl">ชนิดสารน้ำ / อัตราเร็ว:</label>
+                  <input class="cl-input-field" id="iv-type" type="text" placeholder="เช่น NSS 1000 mL IV rate 500 mL/hr">
+                </div>
+              </div>
+            </div>
+
+            <!-- Antibiotic 1 -->
+            <div class="cl-item" id="cl-abx1" onclick="toggleWithInput(event,'cl-abx1','cb-abx1','ct-abx1','abx1','ให้ยาปฏิชีวนะ ตัวที่ 1','ให้ยาปฏิชีวนะทางหลอดเลือดดำ ตัวที่ 1: ','#16a34a')">
+              <div class="cl-checkbox" id="cb-abx1"></div>
+              <div class="cl-text">
+                <div class="cl-title" id="ct-abx1">ยาปฏิชีวนะทางหลอดเลือดดำ ตัวที่ 1<br><span id="abx-timer-txt" style="font-size:9px;color:#ea580c;font-weight:700">⏳ ภายใน 60 นาทีหลังแพทย์ยืนยัน</span></div>
+                <div class="cl-urgent" id="cu-abx1">🔴 ยังไม่ดำเนินการ</div>
+                <div class="cl-input-wrap" onclick="event.stopPropagation()">
+                  <label class="cl-input-lbl">ชนิดยา / ขนาด / วิธีให้:</label>
+                  <input class="cl-input-field" id="abx1-drug" type="text" placeholder="เช่น Ceftriaxone 2g IV push">
+                </div>
+              </div>
+            </div>
+
+            <!-- Antibiotic 2 (optional) -->
+            <div class="cl-item" id="cl-abx2" onclick="toggleOptional(event,'cl-abx2','cb-abx2','ct-abx2','abx2','ให้ยาปฏิชีวนะทางหลอดเลือดดำ ตัวที่ 2: ','#16a34a')">
+              <div class="cl-checkbox" id="cb-abx2"></div>
+              <div class="cl-text">
+                <div class="cl-title" id="ct-abx2">ยาปฏิชีวนะทางหลอดเลือดดำ ตัวที่ 2 <span style="font-size:9px;color:#64748b;font-weight:400">(ถ้ามี)</span></div>
+                <div class="cl-sub" id="cu-abx2">ทำเมื่อแพทย์สั่ง (ถ้ามี)</div>
+                <div class="cl-input-wrap" onclick="event.stopPropagation()">
+                  <label class="cl-input-lbl">ชนิดยา / ขนาด / วิธีให้:</label>
+                  <input class="cl-input-field" id="abx2-drug" type="text" placeholder="เช่น Metronidazole 500mg IV drip">
+                </div>
+              </div>
+            </div>
+
+            <!-- Retain Foley Cath (optional) -->
+            <div class="cl-item" id="cl-foley" onclick="toggleOptional(event,'cl-foley','cb-foley','ct-foley','foley','ใส่สายสวนปัสสาวะ (Retain Foley cath) Urine output: ','#64748b')">
+              <div class="cl-checkbox" id="cb-foley"></div>
+              <div class="cl-text">
+                <div class="cl-title" id="ct-foley">ใส่สายสวนปัสสาวะ (Retain Foley cath) <span style="font-size:9px;color:#64748b;font-weight:400">(ถ้ามีข้อบ่งชี้)</span></div>
+                <div class="cl-sub" id="cu-foley">ทำเมื่อแพทย์สั่ง</div>
+                <div class="cl-input-wrap" onclick="event.stopPropagation()">
+                  <label class="cl-input-lbl">Urine output ที่ได้:</label>
+                  <input class="cl-input-field" id="foley-urine" type="text" placeholder="เช่น 50 mL สีเหลืองใส">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider" style="margin:0 12px"></div>
+
+          <!-- PHASE 4: Assessment schedule -->
+          <div class="checklist-section">
+            <div class="cl-section-title">🔁 ตารางประเมินสัญญาณชีพซ้ำ</div>
+            <div style="font-size:9px;color:#64748b;margin-bottom:6px;line-height:1.5">
+              <strong>ทุก 15 นาที × 4 ครั้ง</strong> แล้ว<strong>ทุก 30 นาที</strong> จนจำหน่ายออก ER<br>
+              ระบบแจ้งเตือนอัตโนมัติเมื่อถึงเวลาประเมินแต่ละรอบ
+            </div>
+            <div class="assess-table-wrap">
+              <div class="at-head"><span>รอบ</span><span style="text-align:center">เวลาเป้าหมาย</span><span style="text-align:center">NEWS</span><span style="text-align:center">สถานะ</span></div>
+              <div id="assess-table-body">
+                <div style="padding:12px;text-align:center;font-size:10px;color:#94a3b8">บันทึกเวลาที่แพทย์ยืนยันเพื่อสร้างตารางประเมิน</div>
+              </div>
+              <div class="at-footer">ระบบจะแจ้งเตือนเมื่อถึงเวลาประเมินแต่ละรอบ</div>
+            </div>
+          </div>
+
+          <!-- Discharge -->
+          <div class="discharge-section">
+            <div style="font-size:9px;color:#64748b;margin-bottom:6px;text-align:center">เมื่อผู้ป่วยพร้อมจำหน่ายออกจาก ER</div>
+            <button class="discharge-btn" id="dischargeBtn" onclick="dischargePatient()">🏠 บันทึก: จำหน่ายออกจากห้องอุบัติเหตุและฉุกเฉิน</button>
+          </div>
+
+        </div><!-- /checklist -->
+
+        <!-- ===== TIMELINE ===== -->
+        <div class="rp-content" id="tab-timeline" style="display:none">
+          <div class="timeline-wrap" id="timeline-list"></div>
+        </div>
+
+        <div class="tl-copy-bar" id="tl-copy-bar" style="display:none">
+          <button class="copy-btn" id="copyBtn" onclick="copyTimeline()">📋 คัดลอก Timeline เพื่อบันทึกใน HIS</button>
+          <div class="copy-note">คัดลอกและวางลงในระบบสารสนเทศโรงพยาบาลได้ทันที</div>
+        </div>
+
+      </div><!-- /right-panel -->
+    </div>
+
+    <div class="demo-bar">
+      <span class="demo-lbl">🎮 ทดสอบ:</span>
+      <button class="demo-btn red" onclick="showAlertPopup()">🚨 Alert Pop-up</button>
+      <button class="demo-btn orange" onclick="demoReminder()">🔔 จำลองแจ้งเตือนประเมิน</button>
+      <div style="flex:1"></div>
+      <div style="font-size:9px;color:var(--text-muted)">เกณฑ์: NEWS ≥ 5 = เสี่ยงติดเชื้อในกระแสเลือด · Surviving Sepsis Campaign 2026</div>
+    </div>
+
+    <div class="status-bar">
+      <div class="sb-item"><div class="sb-dot" style="background:var(--green-alert)"></div><span>ระบบออนไลน์</span></div>
+      <div class="sb-item"><div class="sb-dot" style="background:var(--teal)"></div><span>เชื่อมต่อ HIS: ✓</span></div>
+      <div class="sb-item"><span>Rule Engine: Active</span></div>
+      <div class="sb-item"><span>NEWS (RCP 2017)</span></div>
+      <div style="flex:1"></div>
+      <span>v2.0 · โรงพยาบาลบางคล้า © 2569</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// =========================================================
+// STATE
+// =========================================================
+const S = {
+  alertTime: new Date(Date.now() - 520000),
+  confirmTime: null,
+  countdownInterval: null,
+  assessInterval: null,
+  assessSchedule: [],
+  currentAssessIdx: null,
+  reminderPendingIdx: null,
+  timeline: [],
+  discharged: false,
+  checkedCount: 1,
+  totalItems: 9
+};
+
+// Initial timeline entry
+S.timeline.push({
+  time: fmt(S.alertTime),
+  text: '🚨 ระบบแจ้งเตือนภาวะเสี่ยงติดเชื้อในกระแสเลือด NEWS = 12 (RR 28, SpO₂ 91%, SBP 88 mmHg, HR 118, Temp 38.9°C, AVPU: A)',
+  color: '#ef4444'
+});
+renderTimeline();
+
+// =========================================================
+// CLOCK
+// =========================================================
+function updateClock() {
+  const n = new Date();
+  document.getElementById('clock').textContent = `${pad(n.getHours())}:${pad(n.getMinutes())}:${pad(n.getSeconds())}`;
+  const days=['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
+  const mons=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+  document.getElementById('dateDisplay').textContent = `วัน${days[n.getDay()]}ที่ ${n.getDate()} ${mons[n.getMonth()]} ${n.getFullYear()+543}`;
+  const diff = Math.floor((n - S.alertTime)/60000);
+  const sec = Math.floor(((n - S.alertTime)%60000)/1000);
+  document.getElementById('er-elapsed').textContent = `${pad(diff)}:${pad(sec)} นาที`;
+}
+setInterval(updateClock, 1000); updateClock();
+
+// Simulate refresh every 10 seconds
+let refreshCount = 0;
+function simulateRefresh(){
+  const n = new Date();
+  const el = document.getElementById('last-refresh');
+  if(el) el.textContent = `อัปเดต ${pad(n.getHours())}:${pad(n.getMinutes())}:${pad(n.getSeconds())}`;
+}
+setInterval(simulateRefresh, 10000);
+
+function pad(x){ return String(x).padStart(2,'0'); }
+function fmt(d){ return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function fmts(d){ return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
+
+// =========================================================
+// ALERT POPUP
+// =========================================================
+function showAlertPopup(){ document.getElementById('alertPopup').style.display='flex'; }
+function closeAlertPopup(){ document.getElementById('alertPopup').style.display='none'; }
+function acknowledgeAlert(){
+  closeAlertPopup();
+  addTL('รับทราบการแจ้งเตือน — พยาบาลเริ่มกระบวนการดูแลภาวะติดเชื้อในกระแสเลือด','#f97316');
+}
+setTimeout(()=>showAlertPopup(),1000);
+document.getElementById('alertPopup').addEventListener('click',e=>{if(e.target===e.currentTarget)closeAlertPopup();});
+
+// =========================================================
+// CHECKLIST
+// =========================================================
+function toggleSimple(itemId, cbId, titleId, shortLabel, tlText, tlColor){
+  const item=document.getElementById(itemId), cb=document.getElementById(cbId);
+  const title=document.getElementById(titleId), urgEl=document.getElementById('cu-'+cbId.slice(3));
+  const now=new Date();
+  if(cb.classList.contains('checked')){
+    cb.classList.remove('checked'); item.classList.remove('done'); title.classList.remove('done-text');
+    if(urgEl) urgEl.innerHTML='🔴 ยังไม่ดำเนินการ';
+    S.checkedCount=Math.max(1,S.checkedCount-1);
+  } else {
+    cb.classList.add('checked'); item.classList.add('done'); title.classList.add('done-text');
+    if(urgEl) urgEl.innerHTML=`✅ เสร็จ ${fmts(now)} น.`;
+    S.checkedCount=Math.min(S.totalItems,S.checkedCount+1);
+    addTL(tlText, tlColor);
+  }
+  updateProgress();
+}
+
+function toggleWithInput(event, itemId, cbId, titleId, inputKey, shortLabel, tlPrefix, tlColor){
+  if(event.target.tagName==='INPUT'||event.target.tagName==='LABEL') return;
+  const item=document.getElementById(itemId), cb=document.getElementById(cbId);
+  const title=document.getElementById(titleId), urgEl=document.getElementById('cu-'+cbId.slice(3));
+  const now=new Date();
+  if(cb.classList.contains('checked')){
+    cb.classList.remove('checked'); item.classList.remove('done'); title.classList.remove('done-text');
+    if(urgEl) urgEl.innerHTML='🔴 ยังไม่ดำเนินการ';
+    S.checkedCount=Math.max(1,S.checkedCount-1);
+  } else {
+    cb.classList.add('checked'); item.classList.add('done'); title.classList.add('done-text');
+    if(urgEl) urgEl.innerHTML=`✅ เสร็จ ${fmts(now)} น.`;
+    S.checkedCount=Math.min(S.totalItems,S.checkedCount+1);
+    const fallbackMap={bc1:'(ไม่ระบุตำแหน่ง)',bc2:'(ไม่ระบุตำแหน่ง)',iv:'(ไม่ระบุชนิดสารน้ำ)',abx1:'(ไม่ระบุชนิดยา)'};
+    const inputIdMap={bc1:'bc1-site',bc2:'bc2-site',iv:'iv-type',abx1:'abx1-drug'};
+    const fallback=fallbackMap[inputKey]||'(ไม่ระบุ)';
+    let inputVal=(document.getElementById(inputIdMap[inputKey])||{}).value||fallback;
+    let timeSuffix='';
+    if(inputKey==='abx1'&&S.confirmTime){ const mins=Math.round((now-S.confirmTime)/60000); timeSuffix=` — ${mins} นาทีหลังแพทย์ยืนยัน`; }
+    addTL(tlPrefix+inputVal+timeSuffix, tlColor, {inputKey, tlPrefix, fallback, timeSuffix});
+  }
+  updateProgress();
+}
+
+function toggleOptional(event, itemId, cbId, titleId, inputKey, tlPrefix, tlColor){
+  if(event.target.tagName==='INPUT'||event.target.tagName==='LABEL') return;
+  const item=document.getElementById(itemId), cb=document.getElementById(cbId);
+  const title=document.getElementById(titleId), urgEl=document.getElementById('cu-'+cbId.slice(3));
+  const now=new Date();
+  if(cb.classList.contains('checked')){
+    cb.classList.remove('checked'); item.classList.remove('done'); title.classList.remove('done-text');
+    if(urgEl) urgEl.textContent='ทำเมื่อแพทย์สั่ง';
+  } else {
+    cb.classList.add('checked'); item.classList.add('done'); title.classList.add('done-text');
+    if(urgEl) urgEl.innerHTML=`เสร็จ ${fmts(now)} น.`;
+    const optFallbackMap={foley:'(ไม่ระบุ urine output)',abx2:'(ไม่ระบุชนิดยา)'};
+    const optInputIdMap={foley:'foley-urine',abx2:'abx2-drug'};
+    const optFallback=optFallbackMap[inputKey]||'(ไม่ระบุ)';
+    let inputVal=(document.getElementById(optInputIdMap[inputKey])||{}).value||optFallback;
+    let timeSuffix='';
+    if(inputKey==='abx2'&&S.confirmTime){ const mins=Math.round((now-S.confirmTime)/60000); timeSuffix=` — ${mins} นาทีหลังแพทย์ยืนยัน`; }
+    addTL(tlPrefix+inputVal+timeSuffix, tlColor, {inputKey, tlPrefix, fallback:optFallback, timeSuffix});
+  }
+  // optional items ไม่นับใน progress bar
+}
+
+function updateProgress(){
+  const pct=Math.round((S.checkedCount/S.totalItems)*100);
+  document.getElementById('progress-bar').style.width=pct+'%';
+  document.getElementById('progress-text').textContent=`${S.checkedCount}/${S.totalItems} รายการ`;
+}
+
+// =========================================================
+// DOCTOR CONFIRMATION
+// =========================================================
+function doctorConfirm(){
+  if(S.confirmTime) return;
+  S.confirmTime=new Date();
+  const ts=fmt(S.confirmTime);
+  document.getElementById('doctor-pre').style.display='none';
+  document.getElementById('doctor-post').style.display='block';
+  document.getElementById('confirm-time-display').textContent=ts;
+  document.getElementById('cb-doctor').classList.add('checked');
+  document.getElementById('cl-doctor').classList.add('done');
+  document.getElementById('ct-doctor').classList.add('done-text');
+  S.checkedCount=Math.min(S.totalItems,S.checkedCount+1);
+  updateProgress();
+  addTL(`แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด — เริ่มจับเวลา 60 นาที (${ts} น.)`,'#dc2626');
+  startCountdown();
+  buildAssessSchedule();
+}
+
+// =========================================================
+// COUNTDOWN
+// =========================================================
+function startCountdown(){
+  const banner=document.getElementById('countdownBanner');
+  banner.style.display='flex';
+  document.getElementById('cdConfirmTime').textContent=fmt(S.confirmTime)+' น.';
+  S.countdownInterval=setInterval(updateCountdown,1000);
+  updateCountdown();
+}
+function updateCountdown(){
+  const elapsed=Math.floor((new Date()-S.confirmTime)/1000);
+  const rem=3600-elapsed;
+  const el=document.getElementById('cdTime');
+  const banner=document.getElementById('countdownBanner');
+  if(rem<=0){ el.textContent='หมดเวลา!'; banner.className='countdown-banner expired'; return; }
+  const m=Math.floor(rem/60), s=rem%60;
+  el.textContent=`${pad(m)}:${pad(s)}`;
+  if(rem<=600) banner.className='countdown-banner warning';
+  // Update abx badge
+  const abxTxt=document.getElementById('abx-timer-txt');
+  if(abxTxt && !document.getElementById('cb-abx1').classList.contains('checked')){
+    abxTxt.textContent=`⏳ เหลือ ${pad(m)}:${pad(s)} นาที`;
+    abxTxt.style.color=rem<=600?'#dc2626':'#ea580c';
+  }
+}
+
+// =========================================================
+// ASSESSMENT SCHEDULE
+// =========================================================
+const INTERVALS=[15,30,45,60,90,120,150,180,210,240,270,300];
+
+function buildAssessSchedule(){
+  S.assessSchedule=[];
+  INTERVALS.forEach((min,i)=>{
+    const dueTime=new Date(S.confirmTime.getTime()+min*60000);
+    const isQ15=i<4;
+    S.assessSchedule.push({
+      dueTime, round: isQ15?`${i+1}/4`:`${i+1}`,
+      label: isQ15?`ครั้งที่ ${i+1}/4 (ทุก 15 นาที)`:`ครั้งที่ ${i+1} (ทุก 30 นาที)`,
+      interval: min, done:false, reminded:false, news:null, data:null
+    });
+  });
+  renderAssessTable();
+  S.assessInterval=setInterval(checkAssessAlerts,20000);
+}
+
+function renderAssessTable(){
+  const body=document.getElementById('assess-table-body');
+  if(!S.assessSchedule.length) return;
+  const now=new Date();
+  body.innerHTML=S.assessSchedule.map((item,i)=>{
+    const isDue=!item.done&&now>=item.dueTime;
+    const cls=item.done?'at-done':isDue?'at-due':'';
+    const btnCls=item.done?'view':isDue?'due':'open';
+    const btnTxt=item.done?'ดูผล':isDue?'⚡ บันทึก!':'บันทึก';
+    const newsTxt=item.done?`<span class="at-news ${newsClass(item.news)}">${item.news}</span>`:`<span class="at-news none">—</span>`;
+    return `<div class="at-row ${cls}">
+      <span class="at-num">${item.round}</span>
+      <span class="at-time">${fmt(item.dueTime)}<small>+${INTERVALS[i]} นาที</small></span>
+      ${newsTxt}
+      <button class="at-btn ${btnCls}" onclick="openAssess(${i})" ${item.done?'disabled':''}>${btnTxt}</button>
+    </div>`;
+  }).join('');
+}
+function newsClass(s){ return s>=7?'high':s>=5?'med':'low'; }
+
+function checkAssessAlerts(){
+  if(S.discharged){ clearInterval(S.assessInterval); return; }
+  const now=new Date();
+  S.assessSchedule.forEach((item,i)=>{
+    if(!item.done&&!item.reminded&&now>=item.dueTime){
+      item.reminded=true; S.reminderPendingIdx=i;
+      document.getElementById('reminder-title').textContent=`ถึงเวลาประเมินสัญญาณชีพ — รอบที่ ${item.round}`;
+      document.getElementById('reminder-sub').textContent=item.label+` · เวลา ${fmt(item.dueTime)} น.`;
+      document.getElementById('reminderPopup').style.display='flex';
+    }
+  });
+  renderAssessTable();
+}
+function closeReminder(){ document.getElementById('reminderPopup').style.display='none'; }
+function openAssessFromReminder(){ closeReminder(); if(S.reminderPendingIdx!==null) openAssess(S.reminderPendingIdx); }
+
+// =========================================================
+// ASSESSMENT FORM
+// =========================================================
+function openAssess(idx){
+  S.currentAssessIdx=idx;
+  const item=S.assessSchedule[idx];
+  document.getElementById('assess-title').textContent=`บันทึกสัญญาณชีพ — ${item.label}`;
+  document.getElementById('assess-sub').textContent=`HN 2568-04271 · เวลาเป้าหมาย ${fmt(item.dueTime)} น.`;
+  ['ai-rr','ai-spo2','ai-sbp','ai-dbp','ai-hr','ai-bt'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('ai-avpu').value='';
+  document.getElementById('nl-score').textContent='--';
+  document.getElementById('nl-risk').style.color='#94a3b8';
+  document.getElementById('nl-risk').textContent='กรอกข้อมูลเพื่อคำนวณ';
+  document.getElementById('nl-bd').textContent='';
+  document.getElementById('assessPopup').style.display='flex';
+}
+function closeAssessPopup(){ document.getElementById('assessPopup').style.display='none'; S.currentAssessIdx=null; }
+document.getElementById('assessPopup').addEventListener('click',e=>{if(e.target===e.currentTarget)closeAssessPopup();});
+
+function calcNEWSScore(rr,spo2,temp,sbp,hr,avpu){
+  let sc=0, bd=[];
+  const rrP=rr<=8?3:rr<=11?1:rr<=20?0:rr<=24?2:3; sc+=rrP; bd.push(`RR(${rrP})`);
+  const spoP=spo2<=91?3:spo2<=93?2:spo2<=95?1:0; sc+=spoP; bd.push(`SpO₂(${spoP})`);
+  const tmpP=temp<=35?3:temp<=36?1:temp<=38?0:temp<=39?1:2; sc+=tmpP; bd.push(`Temp(${tmpP})`);
+  const sbpP=sbp<=90?3:sbp<=100?2:sbp<=110?1:sbp<=219?0:3; sc+=sbpP; bd.push(`SBP(${sbpP})`);
+  const hrP=hr<=40?3:hr<=50?1:hr<=90?0:hr<=110?1:hr<=130?2:3; sc+=hrP; bd.push(`HR(${hrP})`);
+  const avpuP=avpu==='A'?0:3; sc+=avpuP; bd.push(`AVPU(${avpuP})`);
+  return {score:sc, breakdown:bd.join(' + ')+'= '+sc};
+}
+
+function calcLiveNEWS(){
+  const rr=parseFloat(document.getElementById('ai-rr').value);
+  const spo2=parseFloat(document.getElementById('ai-spo2').value);
+  const sbp=parseFloat(document.getElementById('ai-sbp').value);
+  const hr=parseFloat(document.getElementById('ai-hr').value);
+  const bt=parseFloat(document.getElementById('ai-bt').value);
+  const avpu=document.getElementById('ai-avpu').value;
+  if([rr,spo2,sbp,hr,bt].some(isNaN)||!avpu){
+    document.getElementById('nl-score').textContent='--';
+    document.getElementById('nl-risk').textContent='กรอกข้อมูลให้ครบ';
+    document.getElementById('nl-risk').style.color='#94a3b8';
+    return;
+  }
+  const {score,breakdown}=calcNEWSScore(rr,spo2,bt,sbp,hr,avpu);
+  document.getElementById('nl-score').textContent=score;
+  let risk,color;
+  if(score>=7){risk='🔴 สูง — ต้องการการดูแลเร่งด่วน';color='#ef4444';}
+  else if(score>=5){risk='🟡 ปานกลาง — ติดตามใกล้ชิด';color='#f97316';}
+  else if(score>=1){risk='🟢 ต่ำ-ปานกลาง';color='#22c55e';}
+  else{risk='🟢 ปกติ — NEWS = 0';color='#22c55e';}
+  const riskEl=document.getElementById('nl-risk');
+  riskEl.textContent=risk; riskEl.style.color=color;
+  document.getElementById('nl-bd').textContent=breakdown;
+}
+
+function saveAssessment(){
+  const rr=parseFloat(document.getElementById('ai-rr').value);
+  const spo2=parseFloat(document.getElementById('ai-spo2').value);
+  const sbp=parseFloat(document.getElementById('ai-sbp').value);
+  const dbp=document.getElementById('ai-dbp').value;
+  const hr=parseFloat(document.getElementById('ai-hr').value);
+  const bt=parseFloat(document.getElementById('ai-bt').value);
+  const avpu=document.getElementById('ai-avpu').value;
+  if([rr,spo2,sbp,hr,bt].some(isNaN)||!avpu){ alert('กรุณากรอกข้อมูลสัญญาณชีพให้ครบถ้วน'); return; }
+  const {score}=calcNEWSScore(rr,spo2,bt,sbp,hr,avpu);
+  const idx=S.currentAssessIdx;
+  const item=S.assessSchedule[idx];
+  item.done=true; item.news=score; item.data={rr,spo2,sbp,dbp,hr,bt,avpu};
+  const now=new Date();
+  const dbpTxt=dbp?`/${dbp}`:'';
+  const color=score>=7?'#dc2626':score>=5?'#ea580c':'#16a34a';
+  addTL(`${item.label} (${fmt(now)} น.) — BP ${sbp}${dbpTxt} mmHg, P ${hr}, BT ${bt}°C, O₂ sat ${spo2}%, RR ${rr}, AVPU: ${avpu} — NEWS = ${score}`, color);
+  closeAssessPopup();
+  renderAssessTable();
+  S.checkedCount=Math.min(S.totalItems,S.checkedCount+1);
+  updateProgress();
+}
+
+// =========================================================
+// DISCHARGE
+// =========================================================
+function dischargePatient(){
+  if(S.discharged) return;
+  S.discharged=true;
+  const now=new Date();
+  clearInterval(S.countdownInterval); clearInterval(S.assessInterval);
+  const btn=document.getElementById('dischargeBtn');
+  btn.classList.add('done-discharge');
+  btn.textContent=`✅ จำหน่ายออก ER — ${fmt(now)} น.`;
+  addTL(`จำหน่ายผู้ป่วยออกจากห้องอุบัติเหตุและฉุกเฉิน (${fmt(now)} น.)`,'#475569');
+  // Switch to timeline
+  switchTabByName('timeline');
+}
+
+// =========================================================
+// TIMELINE
+// =========================================================
+function addTL(text,color,meta){
+  // meta = {inputKey, tlPrefix, fallback, timeSuffix} — ใช้ re-resolve ค่า input ณ เวลาคัดลอก
+  S.timeline.push({time:fmts(new Date()),text,color:color||'#475569',...(meta||{})});
+  renderTimeline();
+}
+// อัปเดต text ใน S.timeline เมื่อ input เปลี่ยน
+function syncInputToTimeline(inputKey){
+  const inputMap={
+    'bc1':{id:'bc1-site',fallback:'(ไม่ระบุตำแหน่ง)'},
+    'bc2':{id:'bc2-site',fallback:'(ไม่ระบุตำแหน่ง)'},
+    'iv':{id:'iv-type',fallback:'(ไม่ระบุชนิดสารน้ำ)'},
+    'abx1':{id:'abx1-drug',fallback:'(ไม่ระบุชนิดยา)'},
+    'abx2':{id:'abx2-drug',fallback:'(ไม่ระบุชนิดยา)'},
+    'foley':{id:'foley-urine',fallback:'(ไม่ระบุ urine output)'},
+  };
+  const m=inputMap[inputKey]; if(!m) return;
+  const val=document.getElementById(m.id).value.trim()||m.fallback;
+  const ev=S.timeline.find(e=>e.inputKey===inputKey);
+  if(!ev) return;
+  ev.text=ev.tlPrefix+val+(ev.timeSuffix||'');
+  renderTimeline();
+}
+// ผูก listener ทุก input field
+['bc1','bc2','iv','abx1','abx2','foley'].forEach(k=>{
+  const idMap={bc1:'bc1-site',bc2:'bc2-site',iv:'iv-type',abx1:'abx1-drug',abx2:'abx2-drug',foley:'foley-urine'};
+  const el=document.getElementById(idMap[k]);
+  if(el) el.addEventListener('input',()=>syncInputToTimeline(k));
+});
+function renderTimeline(){
+  const list=document.getElementById('timeline-list');
+  if(!S.timeline.length){ list.innerHTML='<div style="padding:20px;text-align:center;font-size:11px;color:#94a3b8">ยังไม่มีข้อมูล</div>'; return; }
+  list.innerHTML=`<div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:1px;padding:10px 12px 6px;border-bottom:1px solid #e2e8f0;margin-bottom:4px">📅 บันทึกเหตุการณ์ HN 2568-04271</div>`+
+  S.timeline.map((ev,i)=>{
+    const isLast=i===S.timeline.length-1;
+    return `<div class="tl-item"><div class="tl-dot" style="background:${ev.color}${isLast?';box-shadow:0 0 5px '+ev.color:''}"></div><div class="tl-content"><div class="tl-time">${ev.time}</div><div class="tl-text">${ev.text}</div></div></div>`;
+  }).join('');
+}
+
+function stripEmoji(str){
+  return str.replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}]/gu,'')
+            .replace(/[\u{1F300}-\u{1F9FF}]/gu,'')
+            .replace(/\s+/g,' ').trim();
+}
+function copyTimeline(){
+  const today=new Date().toLocaleDateString('th-TH',{year:'numeric',month:'long',day:'numeric'});
+  let txt=`=== บันทึกการพยาบาลผู้ป่วยภาวะติดเชื้อในกระแสเลือด ===\n`;
+  txt+=`HN: 2568-04271 | เพศชาย | อายุ 68 ปี | วันที่: ${today}\n\n`;
+  const inputIdMap={bc1:'bc1-site',bc2:'bc2-site',iv:'iv-type',abx1:'abx1-drug',abx2:'abx2-drug',foley:'foley-urine'};
+  S.timeline.forEach(ev=>{
+    let text=ev.text;
+    // re-read ค่า input ณ เวลาคัดลอก (กรณีกรอกหลังจากติ๊ก)
+    if(ev.inputKey&&ev.tlPrefix){
+      const domId=inputIdMap[ev.inputKey];
+      const currentVal=domId&&document.getElementById(domId)&&document.getElementById(domId).value.trim();
+      if(currentVal) text=ev.tlPrefix+currentVal+(ev.timeSuffix||'');
+    }
+    txt+=`${ev.time}  ${stripEmoji(text)}\n`;
+  });
+  txt+=`\n[พยาบาลผู้บันทึก: ___________________]`;
+  navigator.clipboard.writeText(txt).then(()=>{
+    const btn=document.getElementById('copyBtn');
+    btn.classList.add('copied'); btn.textContent='คัดลอกสำเร็จแล้ว';
+    setTimeout(()=>{ btn.classList.remove('copied'); btn.textContent='คัดลอก Timeline เพื่อบันทึกใน HIS'; },3000);
+  }).catch(()=>alert('ไม่สามารถคัดลอกอัตโนมัติได้ในสภาพแวดล้อมนี้'));
+}
+
+// =========================================================
+// TABS
+// =========================================================
+function switchTab(btn,name){
+  document.querySelectorAll('.rp-tab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-checklist').style.display=name==='checklist'?'block':'none';
+  document.getElementById('tab-timeline').style.display=name==='timeline'?'block':'none';
+  document.getElementById('tl-copy-bar').style.display=name==='timeline'?'block':'none';
+}
+function switchTabByName(name){
+  const tabs=document.querySelectorAll('.rp-tab');
+  tabs.forEach(t=>t.classList.remove('active'));
+  if(name==='timeline') tabs[1].classList.add('active');
+  else tabs[0].classList.add('active');
+  document.getElementById('tab-checklist').style.display=name==='checklist'?'block':'none';
+  document.getElementById('tab-timeline').style.display=name==='timeline'?'block':'none';
+  document.getElementById('tl-copy-bar').style.display=name==='timeline'?'block':'none';
+}
+
+// =========================================================
+// DEMO
+// =========================================================
+function demoReminder(){
+  if(!S.confirmTime){ alert('กรุณากด "บันทึก: แพทย์ยืนยันภาวะติดเชื้อ" ใน Checklist ก่อน'); return; }
+  const idx=S.assessSchedule.findIndex(x=>!x.done);
+  if(idx<0){ alert('ประเมินครบทุกรอบแล้ว'); return; }
+  S.reminderPendingIdx=idx;
+  const item=S.assessSchedule[idx];
+  document.getElementById('reminder-title').textContent=`ถึงเวลาประเมินสัญญาณชีพ — รอบที่ ${item.round}`;
+  document.getElementById('reminder-sub').textContent=item.label+` · เวลาเป้าหมาย ${fmt(item.dueTime)} น.`;
+  document.getElementById('reminderPopup').style.display='flex';
+}
+</script>
+</body>
+</html>
