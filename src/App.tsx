@@ -21,33 +21,41 @@ function EmptyState() {
     <div className="flex-1 flex items-center justify-center">
       <div className="text-center">
         <div className="w-20 h-20 rounded-full bg-surface-elevated flex items-center justify-center mx-auto mb-4">
-          <svg className="w-10 h-10 text-text-muted opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
+          <span className="text-4xl opacity-30">👤</span>
         </div>
-        <h3 className="text-lg font-semibold text-text-secondary mb-1">Select a Patient</h3>
+        <h3 className="text-lg font-semibold text-text-secondary mb-1">เลือกผู้ป่วย</h3>
         <p className="text-sm text-text-muted max-w-xs">
-          Choose a patient from the sidebar to view vitals, NEWS score, and manage the sepsis workflow.
+          เลือกผู้ป่วยจากรายชื่อด้านซ้าย เพื่อดูสัญญาณชีพ คะแนน NEWS และจัดการ Sepsis Workflow
         </p>
       </div>
     </div>
   );
 }
 
+/**
+ * Detail Panel (RIGHT) — Patient Info + Vitals + NEWS
+ * ตำแหน่ง: ขวาสุด (order: 2)
+ */
 function DetailPanel() {
   const selectedPatient = useRTSASStore((s) => s.selectedPatient);
 
-  if (!selectedPatient || !selectedPatient.latestNewsResult) return <EmptyState />;
+  if (!selectedPatient || !selectedPatient.latestNewsResult) return null;
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-4">
-      <PatientInfoBar patient={selectedPatient} />
-      <VitalSignsGrid newsResult={selectedPatient.latestNewsResult} />
-      <NewsCalculationLogic newsResult={selectedPatient.latestNewsResult} />
+    <div className="detail-panel-col">
+      <div className="detail-panel-col-inner">
+        <PatientInfoBar patient={selectedPatient} />
+        <VitalSignsGrid newsResult={selectedPatient.latestNewsResult} />
+        <NewsCalculationLogic newsResult={selectedPatient.latestNewsResult} />
+      </div>
     </div>
   );
 }
 
+/**
+ * Workflow Panel (CENTER) — Countdown + Checklist/Timeline tabs
+ * ตำแหน่ง: กลาง (order: 1)
+ */
 function WorkflowPanel() {
   const { selectedPatient, ui, setActiveTab, timeline } = useRTSASStore();
 
@@ -56,61 +64,46 @@ function WorkflowPanel() {
   const unreadTimelineCount = timeline.length;
 
   return (
-    <div className="w-[400px] flex-shrink-0 border-r border-border-default flex flex-col bg-surface-card/50">
-      {/* Countdown Banner */}
-      <div className="p-3 border-b border-border-default">
-        <CountdownBanner />
-      </div>
+    <div className="workflow-panel-col">
+      {/* Countdown Banner — show only when active */}
+      <CountdownBanner />
 
       {/* Tabs */}
-      <div className="flex border-b border-border-default">
+      <div className="flex border-b border-border-default flex-shrink-0">
         <button
           id="tab-checklist"
           onClick={() => setActiveTab('checklist')}
-          className={`flex-1 px-4 py-2.5 text-sm font-medium transition-all relative ${
+          className={`flex-1 py-2.5 text-[11px] font-semibold cursor-pointer transition-all relative border-b-2 ${
             ui.activeTab === 'checklist'
-              ? 'text-brand-accent'
-              : 'text-text-muted hover:text-text-secondary'
+              ? 'text-brand-primary border-brand-primary'
+              : 'text-text-muted hover:text-text-secondary border-transparent'
           }`}
+          style={{ background: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', fontFamily: 'inherit' }}
         >
-          <span className="flex items-center justify-center gap-1.5">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-            </svg>
-            Checklist
-          </span>
-          {ui.activeTab === 'checklist' && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-accent rounded-full" />
-          )}
+          ☑ Checklist
         </button>
         <button
           id="tab-timeline"
           onClick={() => setActiveTab('timeline')}
-          className={`flex-1 px-4 py-2.5 text-sm font-medium transition-all relative ${
+          className={`flex-1 py-2.5 text-[11px] font-semibold cursor-pointer transition-all relative border-b-2 ${
             ui.activeTab === 'timeline'
-              ? 'text-brand-accent'
-              : 'text-text-muted hover:text-text-secondary'
+              ? 'text-brand-primary border-brand-primary'
+              : 'text-text-muted hover:text-text-secondary border-transparent'
           }`}
+          style={{ background: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', fontFamily: 'inherit' }}
         >
-          <span className="flex items-center justify-center gap-1.5">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Timeline
-            {ui.activeTab !== 'timeline' && unreadTimelineCount > 0 && (
-              <span className="ml-1 w-5 h-5 rounded-full bg-brand-accent/20 text-brand-accent text-[10px] font-bold flex items-center justify-center">
-                {unreadTimelineCount > 9 ? '9+' : unreadTimelineCount}
-              </span>
-            )}
-          </span>
-          {ui.activeTab === 'timeline' && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-accent rounded-full" />
+          📅 Timeline
+          {ui.activeTab !== 'timeline' && unreadTimelineCount > 0 && (
+            <span className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold"
+              style={{ background: '#dbeafe', color: '#2563eb' }}>
+              {unreadTimelineCount > 9 ? '9+' : unreadTimelineCount}
+            </span>
           )}
         </button>
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 overflow-hidden p-3">
+      <div className="flex-1 overflow-hidden">
         {ui.activeTab === 'checklist' ? <ChecklistPanel /> : <TimelinePanel />}
       </div>
     </div>
@@ -136,7 +129,7 @@ export default function App() {
 
       // Add initial system event
       addTimelineEvent(
-        `🏥 Patient ${highestRisk.fullName} selected — NEWS: ${highestRisk.latestNewsScore}`,
+        `🏥 เลือกผู้ป่วย ${highestRisk.fullName} — NEWS: ${highestRisk.latestNewsScore}`,
         highestRisk.latestNewsScore >= 7 ? 'red' : highestRisk.latestNewsScore >= 5 ? 'orange' : 'green',
         'System'
       );
@@ -148,15 +141,24 @@ export default function App() {
     <div className="h-screen flex flex-col bg-surface-base">
       <Header />
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        {/* LEFT — Sidebar (Patient List) */}
         <Sidebar />
 
-        <main className="flex-1 flex overflow-hidden">
+        {/* MAIN CONTENT — Workflow (center) + Detail (right) */}
+        <main className="flex-1 flex overflow-hidden min-h-0">
+          {/* CENTER — Checklist/Timeline */}
           <WorkflowPanel />
+
+          {/* RIGHT — Patient Detail + Vitals + NEWS */}
           <DetailPanel />
+
+          {/* Show empty state if no patient selected */}
+          {!useRTSASStore.getState().selectedPatient && <EmptyState />}
         </main>
       </div>
 
+      {/* BOTTOM — Status Bar + Demo */}
       <StatusBar />
 
       {/* Modals */}

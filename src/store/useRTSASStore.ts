@@ -109,56 +109,89 @@ function createDefaultChecklist(): ChecklistPhase[] {
       isCompleted: false,
       items: [
         {
-          id: 'hemoculture',
+          id: 'hemoculture_1',
           phase: 'sepsis_bundle',
-          label: 'Hemoculture Drawn',
+          label: 'เจาะเลือดเพาะเชื้อ ครั้งที่ 1',
+          subLabel: 'ก่อนให้ยาปฏิชีวนะ',
           status: 'pending',
           completedAt: null,
           completedBy: null,
           requiresInput: true,
           inputValue: null,
-          inputLabel: 'Injection site (e.g., Left AC, Right AC)',
+          inputLabel: 'ตำแหน่งที่เจาะ:',
           sortOrder: 1,
+          isUnlocked: false,
+        },
+        {
+          id: 'hemoculture_2',
+          phase: 'sepsis_bundle',
+          label: 'เจาะเลือดเพาะเชื้อ ครั้งที่ 2',
+          subLabel: 'ก่อนให้ยาปฏิชีวนะ',
+          status: 'pending',
+          completedAt: null,
+          completedBy: null,
+          requiresInput: true,
+          inputValue: null,
+          inputLabel: 'ตำแหน่งที่เจาะ:',
+          sortOrder: 2,
           isUnlocked: false,
         },
         {
           id: 'iv_fluid',
           phase: 'sepsis_bundle',
-          label: 'IV Fluid Bolus Administered',
+          label: 'ให้สารน้ำทางหลอดเลือดดำ',
           status: 'pending',
           completedAt: null,
           completedBy: null,
           requiresInput: true,
           inputValue: null,
-          inputLabel: 'Fluid type & volume (e.g., NSS 1000ml)',
-          sortOrder: 2,
-          isUnlocked: false,
-        },
-        {
-          id: 'antibiotics',
-          phase: 'sepsis_bundle',
-          label: 'Antibiotics Administered',
-          status: 'pending',
-          completedAt: null,
-          completedBy: null,
-          requiresInput: true,
-          inputValue: null,
-          inputLabel: 'Drug name & dosage',
+          inputLabel: 'ชนิดสารน้ำ / อัตราเร็ว:',
           sortOrder: 3,
           isUnlocked: false,
         },
         {
-          id: 'lactate',
+          id: 'antibiotics_1',
           phase: 'sepsis_bundle',
-          label: 'Lactate Level Ordered',
+          label: 'ยาปฏิชีวนะทางหลอดเลือดดำ ตัวที่ 1',
+          subLabel: 'ภายใน 60 นาทีหลังแพทย์ยืนยัน',
           status: 'pending',
           completedAt: null,
           completedBy: null,
-          requiresInput: false,
+          requiresInput: true,
           inputValue: null,
-          inputLabel: null,
+          inputLabel: 'ชนิดยา / ขนาด / วิธีให้:',
           sortOrder: 4,
           isUnlocked: false,
+        },
+        {
+          id: 'antibiotics_2',
+          phase: 'sepsis_bundle',
+          label: 'ยาปฏิชีวนะทางหลอดเลือดดำ ตัวที่ 2 (ถ้ามี)',
+          subLabel: 'ทำเมื่อแพทย์สั่ง (ถ้ามี)',
+          status: 'pending',
+          completedAt: null,
+          completedBy: null,
+          requiresInput: true,
+          inputValue: null,
+          inputLabel: 'ชนิดยา / ขนาด / วิธีให้:',
+          sortOrder: 5,
+          isUnlocked: false,
+          isOptional: true,
+        },
+        {
+          id: 'foley_cath',
+          phase: 'sepsis_bundle',
+          label: 'ใส่สายสวนปัสสาวะ (Retain Foley cath)',
+          subLabel: 'ทำเมื่อแพทย์สั่ง (ถ้ามีข้อบ่งชี้)',
+          status: 'pending',
+          completedAt: null,
+          completedBy: null,
+          requiresInput: true,
+          inputValue: null,
+          inputLabel: 'Urine output ที่ได้:',
+          sortOrder: 6,
+          isUnlocked: false,
+          isOptional: true,
         },
       ],
     },
@@ -176,10 +209,18 @@ function createDefaultChecklist(): ChecklistPhase[] {
 // Store State Interface
 // ---------------------------------------------------------------------------
 
+export interface PatientData {
+  checklist: ChecklistPhase[];
+  timeline: TimelineEvent[];
+  countdownTimer: CountdownTimer;
+  assessmentSchedule: AssessmentSchedule | null;
+}
+
 export interface RTSASState {
   // ---- Patient Data ----
   patients: Patient[];
   selectedPatient: Patient | null;
+  patientData: Record<string, PatientData>;
 
   // ---- Checklist ----
   checklist: ChecklistPhase[];
@@ -254,6 +295,7 @@ export const useRTSASStore = create<RTSASState>()(
     // ---- Initial State ----
     patients: [],
     selectedPatient: null,
+    patientData: {},
 
     checklist: createDefaultChecklist(),
 
@@ -290,10 +332,42 @@ export const useRTSASStore = create<RTSASState>()(
     setPatients: (patients) => set({ patients }),
 
     selectPatient: (patientId) => {
-      const patient = get().patients.find((p) => p.id === patientId) || null;
+      const state = get();
+      
+      // 1. Save current active patient's data before switching
+      const newPatientDataMap = { ...state.patientData };
+      if (state.selectedPatient) {
+        newPatientDataMap[state.selectedPatient.id] = {
+          checklist: state.checklist,
+          timeline: state.timeline,
+          countdownTimer: state.countdownTimer,
+          assessmentSchedule: state.assessmentSchedule,
+        };
+      }
+
+      // 2. Load new patient's data (or initialize if not exists)
+      const dataToLoad = newPatientDataMap[patientId] || {
+        checklist: createDefaultChecklist(),
+        timeline: [],
+        countdownTimer: {
+          isActive: false, startedAt: null, totalDurationSeconds: 3600,
+          remainingSeconds: 3600, isExpired: false, isWarning: false, isCritical: false,
+        },
+        assessmentSchedule: null,
+      };
+
+      // 3. Ensure the newly loaded data is in the map
+      newPatientDataMap[patientId] = dataToLoad;
+
+      const patient = state.patients.find((p) => p.id === patientId) || null;
       set({
         selectedPatient: patient,
-        ui: { ...get().ui, selectedPatientId: patientId },
+        patientData: newPatientDataMap,
+        checklist: dataToLoad.checklist,
+        timeline: dataToLoad.timeline,
+        countdownTimer: dataToLoad.countdownTimer,
+        assessmentSchedule: dataToLoad.assessmentSchedule,
+        ui: { ...state.ui, selectedPatientId: patientId },
       });
     },
 
@@ -383,9 +457,17 @@ export const useRTSASStore = create<RTSASState>()(
           ),
         }));
 
-        // Check phase completion and unlock next phases
+        const unlockedChecklist = updatePhaseUnlocking(newChecklist);
+
         return {
-          checklist: updatePhaseUnlocking(newChecklist),
+          checklist: unlockedChecklist,
+          patientData: state.selectedPatient ? {
+            ...state.patientData,
+            [state.selectedPatient.id]: {
+              ...(state.patientData[state.selectedPatient.id] || {}),
+              checklist: unlockedChecklist,
+            }
+          } : state.patientData
         };
       });
 
@@ -416,18 +498,41 @@ export const useRTSASStore = create<RTSASState>()(
     },
 
     updateChecklistInput: (itemId, inputValue) => {
-      set((state) => ({
-        checklist: state.checklist.map((phase) => ({
+      set((state) => {
+        const newChecklist = state.checklist.map((phase) => ({
           ...phase,
           items: phase.items.map((item) =>
             item.id === itemId ? { ...item, inputValue } : item
           ),
-        })),
-      }));
+        }));
+        
+        return {
+          checklist: newChecklist,
+          patientData: state.selectedPatient ? {
+            ...state.patientData,
+            [state.selectedPatient.id]: {
+              ...(state.patientData[state.selectedPatient.id] || {}),
+              checklist: newChecklist,
+            }
+          } : state.patientData
+        };
+      });
     },
 
     resetChecklist: () => {
-      set({ checklist: createDefaultChecklist() });
+      set((state) => {
+        const newChecklist = createDefaultChecklist();
+        return {
+          checklist: newChecklist,
+          patientData: state.selectedPatient ? {
+            ...state.patientData,
+            [state.selectedPatient.id]: {
+              ...(state.patientData[state.selectedPatient.id] || {}),
+              checklist: newChecklist,
+            }
+          } : state.patientData
+        };
+      });
     },
 
     // ===========================================================================
@@ -444,12 +549,31 @@ export const useRTSASStore = create<RTSASState>()(
         metadata,
       };
 
-      set((state) => ({
-        timeline: [...state.timeline, event],
-      }));
+      set((state) => {
+        const newTimeline = [...state.timeline, event];
+        return {
+          timeline: newTimeline,
+          patientData: state.selectedPatient ? {
+            ...state.patientData,
+            [state.selectedPatient.id]: {
+              ...(state.patientData[state.selectedPatient.id] || {}),
+              timeline: newTimeline,
+            }
+          } : state.patientData
+        };
+      });
     },
 
-    clearTimeline: () => set({ timeline: [] }),
+    clearTimeline: () => set((state) => ({ 
+      timeline: [],
+      patientData: state.selectedPatient ? {
+        ...state.patientData,
+        [state.selectedPatient.id]: {
+          ...(state.patientData[state.selectedPatient.id] || {}),
+          timeline: [],
+        }
+      } : state.patientData
+    })),
 
     getTimelineText: () => {
       const { timeline, selectedPatient } = get();
@@ -475,8 +599,8 @@ export const useRTSASStore = create<RTSASState>()(
     // ===========================================================================
 
     startCountdown: (doctorConfirmTime) => {
-      set({
-        countdownTimer: {
+      set((state) => {
+        const newTimer = {
           isActive: true,
           startedAt: doctorConfirmTime,
           totalDurationSeconds: 3600,
@@ -484,36 +608,77 @@ export const useRTSASStore = create<RTSASState>()(
           isExpired: false,
           isWarning: false,
           isCritical: false,
-        },
+        };
+        return {
+          countdownTimer: newTimer,
+          patientData: state.selectedPatient ? {
+            ...state.patientData,
+            [state.selectedPatient.id]: {
+              ...(state.patientData[state.selectedPatient.id] || {}),
+              countdownTimer: newTimer,
+            }
+          } : state.patientData
+        };
       });
     },
 
     tickCountdown: () => {
       set((state) => {
-        if (!state.countdownTimer.isActive || state.countdownTimer.isExpired) {
-          return state;
+        let updatedPatientData = { ...state.patientData };
+        let newActiveTimer = state.countdownTimer;
+        let activeTimerUpdated = false;
+
+        // Tick ALL background timers in patientData
+        Object.keys(updatedPatientData).forEach(patientId => {
+          const timer = updatedPatientData[patientId].countdownTimer;
+          if (timer && timer.isActive && !timer.isExpired) {
+            const remaining = Math.max(0, timer.remainingSeconds - 1);
+            updatedPatientData[patientId] = {
+              ...updatedPatientData[patientId],
+              countdownTimer: {
+                ...timer,
+                remainingSeconds: remaining,
+                isExpired: remaining === 0,
+                isWarning: remaining <= 900 && remaining > 300,
+                isCritical: remaining <= 300,
+              }
+            };
+            // Sync with active screen timer if this is the selected patient
+            if (state.selectedPatient && state.selectedPatient.id === patientId) {
+               newActiveTimer = updatedPatientData[patientId].countdownTimer;
+               activeTimerUpdated = true;
+            }
+          }
+        });
+
+        // Also tick the active timer if it wasn't caught by the dictionary loop
+        if (!activeTimerUpdated && state.countdownTimer.isActive && !state.countdownTimer.isExpired) {
+            const remaining = Math.max(0, state.countdownTimer.remainingSeconds - 1);
+            newActiveTimer = {
+                ...state.countdownTimer,
+                remainingSeconds: remaining,
+                isExpired: remaining === 0,
+                isWarning: remaining <= 900 && remaining > 300,
+                isCritical: remaining <= 300,
+            };
+            if (state.selectedPatient) {
+              updatedPatientData[state.selectedPatient.id] = {
+                ...(updatedPatientData[state.selectedPatient.id] || {}),
+                countdownTimer: newActiveTimer
+              };
+            }
         }
 
-        const remaining = Math.max(
-          0,
-          state.countdownTimer.remainingSeconds - 1
-        );
-
         return {
-          countdownTimer: {
-            ...state.countdownTimer,
-            remainingSeconds: remaining,
-            isExpired: remaining === 0,
-            isWarning: remaining <= 900 && remaining > 300, // < 15 min
-            isCritical: remaining <= 300, // < 5 min
-          },
+          countdownTimer: newActiveTimer,
+          patientData: updatedPatientData
         };
       });
     },
 
     resetCountdown: () => {
-      set({
-        countdownTimer: {
+      set((state) => {
+        const newTimer = {
           isActive: false,
           startedAt: null,
           totalDurationSeconds: 3600,
@@ -521,7 +686,17 @@ export const useRTSASStore = create<RTSASState>()(
           isExpired: false,
           isWarning: false,
           isCritical: false,
-        },
+        };
+        return {
+          countdownTimer: newTimer,
+          patientData: state.selectedPatient ? {
+            ...state.patientData,
+            [state.selectedPatient.id]: {
+              ...(state.patientData[state.selectedPatient.id] || {}),
+              countdownTimer: newTimer,
+            }
+          } : state.patientData
+        };
       });
     },
 
@@ -533,13 +708,23 @@ export const useRTSASStore = create<RTSASState>()(
       const patientId = get().selectedPatient?.id ?? '';
       const entries = generateAssessmentSchedule(originTime);
 
-      set({
-        assessmentSchedule: {
+      set((state) => {
+        const newSchedule = {
           patientId,
           generatedAt: new Date().toISOString(),
           originTime,
           entries,
-        },
+        };
+        return {
+          assessmentSchedule: newSchedule,
+          patientData: state.selectedPatient ? {
+            ...state.patientData,
+            [state.selectedPatient.id]: {
+              ...(state.patientData[state.selectedPatient.id] || {}),
+              assessmentSchedule: newSchedule,
+            }
+          } : state.patientData
+        };
       });
 
       get().addTimelineEvent(
@@ -556,21 +741,30 @@ export const useRTSASStore = create<RTSASState>()(
       set((state) => {
         if (!state.assessmentSchedule) return state;
 
+        const newSchedule = {
+          ...state.assessmentSchedule,
+          entries: state.assessmentSchedule.entries.map((entry) =>
+            entry.id === entryId
+              ? {
+                  ...entry,
+                  isCompleted: true,
+                  completedAt: now,
+                  vitals,
+                  newsResult,
+                }
+              : entry
+          ),
+        };
+
         return {
-          assessmentSchedule: {
-            ...state.assessmentSchedule,
-            entries: state.assessmentSchedule.entries.map((entry) =>
-              entry.id === entryId
-                ? {
-                    ...entry,
-                    isCompleted: true,
-                    completedAt: now,
-                    vitals,
-                    newsResult,
-                  }
-                : entry
-            ),
-          },
+          assessmentSchedule: newSchedule,
+          patientData: state.selectedPatient ? {
+            ...state.patientData,
+            [state.selectedPatient.id]: {
+              ...(state.patientData[state.selectedPatient.id] || {}),
+              assessmentSchedule: newSchedule,
+            }
+          } : state.patientData
         };
       });
 
@@ -597,15 +791,24 @@ export const useRTSASStore = create<RTSASState>()(
       set((state) => {
         if (!state.assessmentSchedule) return state;
 
+        const newSchedule = {
+          ...state.assessmentSchedule,
+          entries: state.assessmentSchedule.entries.map((entry) =>
+            entry.id === entryId
+              ? { ...entry, reminderTriggered: true }
+              : entry
+          ),
+        };
+
         return {
-          assessmentSchedule: {
-            ...state.assessmentSchedule,
-            entries: state.assessmentSchedule.entries.map((entry) =>
-              entry.id === entryId
-                ? { ...entry, reminderTriggered: true }
-                : entry
-            ),
-          },
+          assessmentSchedule: newSchedule,
+          patientData: state.selectedPatient ? {
+            ...state.patientData,
+            [state.selectedPatient.id]: {
+              ...(state.patientData[state.selectedPatient.id] || {}),
+              assessmentSchedule: newSchedule,
+            }
+          } : state.patientData
         };
       });
 

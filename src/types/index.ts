@@ -202,6 +202,9 @@ export interface ChecklistItem {
   /** Display label */
   label: string;
 
+  /** Sub-label or description */
+  subLabel?: string;
+
   /** Current status */
   status: ChecklistItemStatus;
 
@@ -210,6 +213,9 @@ export interface ChecklistItem {
 
   /** Person who completed this item */
   completedBy: string | null;
+
+  /** Whether this item is optional and can be skipped in sequential flow */
+  isOptional?: boolean;
 
   /** Whether this item requires text input (e.g., drug name, injection site) */
   requiresInput: boolean;

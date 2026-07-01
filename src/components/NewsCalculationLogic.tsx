@@ -26,44 +26,52 @@ const ptsClasses: Record<number, string> = {
 
 export default function NewsCalculationLogic({ newsResult }: { newsResult: NEWSResult }) {
   const risk = riskLabels[newsResult.riskLevel];
+
+  // Filter out oxygenSupplementation for display (mockup doesn't show it)
   const displayParams = newsResult.breakdown.filter(
     (p) => p.parameter !== 'oxygenSupplementation'
   );
+
+  // Calculate visible score (sum of displayed params only) to avoid mismatch
+  const visibleScore = displayParams.reduce((sum, p) => sum + p.score, 0);
+  // Max possible score for displayed params (6 params × max 3 each = 18)
+  const maxScore = displayParams.length * 3;
 
   return (
     <div className="section-card">
       <div className="section-card-header">
         <div className="section-card-title"><span>🔍</span> การคำนวณ NEWS — Transparent Rule-Based</div>
-        <div className="text-[9px] py-0.5 px-2 rounded-md"
-          style={{ color: '#0891b2', background: '#ecfeff', border: '1px solid #a5f3fc' }}>
+        <div style={{ fontSize: '9px', color: '#0891b2', background: '#ecfeff', padding: '3px 8px', borderRadius: '6px', border: '1px solid #a5f3fc' }}>
           ✅ ตรวจสอบย้อนกลับได้
         </div>
       </div>
       <div className="section-card-body">
         <div className="flex flex-col gap-2.5">
           {/* NEWS Score Box */}
-          <div className="bg-white rounded-[10px] overflow-hidden border border-border-default">
+          <div className="bg-white rounded-[10px] overflow-hidden" style={{ border: '1px solid #dde3ed' }}>
             {/* Score Header */}
-            <div className="px-3 py-2 bg-surface-elevated flex items-center justify-between border-b border-border-default">
+            <div className="flex items-center justify-between" style={{ padding: '8px 12px', background: '#f8fafc', borderBottom: '1px solid #dde3ed' }}>
               <div>
-                <div className="text-[10px] font-bold text-text-secondary uppercase tracking-wider leading-snug">
+                <div style={{ fontSize: '10px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', lineHeight: 1.3 }}>
                   National Early Warning Score (NEWS)
                 </div>
-                <div className="text-[9px] text-text-muted mt-0.5">Royal College of Physicians, 2017</div>
+                <div style={{ fontSize: '9px', color: '#94a3b8', marginTop: '2px' }}>Royal College of Physicians, 2017</div>
               </div>
-              <div className="text-right">
-                <div className="text-[28px] font-black leading-none" style={{ color: risk.color }}>{newsResult.totalScore}</div>
-                <div className="text-[9px] font-semibold mt-0.5" style={{ color: risk.color }}>{risk.label}</div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '28px', fontWeight: 900, lineHeight: 1, color: risk.color }}>{newsResult.totalScore}</div>
+                <div style={{ fontSize: '9px', fontWeight: 600, marginTop: '2px', color: risk.color }}>{risk.label}</div>
               </div>
             </div>
 
             {/* Table header */}
-            <div className="flex items-center px-3 py-1.5 text-[9px] font-bold text-text-secondary uppercase tracking-wider border-b"
-              style={{ background: '#eff6ff', borderColor: '#bfdbfe' }}>
+            <div className="flex items-center" style={{
+              padding: '5px 12px', background: '#eff6ff', borderBottom: '1px solid #bfdbfe',
+              fontSize: '9px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px',
+            }}>
               <span className="flex-1">พารามิเตอร์</span>
-              <span className="w-[90px] text-center">ค่าที่วัดได้</span>
-              <span className="w-[72px] text-center">เกณฑ์ปกติ</span>
-              <span className="w-[40px] text-center">คะแนน</span>
+              <span style={{ width: '90px', textAlign: 'center' }}>ค่าที่วัดได้</span>
+              <span style={{ width: '72px', textAlign: 'center' }}>เกณฑ์ปกติ</span>
+              <span style={{ width: '40px', textAlign: 'center' }}>คะแนน</span>
             </div>
 
             {/* Rows */}
@@ -75,15 +83,20 @@ export default function NewsCalculationLogic({ newsResult }: { newsResult: NEWSR
               return (
                 <div
                   key={param.parameter}
-                  className="flex items-center px-3 py-1.5 border-b border-[#f1f5f9] text-[11px]"
-                  style={isHighlight ? { background: '#fef2f2' } : {}}
+                  className="flex items-center"
+                  style={{
+                    padding: '5px 12px',
+                    borderBottom: '1px solid #f1f5f9',
+                    fontSize: '11px',
+                    ...(isHighlight ? { background: '#fef2f2' } : {}),
+                  }}
                 >
-                  <span className="flex-1 text-text-secondary">
+                  <span className="flex-1" style={{ color: '#475569' }}>
                     {config.icon} {config.label}
                   </span>
-                  <span className="w-[90px] text-center font-semibold">{param.displayValue}</span>
-                  <span className="w-[72px] text-center text-[9px] text-text-muted">{config.normalRange}</span>
-                  <span className={`w-[40px] text-center font-extrabold text-[13px] ${ptsClass}`}>
+                  <span style={{ width: '90px', textAlign: 'center', fontWeight: 600 }}>{param.displayValue}</span>
+                  <span style={{ width: '72px', textAlign: 'center', fontSize: '9px', color: '#94a3b8' }}>{config.normalRange}</span>
+                  <span className={`${ptsClass}`} style={{ width: '40px', textAlign: 'center', fontWeight: 800, fontSize: '13px' }}>
                     +{param.score}
                   </span>
                 </div>
@@ -91,35 +104,34 @@ export default function NewsCalculationLogic({ newsResult }: { newsResult: NEWSR
             })}
 
             {/* Total row */}
-            <div className="px-3 py-2 flex justify-between items-center border-t"
-              style={{ background: '#fef2f2', borderColor: '#fca5a5' }}>
-              <span className="text-[11px] text-text-secondary font-semibold">รวม NEWS Score</span>
-              <span className="text-[22px] font-black" style={{ color: '#ef4444' }}>
-                {newsResult.totalScore} / 18
+            <div className="flex justify-between items-center" style={{
+              padding: '8px 12px', background: '#fef2f2', borderTop: '1px solid #fca5a5',
+            }}>
+              <span style={{ fontSize: '11px', color: '#475569', fontWeight: 600 }}>รวม NEWS Score</span>
+              <span style={{ fontSize: '22px', fontWeight: 900, color: '#ef4444' }}>
+                {newsResult.totalScore} / {maxScore}
               </span>
             </div>
           </div>
 
           {/* Rule Logic Box */}
-          <div className="rounded-[10px] p-2.5 px-3"
-            style={{ background: '#eff6ff', border: '1px solid #bfdbfe' }}>
-            <div className="text-[10px] font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1.5"
-              style={{ color: '#0891b2' }}>
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '10px 12px' }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: '#0891b2', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span>🔎</span> Logic การแจ้งเตือน
             </div>
-            <div className="text-[11px] text-text-secondary leading-relaxed">
-              <span className="text-brand-primary font-bold">IF</span> NEWS ≥ 5<br />
-              <span className="text-brand-primary font-bold">→</span>{' '}
-              <span className="text-status-error font-bold">เสี่ยงติดเชื้อในกระแสเลือด 🔴</span>
+            <div style={{ fontSize: '11px', color: '#475569', lineHeight: 1.6 }}>
+              <span style={{ color: '#2563eb', fontWeight: 700 }}>IF</span> NEWS ≥ 5<br />
+              <span style={{ color: '#2563eb', fontWeight: 700 }}>→</span>{' '}
+              <span style={{ color: '#dc2626', fontWeight: 700 }}>เสี่ยงติดเชื้อในกระแสเลือด 🔴</span>
               <br /><br />
-              NEWS = <span className="text-brand-primary font-bold">{newsResult.totalScore}</span>{' '}
+              NEWS = <span style={{ color: '#2563eb', fontWeight: 700 }}>{newsResult.totalScore}</span>{' '}
               ({newsResult.totalScore >= 5 ? '≥ 5 ✓' : '< 5'})
-              <div className="mt-1.5 py-1 px-2 rounded-md text-center text-xs font-bold"
-                style={
-                  newsResult.totalScore >= 5
-                    ? { background: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626' }
-                    : { background: '#f0fdf4', border: '1px solid #86efac', color: '#16a34a' }
-                }>
+              <div style={{
+                marginTop: '6px', padding: '4px 8px', borderRadius: '6px', textAlign: 'center', fontSize: '12px', fontWeight: 700,
+                ...(newsResult.totalScore >= 5
+                  ? { background: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626' }
+                  : { background: '#f0fdf4', border: '1px solid #86efac', color: '#16a34a' }),
+              }}>
                 {newsResult.totalScore >= 5
                   ? '🔴 เสี่ยงติดเชื้อในกระแสเลือด'
                   : '🟢 ไม่พบความเสี่ยง'}

@@ -43,11 +43,23 @@ function DoctorConfirmButton({ item, phaseUnlocked }: { item: ChecklistItem; pha
 
   if (isCompleted) {
     return (
-      <div className="cl-item done no-click">
-        <div className="cl-checkbox checked" />
+      <div
+        className="flex items-start gap-2"
+        style={{ padding: '7px 8px', borderRadius: '8px', background: '#f0fdf4' }}
+      >
+        <div style={{
+          width: '18px', height: '18px', borderRadius: '5px', flexShrink: 0,
+          background: '#16a34a', border: '2px solid #16a34a',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '11px', fontWeight: 900, color: '#fff', marginTop: '1px',
+        }}>
+          ✓
+        </div>
         <div className="flex-1">
-          <div className="text-[11px] font-semibold text-text-muted line-through">{thaiLabels[item.id] || item.label}</div>
-          <div className="text-[10px] text-status-success font-bold mt-0.5">
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', textDecoration: 'line-through' }}>
+            {thaiLabels[item.id] || item.label}
+          </div>
+          <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginTop: '2px' }}>
             ✅ แพทย์ยืนยัน {item.completedBy} เมื่อ {new Date(item.completedAt!).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.
           </div>
         </div>
@@ -56,33 +68,46 @@ function DoctorConfirmButton({ item, phaseUnlocked }: { item: ChecklistItem; pha
   }
 
   return (
-    <div className="px-3">
-      <div className="text-[11px] font-semibold text-text-primary mb-1">
+    <div style={{ padding: '4px 12px', marginBottom: '4px' }}>
+      <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', marginBottom: '4px' }}>
         {thaiLabels[item.id] || item.label}
       </div>
-      <div className="text-[9px] text-text-muted mb-2">
-        เมื่อแพทย์ยืนยัน — ระบบเริ่มจับเวลา 60 นาที<br />
+      <div style={{
+        fontSize: '9px', color: '#475569', marginBottom: '8px',
+        background: '#eff6ff', padding: '6px 8px', borderRadius: '6px',
+        border: '1px solid #bfdbfe', lineHeight: 1.6,
+      }}>
+        <span style={{ fontWeight: 700, color: '#2563eb' }}>เมื่อแพทย์ยืนยัน</span> — ระบบจะเริ่มจับเวลา 60 นาที<br />
         และสร้างตารางประเมินสัญญาณชีพอัตโนมัติ
       </div>
       <button
+        type="button"
         id="doctor-confirm-btn"
         onClick={handleConfirm}
         disabled={!canComplete}
-        className="w-full py-2 rounded-lg text-[11px] font-bold cursor-pointer flex items-center justify-center gap-1.5 transition-all"
-        style={
-          confirming
-            ? { background: '#dc2626', color: '#fff', border: 'none' }
-            : canComplete
-              ? { background: '#2563eb', color: '#fff', border: 'none' }
-              : { background: '#e2e8f0', color: '#94a3b8', border: 'none', cursor: 'not-allowed' }
-        }
+        className={`w-full transition-all ${!canComplete ? 'cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 active:translate-y-0'}`}
+        style={{
+          padding: '8px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+          fontFamily: 'inherit',
+          ...(!canComplete
+            ? { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' }
+            : confirming
+            ? { background: '#fef2f2', border: '2px solid #ef4444', color: '#dc2626' }
+            : { background: 'linear-gradient(135deg, #10b981, #059669)', color: 'white', boxShadow: '0 4px 12px -2px rgba(16,185,129,.4)' }),
+        }}
       >
-        {confirming ? '⚠️ คลิกอีกครั้งเพื่อยืนยัน — เริ่มนับ 60 นาที' : '✅ บันทึก: แพทย์ยืนยันภาวะติดเชื้อ'}
+        {confirming ? '⚠️ ยืนยันอีกครั้ง — เริ่มนับ 60 นาที' : '✅ บันทึก: แพทย์ยืนยันภาวะติดเชื้อ'}
       </button>
       {confirming && (
         <button
+          type="button"
           onClick={() => setConfirming(false)}
-          className="w-full py-1 text-[10px] text-text-muted hover:text-text-secondary mt-1"
+          style={{
+            width: '100%', padding: '4px', fontSize: '10px', color: '#94a3b8',
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            marginTop: '4px', fontFamily: 'inherit',
+          }}
         >
           ยกเลิก
         </button>
@@ -114,29 +139,50 @@ function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseU
 
   return (
     <div
-      className={`flex items-start gap-2.5 py-2 px-2 rounded-lg mb-0.5 transition-all cursor-pointer ${
-        isCompleted ? 'bg-[#f0fdf4]' : canComplete ? 'hover:bg-[#eff6ff]' : 'opacity-50'
+      className={`flex items-start gap-2 transition-all ${
+        isCompleted ? '' : canComplete ? 'hover:bg-[#eff6ff] cursor-pointer' : 'opacity-50'
       }`}
+      style={{
+        padding: '7px 8px',
+        borderRadius: '8px',
+        marginBottom: '3px',
+        ...(isCompleted ? { background: '#f0fdf4' } : {}),
+      }}
       onClick={!item.requiresInput ? handleComplete : undefined}
     >
       {/* Checkbox */}
       <div
-        className={`w-[18px] h-[18px] rounded-[5px] border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all ${
-          isCompleted ? 'bg-status-success border-status-success' : 'border-[#cbd5e1] bg-white'
-        }`}
+        style={{
+          width: '18px', height: '18px', borderRadius: '5px', flexShrink: 0,
+          border: isCompleted ? '2px solid #16a34a' : '2px solid #cbd5e1',
+          background: isCompleted ? '#16a34a' : '#fff',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          marginTop: '1px',
+        }}
       >
-        {isCompleted && <span className="text-white text-[11px] font-black">✓</span>}
+        {isCompleted && <span style={{ color: '#fff', fontSize: '11px', fontWeight: 900 }}>✓</span>}
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className={`text-[11px] font-semibold ${isCompleted ? 'text-text-muted line-through' : 'text-text-primary'}`}>
+        <div style={{
+          fontSize: '11px', fontWeight: 700,
+          color: isCompleted ? '#94a3b8' : '#1e293b',
+          textDecoration: isCompleted ? 'line-through' : 'none',
+        }}>
           {label}
         </div>
+        {item.subLabel && (
+          <div style={{ fontSize: '9px', color: '#64748b', marginTop: '1px' }}>
+            {item.subLabel}
+          </div>
+        )}
 
         {/* Input field */}
         {item.requiresInput && !isCompleted && canComplete && (
-          <div className="mt-1.5">
-            <label className="text-[9px] text-text-muted mb-0.5 block">{item.inputLabel || 'รายละเอียด'}</label>
+          <div style={{ marginTop: '6px' }}>
+            <label style={{ fontSize: '9px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '3px' }}>
+              {item.inputLabel || 'รายละเอียด'}
+            </label>
             <div className="flex gap-1.5">
               <input
                 type="text"
@@ -146,14 +192,25 @@ function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseU
                   updateChecklistInput(item.id, e.target.value);
                 }}
                 placeholder={item.inputLabel ?? 'ระบุรายละเอียด...'}
-                className="flex-1 py-1 px-2 border rounded-md text-[11px] text-text-primary bg-surface-elevated focus:outline-none focus:border-brand-primary"
-                style={{ border: '1.5px solid #e2e8f0' }}
                 onClick={(e) => e.stopPropagation()}
+                style={{
+                  flex: 1, minWidth: 0, padding: '5px 8px',
+                  border: '1px solid #dde3ed', borderRadius: '6px',
+                  fontSize: '10px', background: '#f8fafc',
+                  fontFamily: 'inherit', color: '#1e293b',
+                  outline: 'none',
+                }}
               />
               {inputVal.trim() && (
                 <button
+                  type="button"
                   onClick={(e) => { e.stopPropagation(); handleComplete(); }}
-                  className="px-2 py-1 text-[10px] font-bold bg-brand-primary text-white rounded-md"
+                  style={{
+                    padding: '5px 10px', fontSize: '10px', fontWeight: 700,
+                    color: '#fff', borderRadius: '6px', border: 'none',
+                    background: '#2563eb', cursor: 'pointer', fontFamily: 'inherit',
+                    whiteSpace: 'nowrap',
+                  }}
                 >
                   บันทึก
                 </button>
@@ -164,16 +221,20 @@ function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseU
 
         {/* Completed input value */}
         {item.requiresInput && isCompleted && item.inputValue && (
-          <div className="text-[10px] text-brand-primary mt-0.5">{item.inputValue}</div>
+          <div style={{ fontSize: '10px', fontWeight: 700, color: '#2563eb', marginTop: '2px' }}>{item.inputValue}</div>
         )}
 
         {/* Status */}
         {isCompleted ? (
-          <div className="text-[9px] text-text-muted mt-0.5">
-            ✅ เสร็จ {new Date(item.completedAt!).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} น.
+          <div className="flex items-center gap-1" style={{ fontSize: '9px', fontWeight: 700, color: '#16a34a', marginTop: '2px' }}>
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+            ทำเสร็จแล้วเมื่อ {new Date(item.completedAt!).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.
           </div>
         ) : canComplete ? (
-          <div className="text-[9px] text-status-error font-bold mt-0.5">🔴 ยังไม่ดำเนินการ</div>
+          <div className="flex items-center gap-1" style={{ fontSize: '9px', fontWeight: 700, color: '#dc2626', marginTop: '2px' }}>
+            <span className="animate-pulse" style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#dc2626', display: 'inline-block' }} />
+            ยังไม่ดำเนินการ
+          </div>
         ) : null}
       </div>
     </div>
@@ -186,26 +247,51 @@ function PhaseSection({ phase }: { phase: ChecklistPhase }) {
   const config = thaiPhaseLabels[phase.phase] || { icon: '📌', title: phase.title };
 
   return (
-    <div className={`${!phase.isUnlocked ? 'opacity-50' : ''}`}>
-      {/* Phase Header */}
-      <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider py-1.5 mb-1.5 border-b border-border-light flex items-center gap-1.5 px-3">
+    <div className={`${!phase.isUnlocked ? 'opacity-50 grayscale cursor-not-allowed' : ''}`} style={{ marginBottom: '8px' }}>
+      {/* Phase Header — matches .cl-section-title */}
+      <div
+        className="flex items-center gap-1.5"
+        style={{
+          fontSize: '10px', fontWeight: 700, color: '#64748b',
+          textTransform: 'uppercase', letterSpacing: '1px',
+          padding: '5px 12px', marginBottom: '5px',
+          borderBottom: '1px solid #e2e8f0',
+        }}
+      >
         <span>{config.icon}</span>
         {config.title}
         {totalCount > 0 && (
-          <span className="ml-auto text-text-muted">{completedCount}/{totalCount}</span>
+          <span style={{
+            marginLeft: 'auto', fontSize: '9px', fontWeight: 700,
+            background: '#f8fafc', color: '#475569',
+            padding: '1px 6px', borderRadius: '4px',
+            border: '1px solid #e2e8f0',
+          }}>
+            {completedCount}/{totalCount}
+          </span>
         )}
       </div>
 
       {/* Items */}
-      <div className="px-1">
-        {phase.items.map((item) => (
-          <ChecklistItemRow key={item.id} item={item} phaseUnlocked={phase.isUnlocked} />
-        ))}
+      <div style={{ padding: '0 12px' }}>
+        {phase.items.map((item, index) => {
+          const isItemSequentialUnlocked = phase.isUnlocked && phase.items.slice(0, index).every(i => i.isOptional || i.status === 'completed');
+          return (
+            <ChecklistItemRow
+              key={item.id}
+              item={item}
+              phaseUnlocked={isItemSequentialUnlocked}
+            />
+          );
+        })}
       </div>
 
       {/* Lock message */}
       {!phase.isUnlocked && (
-        <div className="flex items-center gap-2 mx-3 mt-1 px-3 py-2 bg-surface-elevated rounded-lg text-xs text-text-muted">
+        <div style={{
+          margin: '4px 12px', padding: '5px 8px', borderRadius: '6px',
+          background: '#f1f5f9', fontSize: '9px', color: '#94a3b8',
+        }}>
           🔒 ทำ Phase ก่อนหน้าให้เสร็จก่อน
         </div>
       )}
@@ -223,33 +309,46 @@ export default function ChecklistPanel() {
   const pct = totalItems > 0 ? Math.round((completedTotal / totalItems) * 100) : 0;
 
   return (
-    <div className="space-y-1 overflow-y-auto pr-1">
+    <div className="h-full overflow-y-auto" style={{ paddingBottom: '40px' }}>
       {/* Overall progress */}
-      <div className="bg-surface-elevated rounded-lg px-3 py-2 mx-3 mb-2 border border-border-light">
-        <div className="flex justify-between text-[10px] text-text-secondary mb-1.5">
-          <span>ความคืบหน้า Sepsis Bundle</span>
-          <span>{completedTotal}/{totalItems} รายการ</span>
+      <div style={{
+        margin: '10px 12px', padding: '8px 12px',
+        background: '#fff', borderRadius: '8px',
+        border: '1px solid #dde3ed', boxShadow: '0 1px 4px rgba(0,0,0,.05)',
+      }}>
+        <div className="flex justify-between items-center" style={{ marginBottom: '5px' }}>
+          <span style={{ fontSize: '10px', fontWeight: 700, color: '#475569' }}>ความคืบหน้า Sepsis Bundle</span>
+          <span style={{ fontSize: '9px', fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '1px 6px', borderRadius: '4px' }}>
+            {completedTotal}/{totalItems} รายการ
+          </span>
         </div>
-        <div className="h-1.5 bg-border-light rounded-full overflow-hidden">
+        <div style={{ height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
           <div
-            className="h-full rounded-full transition-all duration-500"
-            style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #2563eb, #0891b2)' }}
+            className="transition-all duration-700 ease-out"
+            style={{ height: '100%', borderRadius: '3px', width: `${pct}%`, background: 'linear-gradient(90deg, #3b82f6, #06b6d4)' }}
           />
         </div>
       </div>
 
       {/* System alert item (always checked) */}
-      <div className="px-3">
-        <div className="flex items-start gap-2.5 py-2 px-2 rounded-lg bg-[#f0fdf4]">
-          <div className="w-[18px] h-[18px] rounded-[5px] border-2 flex-shrink-0 mt-0.5 flex items-center justify-center bg-status-success border-status-success">
-            <span className="text-white text-[11px] font-black">✓</span>
+      <div style={{ padding: '0 12px', marginBottom: '8px' }}>
+        <div
+          className="flex items-start gap-2"
+          style={{ padding: '7px 8px', borderRadius: '8px', background: '#eff6ff', border: '1px solid #bfdbfe' }}
+        >
+          <div style={{
+            width: '22px', height: '22px', borderRadius: '50%', flexShrink: 0,
+            background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 2px 6px rgba(37,99,235,.3)',
+          }}>
+            <span style={{ color: '#fff', fontSize: '10px', fontWeight: 900 }}>✓</span>
           </div>
           <div className="flex-1">
-            <div className="text-[11px] font-semibold text-text-muted line-through">
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b' }}>
               ระบบแจ้งเตือน — NEWS ≥ 5
             </div>
-            <div className="text-[9px] text-text-muted mt-0.5">
-              ✅ แจ้งเตือนอัตโนมัติ
+            <div style={{ fontSize: '9px', color: '#475569', marginTop: '2px' }}>
+              เริ่มกระบวนการอัตโนมัติ
             </div>
           </div>
         </div>
@@ -259,95 +358,124 @@ export default function ChecklistPanel() {
         <PhaseSection key={phase.phase} phase={phase} />
       ))}
 
-      {/* Assessment Schedule Table */}
+      {/* Assessment Schedule Table — matches .assess-table-wrap */}
       {assessmentSchedule && assessmentSchedule.entries.length > 0 && (
-        <div className="px-3 mt-2">
-          <div className="border border-border-default rounded-lg overflow-hidden bg-white">
-            {/* Table header */}
-            <div className="grid gap-1 px-2 py-1.5 text-[9px] font-bold text-brand-primary uppercase tracking-wider"
-              style={{ gridTemplateColumns: '30px 1fr 46px 64px', background: '#eff6ff', borderBottom: '1px solid #bfdbfe' }}>
-              <span>#</span>
-              <span>เวลา</span>
-              <span className="text-center">NEWS</span>
-              <span className="text-center">สถานะ</span>
+        <div style={{ padding: '0 12px', marginTop: '8px' }}>
+          <div style={{
+            border: '1px solid #dde3ed', borderRadius: '8px', overflow: 'hidden', background: '#fff',
+          }}>
+            {/* Table header — matches .at-head */}
+            <div
+              style={{
+                display: 'grid', gridTemplateColumns: '30px 1fr 46px 64px', gap: '4px',
+                padding: '5px 8px', background: '#eff6ff', borderBottom: '1px solid #bfdbfe',
+                fontSize: '9px', fontWeight: 700, color: '#2563eb',
+                letterSpacing: '0.5px', textTransform: 'uppercase',
+              }}
+            >
+              <span>ครั้งที่</span>
+              <span style={{ textAlign: 'center' }}>เวลา</span>
+              <span style={{ textAlign: 'center' }}>NEWS</span>
+              <span style={{ textAlign: 'center' }}>สถานะ</span>
             </div>
 
             {/* Rows */}
-            {assessmentSchedule.entries.map((entry) => {
-              const isDone = entry.isCompleted;
-              const isDue = !isDone && new Date() >= new Date(entry.scheduledTime);
-              const timeStr = new Date(entry.scheduledTime).toLocaleTimeString('th-TH', {
-                hour: '2-digit',
-                minute: '2-digit',
-              });
+            <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+              {assessmentSchedule.entries.map((entry) => {
+                const isDone = entry.isCompleted;
+                const isDue = !isDone && new Date() >= new Date(entry.scheduledTime);
+                const timeStr = new Date(entry.scheduledTime).toLocaleTimeString('th-TH', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
 
-              return (
-                <div
-                  key={entry.id}
-                  className={`grid items-center gap-1 px-2 py-1.5 border-b border-[#f1f5f9] text-[10px] ${
-                    isDone ? 'bg-[#f0fdf4]' : isDue ? 'animate-blink-row' : ''
-                  }`}
-                  style={{ gridTemplateColumns: '30px 1fr 46px 64px' }}
-                >
-                  <span className="text-[10px] text-text-muted font-bold">{entry.sequence}</span>
-                  <span className="text-[10px] text-text-primary font-semibold">
-                    {timeStr}
-                    <span className="text-text-muted text-[9px] block">
-                      {entry.intervalType}
+                return (
+                  <div
+                    key={entry.id}
+                    style={{
+                      display: 'grid', gridTemplateColumns: '30px 1fr 46px 64px', gap: '4px',
+                      padding: '5px 8px', borderBottom: '1px solid #f1f5f9',
+                      alignItems: 'center', fontSize: '10px',
+                      ...(isDone ? { background: '#f0fdf430' } : isDue ? { background: '#fef2f230' } : {}),
+                    }}
+                  >
+                    <span style={{ fontSize: '9px', color: '#94a3b8', fontWeight: 700 }}>{entry.sequence}</span>
+                    <span style={{ textAlign: 'center' }}>
+                      <span style={{ fontSize: '10px', fontWeight: 600, color: '#1e293b' }}>{timeStr}</span>
+                      <span style={{ fontSize: '8px', color: '#94a3b8', display: 'block' }}>
+                        {entry.intervalType}
+                      </span>
                     </span>
-                  </span>
-                  <span className="text-center">
-                    {entry.newsResult ? (
-                      <span className={`font-extrabold text-[11px] ${
-                        entry.newsResult.totalScore >= 7 ? 'text-status-error'
-                        : entry.newsResult.totalScore >= 5 ? 'text-status-warning'
-                        : 'text-status-success'
-                      }`}>
-                        {entry.newsResult.totalScore}
-                      </span>
-                    ) : (
-                      <span className="text-text-muted">—</span>
-                    )}
-                  </span>
-                  <span className="text-center">
-                    {isDone ? (
-                      <span className="py-0.5 px-1.5 rounded-md text-[9px] font-bold text-status-success bg-[#f0fdf4] border border-[#86efac]">
-                        ดูผล
-                      </span>
-                    ) : isDue ? (
-                      <button
-                        className="py-0.5 px-1.5 rounded-md text-[9px] font-bold text-white bg-status-error border-status-error animate-pulse-btn cursor-pointer"
-                        onClick={() =>
-                          useRTSASStore.getState().openModal('assessment_form', {
-                            entryId: entry.id,
-                            sequence: entry.sequence,
-                          })
-                        }
-                      >
-                        ⚡ บันทึก!
-                      </button>
-                    ) : (
-                      <button
-                        className="py-0.5 px-1.5 rounded-md text-[9px] font-bold cursor-pointer"
-                        style={{ background: '#eff6ff', color: '#2563eb', border: '1px solid #93c5fd' }}
-                        onClick={() =>
-                          useRTSASStore.getState().openModal('assessment_form', {
-                            entryId: entry.id,
-                            sequence: entry.sequence,
-                          })
-                        }
-                      >
-                        บันทึก
-                      </button>
-                    )}
-                  </span>
-                </div>
-              );
-            })}
+                    <span style={{ textAlign: 'center' }}>
+                      {entry.newsResult ? (
+                        <span style={{
+                          fontWeight: 800, fontSize: '10px',
+                          color: entry.newsResult.totalScore >= 7 ? '#dc2626'
+                            : entry.newsResult.totalScore >= 5 ? '#ea580c'
+                            : '#16a34a',
+                        }}>
+                          {entry.newsResult.totalScore}
+                        </span>
+                      ) : (
+                        <span style={{ color: '#94a3b8' }}>—</span>
+                      )}
+                    </span>
+                    <span style={{ textAlign: 'center' }}>
+                      {isDone ? (
+                        <span style={{
+                          padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
+                          background: '#dcfce7', color: '#16a34a', border: '1px solid #bbf7d0',
+                        }}>
+                          ✓ เสร็จสิ้น
+                        </span>
+                      ) : isDue ? (
+                        <button
+                          type="button"
+                          className="animate-pulse-btn"
+                          onClick={() =>
+                            useRTSASStore.getState().openModal('assessment_form', {
+                              entryId: entry.id,
+                              sequence: entry.sequence,
+                            })
+                          }
+                          style={{
+                            padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
+                            color: '#fff', background: '#dc2626', border: '1px solid #b91c1c',
+                            cursor: 'pointer', fontFamily: 'inherit', width: '100%',
+                          }}
+                        >
+                          ⚡ บันทึกด่วน
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            useRTSASStore.getState().openModal('assessment_form', {
+                              entryId: entry.id,
+                              sequence: entry.sequence,
+                            })
+                          }
+                          style={{
+                            padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
+                            color: '#2563eb', background: '#eff6ff', border: '1px solid #bfdbfe',
+                            cursor: 'pointer', fontFamily: 'inherit', width: '100%',
+                          }}
+                        >
+                          บันทึก
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
 
-            <div className="px-2 py-1.5 text-[9px] text-center font-semibold"
-              style={{ background: '#eff6ff', borderTop: '1px solid #bfdbfe', color: '#0891b2' }}>
-              ทุก 15 นาที (4 ครั้งแรก) → ทุก 30 นาที
+            {/* Footer — matches .at-footer */}
+            <div style={{
+              padding: '6px 8px', background: '#eff6ff', borderTop: '1px solid #bfdbfe',
+              fontSize: '9px', color: '#0891b2', textAlign: 'center', fontWeight: 600,
+            }}>
+              ทุก 15 นาที (4 ครั้งแรก) → หลังจากนั้นทุก 30 นาที
             </div>
           </div>
         </div>

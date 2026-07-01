@@ -73,10 +73,10 @@ export function ToastContainer() {
         return (
           <div
             key={toast.id}
-            className={`${style.bg} border ${style.border} rounded-lg px-4 py-3 shadow-lg animate-slide-in flex items-center gap-3`}
+            className={`${style.bg} border ${style.border} rounded-lg px-5 py-4 shadow-lg animate-slide-in flex items-center gap-4`}
           >
-            <span className="text-lg flex-shrink-0">{style.icon}</span>
-            <p className="text-sm text-text-primary flex-1">{toast.message}</p>
+            <span className="text-xl flex-shrink-0">{style.icon}</span>
+            <p className="text-base text-text-primary flex-1">{toast.message}</p>
             <button
               onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
               className="text-text-muted hover:text-text-primary transition-colors flex-shrink-0"

@@ -33,8 +33,8 @@ function TimelineEntry({ event, isLast }: { event: TimelineEvent; isLast: boolea
         }}
       />
       <div className="flex-1">
-        <div className="text-[9px] text-text-muted">{time}</div>
-        <div className="text-[11px] text-text-secondary mt-0.5 leading-snug">{event.actionText}</div>
+        <div className="text-xs text-text-muted">{time}</div>
+        <div className="text-sm text-text-secondary mt-0.5 leading-snug">{event.actionText}</div>
       </div>
     </div>
   );
@@ -64,7 +64,7 @@ export default function TimelinePanel() {
           </div>
         ) : (
           <>
-            <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider py-2 px-0 border-b border-border-light mb-1">
+            <div className="text-xs font-bold text-text-muted uppercase tracking-wider py-2 px-0 border-b border-border-light mb-2">
               📅 บันทึกเหตุการณ์ {selectedPatient?.hn || ''}
             </div>
             {timeline.map((event, i) => (
@@ -79,12 +79,12 @@ export default function TimelinePanel() {
         <div className="px-3 py-2.5 border-t border-border-default bg-surface-elevated flex-shrink-0">
           <button
             onClick={handleCopyToHIS}
-            className="w-full py-2.5 rounded-lg text-white text-xs font-bold cursor-pointer flex items-center justify-center gap-2 transition-colors hover:bg-[#0f172a]"
+            className="w-full py-2.5 rounded-lg text-white text-sm font-bold cursor-pointer flex items-center justify-center gap-2 transition-colors hover:bg-[#0f172a]"
             style={{ background: '#1e293b' }}
           >
             📋 คัดลอก Timeline เพื่อบันทึกใน HIS
           </button>
-          <div className="text-[10px] text-text-muted text-center mt-1.5">
+          <div className="text-xs text-text-muted text-center mt-1.5">
             คัดลอก → วางใน HIS เพื่อเป็นบันทึกการพยาบาล
           </div>
         </div>

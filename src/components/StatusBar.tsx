@@ -1,48 +1,85 @@
 import { useRTSASStore } from '../store/useRTSASStore';
 
 export default function StatusBar() {
-  const { openModal, resetChecklist, clearTimeline, ui, setConnectionStatus } = useRTSASStore();
-  
+  const { openModal, resetChecklist, clearTimeline, resetCountdown, ui, setConnectionStatus } = useRTSASStore();
+
+  const handleTriggerAlert = () => {
+    const patient = useRTSASStore.getState().selectedPatient;
+    openModal('alert', {
+      newsScore: patient?.latestNewsScore ?? 12,
+      riskLevel: 'high',
+      patientName: patient?.fullName ?? 'Demo',
+    });
+  };
+
+  const handleTriggerReminder = () => {
+    openModal('reminder', {
+      entryId: 'demo',
+      sequence: 1,
+      scheduledTime: new Date().toISOString(),
+    });
+  };
+
+  const handleReset = () => {
+    resetChecklist();
+    clearTimeline();
+    resetCountdown();
+  };
+
   return (
-    <div className="bg-surface-elevated border-t border-border-default px-4 py-2 flex items-center justify-between text-[11px] flex-shrink-0 z-10">
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-text-secondary">System Status:</span>
-          <span className={`flex items-center gap-1.5 ${ui.connectionStatus === 'connected' ? 'text-status-success' : 'text-status-error'}`}>
-            <span className={`w-2 h-2 rounded-full ${ui.connectionStatus === 'connected' ? 'bg-status-success animate-pulse-green' : 'bg-status-error animate-pulse-red'}`} />
-            {ui.connectionStatus === 'connected' ? 'Connected to HIS' : 'Disconnected'}
-          </span>
-        </div>
-        <span className="text-border-default">|</span>
-        <span className="text-text-muted">v1.2.0 (Build 8a9b2c)</span>
-        <span className="text-border-default">|</span>
-        <span className="text-text-muted">Last sync: {new Date(ui.currentTime).toLocaleTimeString('th-TH')}</span>
-      </div>
-      
-      <div className="flex items-center gap-2">
-        <span className="font-semibold text-text-secondary mr-2">Demo Tools:</span>
-        <button 
-          onClick={() => openModal('alert', { newsScore: 9, riskLevel: 'High', patientName: 'Demo Patient' })}
-          className="px-2 py-1 bg-status-error/10 text-status-error hover:bg-status-error/20 rounded border border-status-error/20 transition-colors focus:outline-none"
+    <>
+      {/* Demo Bar */}
+      <div className="bg-white border-t border-border-default flex items-center gap-2.5 flex-shrink-0"
+        style={{ padding: '5px 14px' }}>
+        <span className="text-[10px] text-text-muted flex items-center gap-1">🧪 ทดสอบ:</span>
+        <button
+          onClick={handleTriggerAlert}
+          className="text-[11px] font-semibold cursor-pointer transition-all"
+          style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid #dc2626', color: '#dc2626', background: '#fef2f2', fontFamily: 'inherit' }}
         >
-          Trigger Alert
+          🚨 Alert Pop-up
         </button>
-        <button 
-          onClick={() => {
-            resetChecklist();
-            clearTimeline();
-          }}
-          className="px-2 py-1 bg-brand-primary/10 text-brand-primary hover:bg-brand-primary/20 rounded border border-brand-primary/20 transition-colors focus:outline-none"
+        <button
+          onClick={handleTriggerReminder}
+          className="text-[11px] font-semibold cursor-pointer transition-all"
+          style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid #ea580c', color: '#ea580c', background: '#fff7ed', fontFamily: 'inherit' }}
         >
-          Reset State
+          🔔 จำลองแจ้งเตือนประเมิน
         </button>
-        <button 
+        <button
+          onClick={handleReset}
+          className="text-[11px] font-semibold cursor-pointer transition-all"
+          style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid #2563eb', color: '#2563eb', background: '#eff6ff', fontFamily: 'inherit' }}
+        >
+          🔄 รีเซ็ต
+        </button>
+        <button
           onClick={() => setConnectionStatus(ui.connectionStatus === 'connected' ? 'disconnected' : 'connected')}
-          className="px-2 py-1 bg-surface-base text-text-secondary hover:text-text-primary rounded border border-border-default transition-colors focus:outline-none"
+          className="text-[11px] font-semibold cursor-pointer transition-all"
+          style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', color: '#475569', background: '#f8fafc', fontFamily: 'inherit' }}
         >
-          Toggle Connection
+          {ui.connectionStatus === 'connected' ? '🔌 ตัดการเชื่อมต่อ' : '🔗 เชื่อมต่อ'}
         </button>
       </div>
-    </div>
+
+      {/* Status Bar */}
+      <div className="flex items-center gap-5 flex-shrink-0"
+        style={{ background: '#f1f5f9', borderTop: '1px solid #dde3ed', padding: '4px 16px', fontSize: '10px', color: '#94a3b8' }}>
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse-green inline-block" />
+          ระบบออนไลน์
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className={`w-1.5 h-1.5 rounded-full inline-block ${ui.connectionStatus === 'connected' ? 'bg-status-success' : 'bg-status-error'}`} />
+          {ui.connectionStatus === 'connected' ? 'เชื่อมต่อ HIS: ✓' : 'HIS: ✕ ไม่เชื่อมต่อ'}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-status-success inline-block" />
+          Rule Engine: Active
+        </div>
+        <span>NEWS (RCP 2017)</span>
+        <span className="ml-auto">v2.0 · โรงพยาบาลบางคล้า 2569</span>
+      </div>
+    </>
   );
 }

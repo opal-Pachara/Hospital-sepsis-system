@@ -47,19 +47,19 @@ export default function CountdownBanner() {
       }}
     >
       <div>
-        <div className="text-[9px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,.6)' }}>
+        <div className="text-xs uppercase tracking-wider" style={{ color: 'rgba(255,255,255,.6)' }}>
           ⏱ เวลาที่เหลือ — เป้าหมายยาปฏิชีวนะ
         </div>
-        <div className="text-[22px] font-black text-white tabular-nums leading-tight">
+        <div className="text-3xl font-black text-white tabular-nums leading-tight">
           {isExpired
             ? 'หมดเวลา!'
             : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`}
         </div>
       </div>
       <div className="text-right">
-        <div className="text-[9px]" style={{ color: 'rgba(255,255,255,.6)' }}>แพทย์ยืนยัน</div>
-        <div className="text-[11px] font-bold text-right" style={{ color: '#fbbf24' }}>{confirmTimeStr} น.</div>
-        <div className="text-[9px] mt-0.5" style={{ color: 'rgba(255,255,255,.6)' }}>เป้าหมาย ยา ≤ 60 นาที</div>
+        <div className="text-xs" style={{ color: 'rgba(255,255,255,.6)' }}>แพทย์ยืนยัน</div>
+        <div className="text-sm font-bold text-right" style={{ color: '#fbbf24' }}>{confirmTimeStr} น.</div>
+        <div className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,.6)' }}>เป้าหมาย ยา ≤ 60 นาที</div>
       </div>
     </div>
   );

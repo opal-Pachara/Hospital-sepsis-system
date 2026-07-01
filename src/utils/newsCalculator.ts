@@ -380,8 +380,8 @@ export function generateAssessmentSchedule(
     });
   }
 
-  // Q30 × 4 (at 90, 120, 150, 180 minutes — continuing monitoring)
-  for (let i = 0; i < 4; i++) {
+  // Q30 × 48 (at 90, 120, 150, 180 minutes... up to 24 hours for continuous monitoring)
+  for (let i = 0; i < 48; i++) {
     const scheduledTime = new Date(
       origin.getTime() + (60 + (i + 1) * 30) * 60 * 1000
     );

@@ -47,24 +47,30 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
     <button
       id={`patient-card-${patient.id}`}
       onClick={() => selectPatient(patient.id)}
-      className="w-full text-left border-b border-border-default relative bg-white"
+      className="w-full text-left border-b border-[#dde3ed] relative bg-white transition-all hover:bg-slate-50"
       style={{
         padding: '10px 14px',
+        fontFamily: 'inherit',
+        cursor: 'pointer',
         ...(isSelected ? { background: '#eff6ff', borderLeft: '3px solid #2563eb' } : {}),
       }}
     >
       {/* Alert bar */}
       <div
-        className="absolute left-0 top-0 bottom-0 w-1"
-        style={{ background: risk.barColor, borderRadius: '0 2px 2px 0' }}
+        className="absolute left-0 top-0 bottom-0"
+        style={{ width: '4px', background: risk.barColor, borderRadius: '0 2px 2px 0' }}
       />
 
       {/* Top row: HN + Badge */}
       <div className="flex justify-between items-start" style={{ marginLeft: '8px' }}>
-        <div className="text-xs font-bold text-text-primary">{patient.hn}</div>
+        <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b' }}>{patient.hn}</div>
         <span
-          className={`text-[9px] font-bold py-0.5 px-1.5 rounded-[10px] ${isHighRisk ? 'animate-blink-badge' : ''}`}
+          className={isHighRisk ? 'animate-blink-badge' : ''}
           style={{
+            fontSize: '9px',
+            fontWeight: 700,
+            padding: '2px 6px',
+            borderRadius: '10px',
             background: risk.badgeBg,
             color: risk.badgeText,
             border: `1px solid ${risk.badgeBorder}`,
@@ -76,23 +82,28 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
       </div>
 
       {/* Info */}
-      <div className="text-[10px] text-text-secondary mt-0.5" style={{ marginLeft: '8px' }}>
+      <div style={{ fontSize: '10px', color: '#475569', marginTop: '3px', marginLeft: '8px' }}>
         {genderIcon} {genderLabel} · {patient.age} ปี · {patient.location}
       </div>
 
       {/* Score Chip */}
-      <div className="flex gap-2 mt-1" style={{ marginLeft: '8px' }}>
+      <div className="flex gap-2" style={{ marginLeft: '8px', marginTop: '5px' }}>
         {isMissingData ? (
           <span
-            className="text-[10px] font-bold py-0.5 px-2 rounded-lg"
-            style={{ background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', fontSize: '9px' }}
+            style={{
+              fontSize: '9px', fontWeight: 600, padding: '2px 7px', borderRadius: '8px',
+              background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1',
+            }}
           >
             ⚠ คำนวณ NEWS ไม่ได้
           </span>
         ) : (
           <span
-            className="text-[10px] font-bold py-0.5 px-2 rounded-lg whitespace-nowrap"
-            style={{ background: risk.chipBg, color: risk.chipText, border: `1px solid ${risk.chipBorder}` }}
+            style={{
+              fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '8px',
+              background: risk.chipBg, color: risk.chipText, border: `1px solid ${risk.chipBorder}`,
+              whiteSpace: 'nowrap',
+            }}
           >
             NEWS {patient.latestNewsScore} — {risk.label}
           </span>
@@ -101,13 +112,13 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
 
       {/* Missing data info */}
       {isMissingData && (
-        <div className="text-[9px] text-text-muted mt-0.5" style={{ marginLeft: '8px' }}>
+        <div style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '8px', marginTop: '2px' }}>
           ขาดข้อมูล: {patient.latestNewsResult?.missingDataCount} รายการ
         </div>
       )}
 
       {/* Time */}
-      <div className="text-[9px] text-text-muted mt-1" style={{ marginLeft: '8px' }}>
+      <div style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '8px', marginTop: '3px' }}>
         🕐 {arrivalTime} · {isSelected ? 'กำลังดูแล' : `${arrivalMinutes} นาทีที่แล้ว`}
       </div>
     </button>
@@ -144,43 +155,72 @@ export default function Sidebar() {
   }, []);
 
   return (
-    <aside className="w-[260px] bg-surface-sidebar border-r border-border-default flex flex-col flex-shrink-0 overflow-hidden">
+    <aside
+      className="flex flex-col flex-shrink-0 overflow-hidden z-10 relative"
+      style={{
+        width: '260px',
+        background: '#f1f5f9',
+        borderRight: '1px solid #dde3ed',
+      }}
+    >
       {/* Header */}
-      <div className="px-3.5 py-2.5 bg-white border-b border-border-default flex items-center justify-between">
-        <span className="text-xs font-bold text-text-primary uppercase tracking-wider">📋 รายชื่อผู้ป่วย</span>
-        <span className="bg-brand-primary text-white rounded-[10px] px-2 py-0.5 text-[11px] font-bold">
+      <div
+        className="flex items-center justify-between flex-shrink-0"
+        style={{ padding: '10px 14px', background: '#fff', borderBottom: '1px solid #dde3ed' }}
+      >
+        <span style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '1px' }}>
+          📋 รายชื่อผู้ป่วย
+        </span>
+        <span style={{
+          background: '#2563eb', color: '#fff', borderRadius: '10px',
+          padding: '1px 8px', fontSize: '11px', fontWeight: 700,
+        }}>
           {patients.length}
         </span>
       </div>
 
       {/* Refresh bar */}
-      <div className="px-3.5 py-1.5 border-b border-border-default bg-surface-elevated flex items-center justify-between">
-        <span className="text-[9px] text-text-muted flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse-green inline-block" />
-          รีเฟรชทุก 10 วินาที
+      <div
+        className="flex items-center justify-between flex-shrink-0"
+        style={{ padding: '5px 14px', borderBottom: '1px solid #dde3ed', background: '#f8fafc' }}
+      >
+        <span className="flex items-center gap-1" style={{ fontSize: '9px', color: '#64748b' }}>
+          <span className="animate-pulse-green inline-block" style={{
+            width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e',
+          }} />
+          รีเฟรชออโต้
         </span>
-        <span className="text-[9px] text-text-muted">{lastRefresh}</span>
+        <span style={{ fontSize: '9px', fontWeight: 700, color: '#94a3b8' }}>{lastRefresh}</span>
       </div>
 
       {/* Filter buttons */}
-      <div className="px-2.5 py-2 border-b border-border-default flex gap-1 flex-wrap">
+      <div
+        className="flex gap-1 flex-wrap flex-shrink-0"
+        style={{ padding: '8px 10px', borderBottom: '1px solid #dde3ed' }}
+      >
         <button
-          className={`py-0.5 px-2.5 rounded-[20px] border text-[10px] font-semibold cursor-pointer transition-all ${
-            filter === 'all'
-              ? 'bg-brand-primary text-white border-brand-primary'
-              : 'bg-transparent text-brand-primary border-brand-primary'
-          }`}
+          className={`transition-all ${filter === 'all' ? 'text-white' : ''}`}
           onClick={() => setFilter('all')}
+          style={{
+            padding: '3px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'inherit',
+            border: `1px solid #2563eb`,
+            background: filter === 'all' ? '#2563eb' : 'transparent',
+            color: filter === 'all' ? '#fff' : '#2563eb',
+          }}
         >
           ทั้งหมด {patients.length}
         </button>
         <button
-          className={`py-0.5 px-2.5 rounded-[20px] border text-[10px] font-semibold cursor-pointer transition-all ${
-            filter === 'alert'
-              ? 'bg-status-error text-white border-status-error'
-              : 'bg-transparent text-status-error border-status-error'
-          }`}
+          className="transition-all"
           onClick={() => setFilter('alert')}
+          style={{
+            padding: '3px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'inherit',
+            border: `1px solid #dc2626`,
+            background: filter === 'alert' ? '#dc2626' : 'transparent',
+            color: filter === 'alert' ? '#fff' : '#dc2626',
+          }}
         >
           🔴 เสี่ยง {alertCount}
         </button>
@@ -189,7 +229,7 @@ export default function Sidebar() {
       {/* Patient List */}
       <div className="flex-1 overflow-y-auto">
         {filteredPatients.length === 0 ? (
-          <div className="text-center py-8 text-text-muted text-sm">
+          <div style={{ textAlign: 'center', padding: '24px 0', fontSize: '11px', color: '#94a3b8' }}>
             ไม่พบผู้ป่วย
           </div>
         ) : (
