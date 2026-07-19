@@ -1,6 +1,7 @@
 import { useRTSASStore } from '../store/useRTSASStore';
 import type { TimelineEvent, TimelineEventColor } from '../types';
 import { showToast } from './Toast';
+import { maskHN } from '../utils/hnMask';
 
 const dotColorMap: Record<TimelineEventColor, string> = {
   green: '#16a34a',
@@ -65,7 +66,7 @@ export default function TimelinePanel() {
         ) : (
           <>
             <div className="text-xs font-bold text-text-muted uppercase tracking-wider py-2 px-0 border-b border-border-light mb-2">
-              📅 บันทึกเหตุการณ์ {selectedPatient?.hn || ''}
+              📅 บันทึกเหตุการณ์ {maskHN(selectedPatient?.hn || '')}
             </div>
             {timeline.map((event, i) => (
               <TimelineEntry key={event.id} event={event} isLast={i === timeline.length - 1} />

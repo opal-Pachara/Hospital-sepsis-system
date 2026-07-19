@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
 import type { Patient, RiskLevel } from '../types';
+import { maskHN } from '../utils/hnMask';
 
 const riskConfig: Record<RiskLevel, { label: string; labelTh: string; badgeBg: string; badgeText: string; badgeBorder: string; barColor: string; chipBg: string; chipText: string; chipBorder: string }> = {
   high: {
@@ -63,7 +64,7 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
 
       {/* Top row: HN + Badge */}
       <div className="flex justify-between items-start" style={{ marginLeft: '8px' }}>
-        <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b' }}>{patient.hn}</div>
+        <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b' }}>{maskHN(patient.hn)}</div>
         <span
           className={isHighRisk ? 'animate-blink-badge' : ''}
           style={{

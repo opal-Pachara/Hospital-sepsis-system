@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
 import type { VitalSigns, AVPULevel } from '../types';
 import { showToast } from './Toast';
+import { maskHN } from '../utils/hnMask';
 
 function calcNEWSScore(rr: number, spo2: number, temp: number, sbp: number, hr: number, avpu: string) {
   let sc = 0;
@@ -102,7 +103,7 @@ export default function AssessmentFormModal() {
               บันทึกสัญญาณชีพ — ครั้งที่ {seqLabel}
             </div>
             <div className="text-sm font-medium text-slate-500 mt-1">
-              HN {selectedPatient?.hn || 'N/A'} {currentEntry?.scheduledTime ? `· เวลาเป้าหมาย ${new Date(currentEntry.scheduledTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.` : ''}
+              HN {maskHN(selectedPatient?.hn || 'N/A')} {currentEntry?.scheduledTime ? `· เวลาเป้าหมาย ${new Date(currentEntry.scheduledTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.` : ''}
             </div>
           </div>
           <button

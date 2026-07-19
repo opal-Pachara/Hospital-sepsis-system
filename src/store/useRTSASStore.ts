@@ -27,6 +27,21 @@ import {
   generateAssessmentSchedule,
   generateId,
 } from '../utils/newsCalculator';
+import { maskHN } from '../utils/hnMask';
+
+// ---------------------------------------------------------------------------
+// Auth Types
+// ---------------------------------------------------------------------------
+
+export type UserRole = 'doctor' | 'nurse' | 'researcher' | 'it_admin';
+
+export interface AuthUser {
+  name: string;
+  role: UserRole;
+}
+
+/** Demo PIN for authentication (Production: use AD/LDAP) */
+const DEMO_PIN = '1234';
 
 // ---------------------------------------------------------------------------
 // Default Checklist Template
@@ -237,6 +252,12 @@ export interface RTSASState {
   // ---- UI State ----
   ui: UIState;
 
+  // ---- Auth State (EC Privacy) ----
+  isAuthenticated: boolean;
+  currentUser: AuthUser | null;
+  /** Whether full HN is revealed in the detail panel */
+  isHNRevealed: boolean;
+
   // ======= ACTIONS =======
 
   // --- Patient Actions ---
@@ -284,6 +305,12 @@ export interface RTSASState {
   updateCurrentTime: () => void;
   openModal: (type: ModalType, data?: Record<string, unknown>) => void;
   closeModal: () => void;
+
+  // --- Auth Actions (EC Privacy) ---
+  authenticateUser: (pin: string, name: string, role: UserRole) => boolean;
+  logoutUser: () => void;
+  revealHN: () => void;
+  hideHN: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +351,11 @@ export const useRTSASStore = create<RTSASState>()(
         modalData: null,
       },
     },
+
+    // ---- Auth State (EC Privacy) ----
+    isAuthenticated: false,
+    currentUser: null,
+    isHNRevealed: false,
 
     // ===========================================================================
     // PATIENT ACTIONS
@@ -576,9 +608,13 @@ export const useRTSASStore = create<RTSASState>()(
     })),
 
     getTimelineText: () => {
-      const { timeline, selectedPatient } = get();
+      const { timeline, selectedPatient, isAuthenticated } = get();
+      // EC Privacy: Use masked HN in copied text unless authenticated
+      const displayHN = selectedPatient
+        ? (isAuthenticated ? selectedPatient.hn : maskHN(selectedPatient.hn))
+        : '';
       const header = selectedPatient
-        ? `Timeline — ${selectedPatient.fullName} (HN: ${selectedPatient.hn})\n`
+        ? `Timeline — (HN: ${displayHN})\n`
         : 'Timeline\n';
       const separator = '='.repeat(60) + '\n';
 
@@ -862,6 +898,57 @@ export const useRTSASStore = create<RTSASState>()(
           modal: { activeModal: null, modalData: null },
         },
       })),
+
+    // ===========================================================================
+    // AUTH ACTIONS (EC Privacy)
+    // ===========================================================================
+
+    authenticateUser: (pin: string, name: string, role: UserRole) => {
+      if (pin !== DEMO_PIN) return false;
+      set({
+        isAuthenticated: true,
+        currentUser: { name, role },
+      });
+      // Log authentication event
+      get().addTimelineEvent(
+        `🔐 ยืนยันตัวตน: ${name} (${
+          role === 'doctor' ? 'แพทย์' : role === 'nurse' ? 'พยาบาล' : role === 'researcher' ? 'ผู้วิจัย' : 'IT'
+        })`,
+        'blue',
+        name
+      );
+      return true;
+    },
+
+    logoutUser: () => {
+      const user = get().currentUser;
+      if (user) {
+        get().addTimelineEvent(
+          `🔓 ออกจากระบบ: ${user.name}`,
+          'gray',
+          user.name
+        );
+      }
+      set({
+        isAuthenticated: false,
+        currentUser: null,
+        isHNRevealed: false,
+      });
+    },
+
+    revealHN: () => {
+      const { isAuthenticated, currentUser, selectedPatient } = get();
+      if (!isAuthenticated || !currentUser) return;
+      set({ isHNRevealed: true });
+      // Log HN access for audit trail
+      get().addTimelineEvent(
+        `👁 เปิดดู HN เต็ม: ${selectedPatient?.hn || 'N/A'} โดย ${currentUser.name}`,
+        'blue',
+        currentUser.name
+      );
+    },
+
+    hideHN: () => set({ isHNRevealed: false }),
   }))
 );
 

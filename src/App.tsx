@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useRTSASStore } from './store/useRTSASStore';
+import { maskHN } from './utils/hnMask';
 import { MOCK_PATIENTS } from './data/mockData';
 import { useAssessmentReminders } from './hooks/useTimers';
 import Header from './components/Header';
@@ -127,9 +128,9 @@ export default function App() {
       )[0];
       selectPatient(highestRisk.id);
 
-      // Add initial system event
+      // Add initial system event (EC: use masked HN, no fullName)
       addTimelineEvent(
-        `🏥 เลือกผู้ป่วย ${highestRisk.fullName} — NEWS: ${highestRisk.latestNewsScore}`,
+        `🏥 เลือกผู้ป่วย ${maskHN(highestRisk.hn)} — NEWS: ${highestRisk.latestNewsScore}`,
         highestRisk.latestNewsScore >= 7 ? 'red' : highestRisk.latestNewsScore >= 5 ? 'orange' : 'green',
         'System'
       );
