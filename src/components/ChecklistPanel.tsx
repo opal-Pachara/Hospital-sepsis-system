@@ -117,7 +117,7 @@ function DoctorConfirmButton({ item, phaseUnlocked }: { item: ChecklistItem; pha
 }
 
 function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseUnlocked: boolean }) {
-  const { completeChecklistItem, updateChecklistInput } = useRTSASStore();
+  const { completeChecklistItem, updateChecklistInput, skipChecklistItem } = useRTSASStore();
   const [inputVal, setInputVal] = useState(item.inputValue ?? '');
   const [actor] = useState('พย.สุกัญญา');
 
@@ -126,7 +126,9 @@ function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseU
   }
 
   const isCompleted = item.status === 'completed';
-  const canComplete = phaseUnlocked && !isCompleted;
+  const isSkipped = item.status === 'skipped';
+  const isDone = isCompleted || isSkipped;
+  const canComplete = phaseUnlocked && !isDone;
   const label = thaiLabels[item.id] || item.label;
 
   const handleComplete = () => {
@@ -140,36 +142,48 @@ function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseU
   return (
     <div
       className={`flex items-start gap-2 transition-all ${
-        isCompleted ? '' : canComplete ? 'hover:bg-[#eff6ff] cursor-pointer' : 'opacity-50'
+        isDone ? '' : canComplete ? 'hover:bg-[#eff6ff] cursor-pointer' : 'opacity-50'
       }`}
       style={{
         padding: '7px 8px',
         borderRadius: '8px',
         marginBottom: '3px',
-        ...(isCompleted ? { background: '#f0fdf4' } : {}),
+        ...(isCompleted ? { background: '#f0fdf4' } : isSkipped ? { background: '#f8fafc' } : {}),
       }}
-      onClick={!item.requiresInput ? handleComplete : undefined}
+      onClick={!item.requiresInput && !isDone ? handleComplete : undefined}
     >
       {/* Checkbox */}
       <div
         style={{
           width: '18px', height: '18px', borderRadius: '5px', flexShrink: 0,
-          border: isCompleted ? '2px solid #16a34a' : '2px solid #cbd5e1',
-          background: isCompleted ? '#16a34a' : '#fff',
+          border: isCompleted ? '2px solid #16a34a' : isSkipped ? '2px solid #94a3b8' : '2px solid #cbd5e1',
+          background: isCompleted ? '#16a34a' : isSkipped ? '#94a3b8' : '#fff',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           marginTop: '1px',
         }}
       >
         {isCompleted && <span style={{ color: '#fff', fontSize: '11px', fontWeight: 900 }}>✓</span>}
+        {isSkipped && <span style={{ color: '#fff', fontSize: '10px', fontWeight: 900 }}>—</span>}
       </div>
 
       <div className="flex-1 min-w-0">
-        <div style={{
-          fontSize: '11px', fontWeight: 700,
-          color: isCompleted ? '#94a3b8' : '#1e293b',
-          textDecoration: isCompleted ? 'line-through' : 'none',
-        }}>
-          {label}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{
+            fontSize: '11px', fontWeight: 700,
+            color: isDone ? '#94a3b8' : '#1e293b',
+            textDecoration: isDone ? 'line-through' : 'none',
+          }}>
+            {label}
+          </span>
+          {item.isOptional && !isDone && (
+            <span style={{
+              fontSize: '8px', fontWeight: 700, color: '#64748b',
+              background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: '4px',
+              padding: '1px 5px', whiteSpace: 'nowrap',
+            }}>
+              ไม่บังคับ
+            </span>
+          )}
         </div>
         {item.subLabel && (
           <div style={{ fontSize: '9px', color: '#64748b', marginTop: '1px' }}>
@@ -178,7 +192,7 @@ function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseU
         )}
 
         {/* Input field */}
-        {item.requiresInput && !isCompleted && canComplete && (
+        {item.requiresInput && !isDone && canComplete && (
           <div style={{ marginTop: '6px' }}>
             <label style={{ fontSize: '9px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '3px' }}>
               {item.inputLabel || 'รายละเอียด'}
@@ -216,6 +230,27 @@ function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseU
                 </button>
               )}
             </div>
+            {/* Skip button for optional items */}
+            {item.isOptional && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  skipChecklistItem(item.id, actor);
+                  showToast(`ข้ามขั้นตอน: ${label}`, 'info', 2000);
+                }}
+                style={{
+                  marginTop: '6px', padding: '4px 10px', fontSize: '9px', fontWeight: 600,
+                  color: '#64748b', borderRadius: '6px', border: '1px dashed #cbd5e1',
+                  background: '#f8fafc', cursor: 'pointer', fontFamily: 'inherit',
+                  width: '100%', transition: 'all 0.2s',
+                }}
+                onMouseOver={(e) => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.borderColor = '#94a3b8'; }}
+                onMouseOut={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#cbd5e1'; }}
+              >
+                ⏭ ข้ามขั้นตอนนี้ — ไม่มียาตัวที่ 2
+              </button>
+            )}
           </div>
         )}
 
@@ -230,10 +265,23 @@ function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseU
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
             ทำเสร็จแล้วเมื่อ {new Date(item.completedAt!).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.
           </div>
+        ) : isSkipped ? (
+          <div className="flex items-center gap-1" style={{ fontSize: '9px', fontWeight: 700, color: '#94a3b8', marginTop: '2px' }}>
+            ⏭ ข้ามเมื่อ {new Date(item.completedAt!).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.
+          </div>
         ) : canComplete ? (
-          <div className="flex items-center gap-1" style={{ fontSize: '9px', fontWeight: 700, color: '#dc2626', marginTop: '2px' }}>
-            <span className="animate-pulse" style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#dc2626', display: 'inline-block' }} />
-            ยังไม่ดำเนินการ
+          <div className="flex items-center gap-1" style={{ fontSize: '9px', fontWeight: 700, color: item.isOptional ? '#f59e0b' : '#dc2626', marginTop: '2px' }}>
+            {item.isOptional ? (
+              <>
+                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} />
+                ไม่บังคับ — กรอกหรือข้ามได้
+              </>
+            ) : (
+              <>
+                <span className="animate-pulse" style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#dc2626', display: 'inline-block' }} />
+                ยังไม่ดำเนินการ
+              </>
+            )}
           </div>
         ) : null}
       </div>
@@ -242,7 +290,7 @@ function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseU
 }
 
 function PhaseSection({ phase }: { phase: ChecklistPhase }) {
-  const completedCount = phase.items.filter((i) => i.status === 'completed').length;
+  const completedCount = phase.items.filter((i) => i.status === 'completed' || i.status === 'skipped').length;
   const totalCount = phase.items.length;
   const config = thaiPhaseLabels[phase.phase] || { icon: '📌', title: phase.title };
 
@@ -275,7 +323,7 @@ function PhaseSection({ phase }: { phase: ChecklistPhase }) {
       {/* Items */}
       <div style={{ padding: '0 12px' }}>
         {phase.items.map((item, index) => {
-          const isItemSequentialUnlocked = phase.isUnlocked && phase.items.slice(0, index).every(i => i.isOptional || i.status === 'completed');
+          const isItemSequentialUnlocked = phase.isUnlocked && phase.items.slice(0, index).every(i => i.isOptional || i.status === 'completed' || i.status === 'skipped');
           return (
             <ChecklistItemRow
               key={item.id}
@@ -304,7 +352,7 @@ export default function ChecklistPanel() {
 
   // Calculate overall progress
   const allItems = checklist.flatMap((p) => p.items);
-  const completedTotal = allItems.filter((i) => i.status === 'completed').length;
+  const completedTotal = allItems.filter((i) => i.status === 'completed' || i.status === 'skipped').length;
   const totalItems = allItems.length;
   const pct = totalItems > 0 ? Math.round((completedTotal / totalItems) * 100) : 0;
 

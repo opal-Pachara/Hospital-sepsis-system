@@ -272,6 +272,7 @@ export interface RTSASState {
     inputValue?: string
   ) => void;
   updateChecklistInput: (itemId: string, inputValue: string) => void;
+  skipChecklistItem: (itemId: string, actor: string) => void;
   resetChecklist: () => void;
 
   // --- Timeline Actions ---
@@ -525,6 +526,51 @@ export const useRTSASStore = create<RTSASState>()(
           '⏱ 60-minute Sepsis Bundle countdown started',
           'red',
           completedBy
+        );
+      }
+    },
+
+    skipChecklistItem: (itemId, actor) => {
+      const now = new Date().toISOString();
+
+      set((state) => {
+        const newChecklist = state.checklist.map((phase) => ({
+          ...phase,
+          items: phase.items.map((item) =>
+            item.id === itemId
+              ? {
+                  ...item,
+                  status: 'skipped' as ChecklistItemStatus,
+                  completedAt: now,
+                  completedBy: actor,
+                }
+              : item
+          ),
+        }));
+
+        const unlockedChecklist = updatePhaseUnlocking(newChecklist);
+
+        return {
+          checklist: unlockedChecklist,
+          patientData: state.selectedPatient ? {
+            ...state.patientData,
+            [state.selectedPatient.id]: {
+              ...(state.patientData[state.selectedPatient.id] || {}),
+              checklist: unlockedChecklist,
+            }
+          } : state.patientData
+        };
+      });
+
+      const skippedItem = get()
+        .checklist.flatMap((p) => p.items)
+        .find((i) => i.id === itemId);
+
+      if (skippedItem) {
+        get().addTimelineEvent(
+          `⏭ ข้าม: ${skippedItem.label}`,
+          'blue',
+          actor
         );
       }
     },
@@ -970,7 +1016,7 @@ function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
     // Check if all items in this phase are completed
     const isCompleted =
       phase.items.length > 0 &&
-      phase.items.every((item) => item.status === 'completed');
+      phase.items.every((item) => item.status === 'completed' || item.status === 'skipped');
 
     // Determine if this phase should be unlocked
     let isUnlocked = phase.isUnlocked;
@@ -981,7 +1027,7 @@ function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
       const prevPhase = phases[index - 1];
       const prevCompleted =
         prevPhase.items.length > 0 &&
-        prevPhase.items.every((item) => item.status === 'completed');
+        prevPhase.items.every((item) => item.status === 'completed' || item.status === 'skipped');
       if (prevCompleted) {
         isUnlocked = true;
       }
