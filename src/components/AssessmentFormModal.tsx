@@ -16,6 +16,26 @@ function calcNEWSScore(rr: number, spo2: number, temp: number, sbp: number, hr: 
   return { score: sc, breakdown: bd.join(' + ') + ' = ' + sc };
 }
 
+/* ── Shared input style constant ── */
+const inputStyle: React.CSSProperties = {
+  padding: '10px 14px', borderRadius: '12px',
+  fontSize: '15px', fontWeight: 700, color: '#1e293b',
+  fontVariantNumeric: 'tabular-nums', width: '100%',
+  border: '1.5px solid #e2e8f0', background: '#fff',
+  fontFamily: 'inherit', outline: 'none',
+  transition: 'border-color 0.2s, box-shadow 0.2s',
+};
+
+/* ── Shared label style ── */
+const labelStyle: React.CSSProperties = {
+  fontSize: '12px', fontWeight: 700, color: '#475569',
+  display: 'flex', alignItems: 'baseline', gap: '4px',
+};
+
+const unitStyle: React.CSSProperties = {
+  fontSize: '10px', fontWeight: 400, color: '#94a3b8',
+};
+
 export default function AssessmentFormModal() {
   const { ui, closeModal, completeAssessment, selectedPatient, assessmentSchedule } = useRTSASStore();
 
@@ -37,7 +57,10 @@ export default function AssessmentFormModal() {
   const currentEntry = data ? assessmentSchedule?.entries.find((e) => e.id === data.entryId) : null;
   const intervalLabel = currentEntry?.intervalType === 'Q15' ? 'ทุก 15 นาที' : currentEntry?.intervalType === 'Q30' ? 'ทุก 30 นาที' : '';
   const totalInPhase = currentEntry?.intervalType === 'Q15' ? 4 : '';
-  const seqLabel = totalInPhase ? `${data?.sequence}/${totalInPhase} (${intervalLabel})` : `${data?.sequence} ${intervalLabel ? `(${intervalLabel})` : ''}`;
+  const seqLabel = totalInPhase ? `${data?.sequence}/${totalInPhase}` : `${data?.sequence}`;
+  const timeLabel = currentEntry?.scheduledTime
+    ? new Date(currentEntry.scheduledTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+    : null;
 
   if (!data) return null;
 
@@ -49,12 +72,15 @@ export default function AssessmentFormModal() {
 
   let riskLabel = 'กรอกข้อมูลเพื่อคำนวณ';
   let riskColor = '#94a3b8';
+  let riskBg = 'rgba(148, 163, 184, .12)';
   if (liveNews) {
-    if (liveNews.score >= 7) { riskLabel = '🔴 สูง — ต้องการการดูแลเร่งด่วน'; riskColor = '#ef4444'; }
-    else if (liveNews.score >= 5) { riskLabel = '🟡 ปานกลาง — ติดตามใกล้ชิด'; riskColor = '#f97316'; }
-    else if (liveNews.score >= 1) { riskLabel = '🟢 ต่ำ-ปานกลาง'; riskColor = '#22c55e'; }
-    else { riskLabel = '🟢 ปกติ — NEWS = 0'; riskColor = '#22c55e'; }
+    if (liveNews.score >= 7) { riskLabel = '🔴 สูง — ต้องการการดูแลเร่งด่วน'; riskColor = '#ef4444'; riskBg = 'rgba(239, 68, 68, .12)'; }
+    else if (liveNews.score >= 5) { riskLabel = '🟡 ปานกลาง — ติดตามใกล้ชิด'; riskColor = '#f97316'; riskBg = 'rgba(249, 115, 22, .12)'; }
+    else if (liveNews.score >= 1) { riskLabel = '🟢 ต่ำ-ปานกลาง'; riskColor = '#22c55e'; riskBg = 'rgba(34, 197, 94, .12)'; }
+    else { riskLabel = '🟢 ปกติ — NEWS = 0'; riskColor = '#22c55e'; riskBg = 'rgba(34, 197, 94, .12)'; }
   }
+
+  const filledCount = [rr, spo2, sbp, hr, bt, avpu].filter(Boolean).length;
 
   const handleSave = () => {
     if (!allFilled) {
@@ -85,133 +111,315 @@ export default function AssessmentFormModal() {
     setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT(''); setAVPU('');
   };
 
+  const handleInputFocus = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => {
+    e.currentTarget.style.borderColor = '#3b82f6';
+    e.currentTarget.style.boxShadow = '0 0 0 4px rgba(59, 130, 246, .1)';
+  };
+  const handleInputBlur = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => {
+    e.currentTarget.style.borderColor = '#e2e8f0';
+    e.currentTarget.style.boxShadow = 'none';
+  };
+
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center animate-fade-in"
-      style={{ background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(8px)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}>
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center animate-fade-in"
+      style={{ background: 'rgba(10, 10, 20, 0.7)', backdropFilter: 'blur(8px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
+    >
+      <div
+        className="animate-slideUp"
+        style={{
+          width: '520px', maxHeight: '95vh',
+          background: '#fff', borderRadius: '20px',
+          overflow: 'hidden', display: 'flex', flexDirection: 'column',
+          boxShadow: '0 25px 60px -12px rgba(37, 99, 235, .25), 0 0 0 1px rgba(37, 99, 235, .1)',
+        }}
+      >
+        {/* ─── Blue Top Accent Bar ─── */}
+        <div style={{ height: '4px', background: 'linear-gradient(90deg, #2563eb, #06b6d4, #2563eb)', flexShrink: 0 }} />
 
-      <div className="bg-white rounded-3xl w-[520px] max-h-[95vh] overflow-y-auto animate-slideUp shadow-2xl flex flex-col">
-
-        {/* Header */}
-        <div className="px-6 py-5 flex items-start gap-4 border-b border-blue-100/50"
-          style={{ background: '#f4f7fb' }}>
-          <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-3xl flex-shrink-0 shadow-sm">
+        {/* ─── Header ─── */}
+        <div style={{
+          padding: '18px 24px 14px',
+          background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 50%, #eff6ff 100%)',
+          display: 'flex', alignItems: 'flex-start', gap: '14px',
+          borderBottom: '1px solid rgba(191, 219, 254, .6)',
+          flexShrink: 0,
+        }}>
+          {/* Icon */}
+          <div style={{
+            width: '52px', height: '52px', borderRadius: '16px',
+            background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '24px', flexShrink: 0,
+            boxShadow: '0 6px 20px rgba(37, 99, 235, .35)',
+          }}>
             📊
           </div>
-          <div className="flex-1 mt-0.5">
-            <div className="text-xl font-bold text-slate-800 tracking-tight">
-              บันทึกสัญญาณชีพ — ครั้งที่ {seqLabel}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '17px', fontWeight: 900, color: '#1e40af', letterSpacing: '-0.3px', lineHeight: 1.3 }}>
+              บันทึกสัญญาณชีพ
             </div>
-            <div className="text-sm font-medium text-slate-500 mt-1">
-              HN {maskHN(selectedPatient?.hn || 'N/A')} {currentEntry?.scheduledTime ? `· เวลาเป้าหมาย ${new Date(currentEntry.scheduledTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.` : ''}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '5px', flexWrap: 'wrap' }}>
+              <span style={{
+                fontSize: '11px', fontWeight: 700, color: '#2563eb',
+                background: '#fff', border: '1.5px solid #93c5fd', borderRadius: '8px',
+                padding: '2px 8px',
+              }}>
+                ครั้งที่ {seqLabel}
+              </span>
+              {intervalLabel && (
+                <span style={{
+                  fontSize: '11px', fontWeight: 700, color: '#64748b',
+                  background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px',
+                  padding: '2px 8px',
+                }}>
+                  {intervalLabel}
+                </span>
+              )}
+              {timeLabel && (
+                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 500 }}>
+                  เป้าหมาย {timeLabel} น.
+                </span>
+              )}
             </div>
           </div>
           <button
             type="button"
-            className="rounded-xl w-10 h-10 flex items-center justify-center cursor-pointer text-lg text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 transition-all shadow-sm"
             onClick={handleClose}
+            style={{
+              width: '36px', height: '36px', borderRadius: '10px',
+              border: '1px solid #93c5fd', background: '#fff',
+              color: '#2563eb', fontSize: '16px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'inherit', flexShrink: 0, transition: 'all 0.2s',
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.background = '#2563eb'; e.currentTarget.style.color = '#fff'; }}
+            onMouseOut={(e) => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.color = '#2563eb'; }}
           >✕</button>
         </div>
 
-        {/* Form body */}
-        <div className="p-6 flex flex-col gap-5">
-          <div className="grid grid-cols-2 gap-x-6 gap-y-5">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-bold text-slate-600">
-                อัตราการหายใจ (RR) <span className="text-xs font-normal text-slate-400 ml-0.5">ครั้ง/นาที</span>
+        {/* ─── Patient Info Bar ─── */}
+        <div style={{
+          padding: '10px 24px', display: 'flex', alignItems: 'center', gap: '10px',
+          background: '#f8fafc', borderBottom: '1px solid #f1f5f9', flexShrink: 0,
+        }}>
+          <div style={{ fontSize: '16px' }}>👤</div>
+          <div style={{ fontSize: '13px', fontWeight: 700, color: '#1e293b' }}>
+            {maskHN(selectedPatient?.hn || 'N/A')}
+          </div>
+          <div style={{ width: '1px', height: '14px', background: '#e2e8f0' }} />
+          <div style={{ fontSize: '11px', color: '#64748b' }}>
+            {selectedPatient?.gender === 'male' ? 'ชาย' : selectedPatient?.gender === 'female' ? 'หญิง' : '—'} · อายุ {selectedPatient?.age || '—'} ปี
+          </div>
+          <div style={{
+            marginLeft: 'auto', fontSize: '10px', fontWeight: 600, color: '#2563eb',
+            background: '#eff6ff', borderRadius: '6px', padding: '2px 8px',
+          }}>
+            {filledCount}/6 ช่อง
+          </div>
+        </div>
+
+        {/* ─── Scrollable Form Body ─── */}
+        <div style={{ overflowY: 'auto', flex: 1, padding: '20px 24px 24px' }}>
+
+          {/* Input Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '18px' }}>
+
+            {/* RR */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <label style={labelStyle}>
+                🫁 อัตราการหายใจ (RR) <span style={unitStyle}>ครั้ง/นาที</span>
               </label>
               <input type="number" value={rr} onChange={(e) => setRR(e.target.value)}
                 min="1" max="60" placeholder="--"
-                className="py-2.5 px-3 rounded-xl text-base font-bold text-slate-800 tabular-nums w-full bg-white border border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none" />
+                style={inputStyle}
+                onFocus={handleInputFocus} onBlur={handleInputBlur}
+              />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-bold text-slate-600">
-                O₂ Saturation (SpO₂) <span className="text-xs font-normal text-slate-400 ml-0.5">%</span>
+
+            {/* SpO2 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <label style={labelStyle}>
+                ✓ SpO₂ <span style={unitStyle}>%</span>
               </label>
               <input type="number" value={spo2} onChange={(e) => setSpo2(e.target.value)}
                 min="50" max="100" placeholder="--"
-                className="py-2.5 px-3 rounded-xl text-base font-bold text-slate-800 tabular-nums w-full bg-white border border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none" />
+                style={inputStyle}
+                onFocus={handleInputFocus} onBlur={handleInputBlur}
+              />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-bold text-slate-600">
-                BP Systolic (SBP) <span className="text-xs font-normal text-slate-400 ml-0.5">mmHg</span>
+
+            {/* SBP */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <label style={labelStyle}>
+                ❤ BP Systolic (SBP) <span style={unitStyle}>mmHg</span>
               </label>
               <input type="number" value={sbp} onChange={(e) => setSBP(e.target.value)}
                 min="40" max="300" placeholder="--"
-                className="py-2.5 px-3 rounded-xl text-base font-bold text-slate-800 tabular-nums w-full bg-white border border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none" />
+                style={inputStyle}
+                onFocus={handleInputFocus} onBlur={handleInputBlur}
+              />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-bold text-slate-600">
-                BP Diastolic (DBP) <span className="text-xs font-normal text-slate-400 ml-0.5">mmHg</span>
+
+            {/* DBP */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <label style={labelStyle}>
+                💜 BP Diastolic (DBP) <span style={unitStyle}>mmHg</span>
               </label>
               <input type="number" value={dbp} onChange={(e) => setDBP(e.target.value)}
                 min="20" max="200" placeholder="--"
-                className="py-2.5 px-3 rounded-xl text-base font-bold text-slate-800 tabular-nums w-full bg-white border border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none" />
+                style={inputStyle}
+                onFocus={handleInputFocus} onBlur={handleInputBlur}
+              />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-bold text-slate-600">
-                ชีพจร (P) <span className="text-xs font-normal text-slate-400 ml-0.5">ครั้ง/นาที</span>
+
+            {/* HR */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <label style={labelStyle}>
+                💓 ชีพจร (HR) <span style={unitStyle}>ครั้ง/นาที</span>
               </label>
               <input type="number" value={hr} onChange={(e) => setHR(e.target.value)}
                 min="20" max="250" placeholder="--"
-                className="py-2.5 px-3 rounded-xl text-base font-bold text-slate-800 tabular-nums w-full bg-white border border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none" />
+                style={inputStyle}
+                onFocus={handleInputFocus} onBlur={handleInputBlur}
+              />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-bold text-slate-600">
-                อุณหภูมิ (BT) <span className="text-xs font-normal text-slate-400 ml-0.5">°C</span>
+
+            {/* BT */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <label style={labelStyle}>
+                🌡 อุณหภูมิ (BT) <span style={unitStyle}>°C</span>
               </label>
               <input type="number" value={bt} onChange={(e) => setBT(e.target.value)}
                 min="30" max="43" step="0.1" placeholder="--"
-                className="py-2.5 px-3 rounded-xl text-base font-bold text-slate-800 tabular-nums w-full bg-white border border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none" />
-            </div>
-            <div className="flex flex-col gap-1.5 col-span-2">
-              <label className="text-sm font-bold text-slate-600">ระดับความรู้สึกตัว (AVPU)</label>
-              <div className="relative">
-                <select value={avpu} onChange={(e) => setAVPU(e.target.value)}
-                  className="appearance-none py-2.5 px-4 rounded-xl text-base font-medium text-slate-800 bg-white w-full cursor-pointer border border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none">
-                  <option value="">-- เลือก --</option>
-                  <option value="A">A — Alert (รู้สึกตัวดี)</option>
-                  <option value="V">V — Voice (ตอบสนองต่อเสียง)</option>
-                  <option value="P">P — Pain (ตอบสนองต่อความเจ็บปวด)</option>
-                  <option value="U">U — Unresponsive (ไม่ตอบสนอง)</option>
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path></svg>
-                </div>
-              </div>
+                style={inputStyle}
+                onFocus={handleInputFocus} onBlur={handleInputBlur}
+              />
             </div>
           </div>
 
-          {/* Live NEWS Score */}
-          <div className="rounded-[18px] px-6 py-5 flex items-center justify-between shadow-sm relative overflow-hidden"
-            style={{ background: '#11294d' }}>
-            <div className="relative z-10">
-              <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-1">NEWS Score (คำนวณอัตโนมัติ)</div>
-              <div className="text-5xl font-extrabold text-white tabular-nums leading-none">
+          {/* AVPU - full width */}
+          <div style={{ marginBottom: '18px' }}>
+            <label style={{ ...labelStyle, marginBottom: '5px' }}>
+              🧠 ระดับความรู้สึกตัว (AVPU)
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+              {[
+                { value: 'A', label: 'Alert', desc: 'รู้สึกตัวดี', color: '#22c55e' },
+                { value: 'V', label: 'Voice', desc: 'ตอบสนองเสียง', color: '#f59e0b' },
+                { value: 'P', label: 'Pain', desc: 'ตอบสนองปวด', color: '#f97316' },
+                { value: 'U', label: 'Unresponsive', desc: 'ไม่ตอบสนอง', color: '#ef4444' },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setAVPU(opt.value)}
+                  style={{
+                    padding: '10px 6px', borderRadius: '12px', cursor: 'pointer',
+                    fontFamily: 'inherit', textAlign: 'center',
+                    border: avpu === opt.value ? `2px solid ${opt.color}` : '1.5px solid #e2e8f0',
+                    background: avpu === opt.value ? `${opt.color}10` : '#fff',
+                    transition: 'all 0.2s',
+                    boxShadow: avpu === opt.value ? `0 2px 8px ${opt.color}25` : 'none',
+                  }}
+                >
+                  <div style={{
+                    fontSize: '18px', fontWeight: 900, color: avpu === opt.value ? opt.color : '#475569',
+                    lineHeight: 1,
+                  }}>{opt.value}</div>
+                  <div style={{
+                    fontSize: '9px', fontWeight: 600,
+                    color: avpu === opt.value ? opt.color : '#94a3b8',
+                    marginTop: '3px',
+                  }}>{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ─── Live NEWS Score Card ─── */}
+          <div style={{
+            borderRadius: '16px', padding: '18px 20px',
+            background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 60%, #1e3a5f 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: '18px', position: 'relative', overflow: 'hidden',
+          }}>
+            {/* Decorative glow */}
+            <div style={{
+              position: 'absolute', right: '-20px', top: '-20px',
+              width: '100px', height: '100px', borderRadius: '50%',
+              background: riskColor, opacity: 0.08, filter: 'blur(30px)',
+            }} />
+
+            <div style={{ position: 'relative', zIndex: 1 }}>
+              <div style={{
+                fontSize: '9px', fontWeight: 700, color: 'rgba(255,255,255,.45)',
+                textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '4px',
+              }}>NEWS Score</div>
+              <div style={{
+                fontSize: '44px', fontWeight: 900, color: '#fff',
+                fontVariantNumeric: 'tabular-nums', lineHeight: 1,
+              }}>
                 {liveNews ? liveNews.score : '--'}
               </div>
+              {!liveNews && (
+                <div style={{ fontSize: '9px', color: 'rgba(255,255,255,.35)', marginTop: '4px' }}>
+                  คำนวณอัตโนมัติ
+                </div>
+              )}
             </div>
-            <div className="text-right relative z-10 flex flex-col items-end">
-              <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-1">ระดับความเสี่ยง</div>
-              <div className="text-sm font-bold" style={{ color: riskColor }}>
+            <div style={{ textAlign: 'right', position: 'relative', zIndex: 1 }}>
+              <div style={{
+                fontSize: '9px', fontWeight: 700, color: 'rgba(255,255,255,.45)',
+                textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '4px',
+              }}>ระดับความเสี่ยง</div>
+              <div style={{
+                fontSize: '12px', fontWeight: 800, color: riskColor,
+                padding: '4px 10px', borderRadius: '8px', background: riskBg,
+                display: 'inline-block',
+              }}>
                 {riskLabel}
               </div>
+              {liveNews && (
+                <div style={{ fontSize: '9px', color: 'rgba(255,255,255,.35)', marginTop: '6px', lineHeight: 1.5 }}>
+                  {liveNews.breakdown}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex gap-4">
+          {/* ─── Action Buttons ─── */}
+          <div style={{ display: 'flex', gap: '10px' }}>
             <button
               type="button"
               onClick={handleSave}
-              className="flex-[2] py-3.5 rounded-xl text-white text-base font-bold cursor-pointer transition-all bg-blue-600 hover:bg-blue-700 active:scale-[0.98]"
+              style={{
+                flex: 2, padding: '14px', borderRadius: '14px',
+                fontSize: '14px', fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
+                color: '#fff', border: 'none',
+                background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                boxShadow: '0 6px 20px -4px rgba(37, 99, 235, .4)',
+                transition: 'all 0.25s ease',
+                letterSpacing: '-0.2px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+              }}
+              onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 8px 28px -4px rgba(37, 99, 235, .5)'; }}
+              onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 6px 20px -4px rgba(37, 99, 235, .4)'; }}
             >
               💾 บันทึกการประเมิน
             </button>
             <button
               type="button"
               onClick={handleClose}
-              className="flex-1 py-3.5 rounded-xl text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 text-base font-bold cursor-pointer transition-all active:scale-[0.98]"
+              style={{
+                flex: 1, padding: '14px', borderRadius: '14px',
+                fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                color: '#64748b', border: '1px solid #e2e8f0', background: '#f8fafc',
+                transition: 'all 0.2s',
+              }}
+              onMouseOver={(e) => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.borderColor = '#cbd5e1'; }}
+              onMouseOut={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#e2e8f0'; }}
             >
               ยกเลิก
             </button>
