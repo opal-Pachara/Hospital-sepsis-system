@@ -3,6 +3,7 @@
 // =============================================================================
 
 import type { Patient, VitalSigns } from '../types';
+import { gcsToAVPU } from '../types';
 import { calculateNEWS } from '../utils/newsCalculator';
 
 // ---------------------------------------------------------------------------
@@ -17,7 +18,8 @@ export const VITALS_NORMAL: VitalSigns = {
   temperature: 37.0,
   systolicBP: 120,
   heartRate: 72,
-  avpu: 'A',
+  gcs: 15,
+  avpu: gcsToAVPU(15),
 };
 
 /** Moderate sepsis risk — NEWS ≈ 5–6 */
@@ -28,7 +30,8 @@ export const VITALS_MODERATE_RISK: VitalSigns = {
   temperature: 38.5,
   systolicBP: 105,
   heartRate: 110,
-  avpu: 'A',
+  gcs: 15,
+  avpu: gcsToAVPU(15),
 };
 
 /** High sepsis risk — NEWS ≥ 7 */
@@ -39,7 +42,8 @@ export const VITALS_HIGH_RISK: VitalSigns = {
   temperature: 39.5,
   systolicBP: 85,
   heartRate: 135,
-  avpu: 'V',
+  gcs: 12,
+  avpu: gcsToAVPU(12),
 };
 
 /** Single-parameter alert — otherwise normal, but AVPU = V */
@@ -50,7 +54,8 @@ export const VITALS_SINGLE_ALERT: VitalSigns = {
   temperature: 37.0,
   systolicBP: 120,
   heartRate: 72,
-  avpu: 'V',
+  gcs: 12,
+  avpu: gcsToAVPU(12),
 };
 
 // ---------------------------------------------------------------------------

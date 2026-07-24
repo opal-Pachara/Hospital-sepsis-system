@@ -19,7 +19,6 @@ interface AuthModalProps {
 export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const { authenticateUser } = useRTSASStore();
   const [pin, setPin] = useState('');
-  const [name, setName] = useState('');
   const [role, setRole] = useState<UserRole>('nurse');
   const [error, setError] = useState('');
   const [isShaking, setIsShaking] = useState(false);
@@ -30,19 +29,23 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
     e.preventDefault();
     setError('');
 
-    if (!name.trim()) {
-      setError('กรุณาระบุชื่อ-นามสกุล');
-      return;
-    }
     if (pin.length !== 4) {
       setError('กรุณาใส่ PIN 4 หลัก');
       return;
     }
 
-    const success = authenticateUser(pin, name.trim(), role);
+    // Auto-generate display name from role
+    const roleNameMap: Record<UserRole, string> = {
+      doctor: 'แพทย์',
+      nurse: 'พยาบาล',
+      researcher: 'ผู้วิจัย',
+      it_admin: 'เจ้าหน้าที่ IT',
+    };
+    const autoName = roleNameMap[role];
+
+    const success = authenticateUser(pin, autoName, role);
     if (success) {
       setPin('');
-      setName('');
       setError('');
       onSuccess?.();
       onClose();
@@ -74,32 +77,12 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
         >
           <div style={{ fontSize: '16px', fontWeight: 700 }}>🔐 ยืนยันตัวตน</div>
           <div style={{ fontSize: '10px', opacity: 0.8, marginTop: '4px' }}>
-            ระบุข้อมูลเพื่อเข้าดูรายละเอียดผู้ป่วย (ตาม EC Protocol)
+            เลือกบทบาทและระบุ PIN เพื่อเข้าสู่ระบบ
           </div>
         </div>
 
         {/* Body */}
         <form onSubmit={handleSubmit} style={{ padding: '20px' }}>
-          {/* Name */}
-          <div style={{ marginBottom: '14px' }}>
-            <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>
-              ชื่อ-นามสกุล ผู้ใช้งาน
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="เช่น พย.สุกัญญา"
-              autoFocus
-              style={{
-                width: '100%', padding: '10px 12px', borderRadius: '10px',
-                border: '1px solid #dde3ed', fontSize: '13px',
-                fontFamily: 'inherit', outline: 'none',
-                background: '#f8fafc',
-              }}
-            />
-          </div>
-
           {/* Role */}
           <div style={{ marginBottom: '14px' }}>
             <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>
@@ -140,6 +123,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
               placeholder="• • • •"
+              autoFocus
               style={{
                 width: '100%', padding: '10px 12px', borderRadius: '10px',
                 border: error ? '2px solid #dc2626' : '1px solid #dde3ed',

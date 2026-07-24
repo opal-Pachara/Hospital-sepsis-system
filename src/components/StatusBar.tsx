@@ -7,7 +7,6 @@ export default function StatusBar() {
     const patient = useRTSASStore.getState().selectedPatient;
     openModal('alert', {
       newsScore: patient?.latestNewsScore ?? 12,
-      riskLevel: 'high',
       patientName: patient?.fullName ?? 'Demo',
     });
   };

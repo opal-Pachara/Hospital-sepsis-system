@@ -8,7 +8,6 @@ export default function AlertModal() {
 
   const data = ui.modal.modalData as {
     newsScore: number;
-    riskLevel: string;
     patientName: string;
   } | null;
 
@@ -21,8 +20,9 @@ export default function AlertModal() {
     : '--:--:--';
 
   const handleAcknowledge = () => {
+    const now = new Date().toISOString();
     addTimelineEvent(
-      `รับทราบการแจ้งเตือน — พยาบาลเริ่มกระบวนการดูแลภาวะติดเชื้อในกระแสเลือด`,
+      `✅ รับทราบการแจ้งเตือน — บันทึก Timestamp: ${new Date(now).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} น.`,
       'orange',
       'Nurse'
     );
@@ -146,7 +146,7 @@ export default function AlertModal() {
                 NEWS Score
               </div>
               <div style={{ fontSize: '13px', fontWeight: 800, color: '#dc2626', marginTop: '3px' }}>
-                ⚠ HIGH RISK — เสี่ยงติดเชื้อในกระแสเลือด
+                ⚠ เสี่ยงติดเชื้อในกระแสเลือด
               </div>
               {/* Parameter breakdown chips */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '8px' }}>

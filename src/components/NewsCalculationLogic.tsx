@@ -6,15 +6,15 @@ const paramLabels: Record<string, { icon: string; label: string; normalRange: st
   temperature: { icon: '🌡️', label: 'อุณหภูมิร่างกาย', normalRange: '36.1–38.0' },
   systolicBP: { icon: '❤️', label: 'SBP', normalRange: '111–219' },
   heartRate: { icon: '🫀', label: 'ชีพจร (HR)', normalRange: '51–90' },
-  avpu: { icon: '🧠', label: 'ระดับความรู้สึกตัว', normalRange: 'Alert' },
+  avpu: { icon: '🧠', label: 'GCS/ระดับความรู้สึกตัว', normalRange: 'GCS 15 (A)' },
   oxygenSupplementation: { icon: '🔵', label: 'O₂ Supplement', normalRange: 'Room Air' },
 };
 
 const riskLabels: Record<RiskLevel, { label: string; color: string }> = {
-  low: { label: 'LOW RISK', color: '#16a34a' },
-  low_medium: { label: 'LOW-MEDIUM', color: '#ca8a04' },
-  medium: { label: 'MEDIUM RISK', color: '#ea580c' },
-  high: { label: '⚠ HIGH RISK', color: '#ef4444' },
+  low: { label: 'ปกติ', color: '#16a34a' },
+  low_medium: { label: 'ปกติ', color: '#16a34a' },
+  medium: { label: 'เฝ้าระวัง', color: '#ea580c' },
+  high: { label: '⚠ เสี่ยงติดเชื้อ', color: '#ef4444' },
 };
 
 const ptsClasses: Record<number, string> = {

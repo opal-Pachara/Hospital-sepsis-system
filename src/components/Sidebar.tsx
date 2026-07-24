@@ -72,13 +72,12 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
             fontWeight: 700,
             padding: '2px 6px',
             borderRadius: '10px',
-            background: risk.badgeBg,
-            color: risk.badgeText,
-            border: `1px solid ${risk.badgeBorder}`,
+            background: isHighRisk ? risk.badgeBg : isMissingData ? '#f1f5f9' : '#f0fdf4',
+            color: isHighRisk ? risk.badgeText : isMissingData ? '#64748b' : '#16a34a',
+            border: `1px solid ${isHighRisk ? risk.badgeBorder : isMissingData ? '#cbd5e1' : '#86efac'}`,
           }}
         >
-          {isHighRisk ? '🔴 ' : isMissingData ? '⚪ ' : '🟢 '}
-          {isHighRisk ? risk.labelTh : isMissingData ? 'รอประเมิน' : risk.labelTh}
+          {isHighRisk ? '🔴 เสี่ยงติดเชื้อ' : isMissingData ? '⚪ รอประเมิน' : '🟢 ปกติ'}
         </span>
       </div>
 
@@ -106,7 +105,7 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
               whiteSpace: 'nowrap',
             }}
           >
-            NEWS {patient.latestNewsScore} — {risk.label}
+            NEWS {patient.latestNewsScore}
           </span>
         )}
       </div>

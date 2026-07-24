@@ -229,6 +229,7 @@ describe('calculateNEWS', () => {
       temperature: 37.0,
       systolicBP: 120,
       heartRate: 72,
+      gcs: 15,
       avpu: 'A',
     };
 
@@ -250,6 +251,7 @@ describe('calculateNEWS', () => {
       temperature: 39.5,   // Score 2
       systolicBP: 85,      // Score 3
       heartRate: 135,      // Score 3
+      gcs: 12,
       avpu: 'V',           // Score 3
     };
 
@@ -269,6 +271,7 @@ describe('calculateNEWS', () => {
       temperature: 37.0,
       systolicBP: 120,
       heartRate: 72,
+      gcs: 12,
       avpu: 'V', // Score 3
     };
 
@@ -287,6 +290,7 @@ describe('calculateNEWS', () => {
       temperature: null,
       systolicBP: null,
       heartRate: null,
+      gcs: 15,
       avpu: 'A',
     };
 
@@ -308,6 +312,7 @@ describe('calculateNEWS', () => {
       temperature: 38.5,
       systolicBP: 105,
       heartRate: 110,
+      gcs: 15,
       avpu: 'A',
     };
 
@@ -340,6 +345,7 @@ describe('calculateNEWS', () => {
       temperature: 37.0,    // Score 0
       systolicBP: 120,      // Score 0
       heartRate: 72,        // Score 0
+      gcs: 15,
       avpu: 'A',            // Score 0
     };
 
@@ -356,6 +362,7 @@ describe('calculateNEWS', () => {
       temperature: 37.0,
       systolicBP: 120,
       heartRate: 72,
+      gcs: 15,
       avpu: 'A',
     };
 

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
-import type { VitalSigns, AVPULevel } from '../types';
+import type { VitalSigns } from '../types';
+import { gcsToAVPU } from '../types';
 import { showToast } from './Toast';
 import { maskHN } from '../utils/hnMask';
 
-function calcNEWSScore(rr: number, spo2: number, temp: number, sbp: number, hr: number, avpu: string) {
+function calcNEWSScore(rr: number, spo2: number, temp: number, sbp: number, hr: number, gcs: number) {
   let sc = 0;
   const bd: string[] = [];
   const rrP = rr <= 8 ? 3 : rr <= 11 ? 1 : rr <= 20 ? 0 : rr <= 24 ? 2 : 3; sc += rrP; bd.push(`RR(${rrP})`);
@@ -12,7 +13,8 @@ function calcNEWSScore(rr: number, spo2: number, temp: number, sbp: number, hr: 
   const tmpP = temp <= 35 ? 3 : temp <= 36 ? 1 : temp <= 38 ? 0 : temp <= 39 ? 1 : 2; sc += tmpP; bd.push(`Temp(${tmpP})`);
   const sbpP = sbp <= 90 ? 3 : sbp <= 100 ? 2 : sbp <= 110 ? 1 : sbp <= 219 ? 0 : 3; sc += sbpP; bd.push(`SBP(${sbpP})`);
   const hrP = hr <= 40 ? 3 : hr <= 50 ? 1 : hr <= 90 ? 0 : hr <= 110 ? 1 : hr <= 130 ? 2 : 3; sc += hrP; bd.push(`HR(${hrP})`);
-  const avpuP = avpu === 'A' ? 0 : 3; sc += avpuP; bd.push(`AVPU(${avpuP})`);
+  const avpu = gcsToAVPU(gcs);
+  const avpuP = avpu === 'A' ? 0 : 3; sc += avpuP; bd.push(`GCS${gcs}→${avpu}(${avpuP})`);
   return { score: sc, breakdown: bd.join(' + ') + ' = ' + sc };
 }
 
@@ -45,7 +47,7 @@ export default function AssessmentFormModal() {
   const [dbp, setDBP] = useState('');
   const [hr, setHR] = useState('');
   const [bt, setBT] = useState('');
-  const [avpu, setAVPU] = useState('');
+  const [gcsInput, setGCSInput] = useState('');
 
   if (ui.modal.activeModal !== 'assessment_form') return null;
 
@@ -67,8 +69,9 @@ export default function AssessmentFormModal() {
   // Live NEWS calculation
   const rrN = parseFloat(rr), spo2N = parseFloat(spo2), sbpN = parseFloat(sbp),
     hrN = parseFloat(hr), btN = parseFloat(bt);
-  const allFilled = !isNaN(rrN) && !isNaN(spo2N) && !isNaN(sbpN) && !isNaN(hrN) && !isNaN(btN) && avpu;
-  const liveNews = allFilled ? calcNEWSScore(rrN, spo2N, btN, sbpN, hrN, avpu) : null;
+  const gcsN = parseInt(gcsInput);
+  const allFilled = !isNaN(rrN) && !isNaN(spo2N) && !isNaN(sbpN) && !isNaN(hrN) && !isNaN(btN) && !isNaN(gcsN) && gcsN >= 3 && gcsN <= 15;
+  const liveNews = allFilled ? calcNEWSScore(rrN, spo2N, btN, sbpN, hrN, gcsN) : null;
 
   let riskLabel = 'กรอกข้อมูลเพื่อคำนวณ';
   let riskColor = '#94a3b8';
@@ -80,7 +83,7 @@ export default function AssessmentFormModal() {
     else { riskLabel = '🟢 ปกติ — NEWS = 0'; riskColor = '#22c55e'; riskBg = 'rgba(34, 197, 94, .12)'; }
   }
 
-  const filledCount = [rr, spo2, sbp, hr, bt, avpu].filter(Boolean).length;
+  const filledCount = [rr, spo2, sbp, hr, bt, gcsInput].filter(Boolean).length;
 
   const handleSave = () => {
     if (!allFilled) {
@@ -88,6 +91,7 @@ export default function AssessmentFormModal() {
       return;
     }
 
+    const derivedAVPU = gcsToAVPU(gcsN);
     const vitals: VitalSigns = {
       respiratoryRate: rrN,
       spO2: spo2N,
@@ -95,7 +99,8 @@ export default function AssessmentFormModal() {
       temperature: btN,
       systolicBP: sbpN,
       heartRate: hrN,
-      avpu: avpu as AVPULevel,
+      gcs: gcsN,
+      avpu: derivedAVPU,
     };
 
     completeAssessment(data.entryId, vitals, 'พย.สุกัญญา');
@@ -103,12 +108,12 @@ export default function AssessmentFormModal() {
     closeModal();
 
     // Reset fields
-    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT(''); setAVPU('');
+    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT(''); setGCSInput('');
   };
 
   const handleClose = () => {
     closeModal();
-    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT(''); setAVPU('');
+    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT(''); setGCSInput('');
   };
 
   const handleInputFocus = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -299,42 +304,52 @@ export default function AssessmentFormModal() {
             </div>
           </div>
 
-          {/* AVPU - full width */}
+          {/* GCS / AVPU - full width */}
           <div style={{ marginBottom: '18px' }}>
             <label style={{ ...labelStyle, marginBottom: '5px' }}>
-              🧠 ระดับความรู้สึกตัว (AVPU)
+              🧠 GCS Score <span style={unitStyle}>(3-15) → แปลง AVPU อัตโนมัติ</span>
             </label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
-              {[
-                { value: 'A', label: 'Alert', desc: 'รู้สึกตัวดี', color: '#22c55e' },
-                { value: 'V', label: 'Voice', desc: 'ตอบสนองเสียง', color: '#f59e0b' },
-                { value: 'P', label: 'Pain', desc: 'ตอบสนองปวด', color: '#f97316' },
-                { value: 'U', label: 'Unresponsive', desc: 'ไม่ตอบสนอง', color: '#ef4444' },
-              ].map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setAVPU(opt.value)}
-                  style={{
-                    padding: '10px 6px', borderRadius: '12px', cursor: 'pointer',
-                    fontFamily: 'inherit', textAlign: 'center',
-                    border: avpu === opt.value ? `2px solid ${opt.color}` : '1.5px solid #e2e8f0',
-                    background: avpu === opt.value ? `${opt.color}10` : '#fff',
-                    transition: 'all 0.2s',
-                    boxShadow: avpu === opt.value ? `0 2px 8px ${opt.color}25` : 'none',
-                  }}
-                >
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <input
+                type="number"
+                min={3}
+                max={15}
+                value={gcsInput}
+                onChange={(e) => setGCSInput(e.target.value)}
+                placeholder="เช่น 15"
+                style={{ ...inputStyle, flex: 1 }}
+                onFocus={handleInputFocus} onBlur={handleInputBlur}
+              />
+              {/* Auto-derived AVPU badge */}
+              {!isNaN(gcsN) && gcsN >= 3 && gcsN <= 15 && (() => {
+                const derivedAVPU = gcsToAVPU(gcsN);
+                const avpuConfig: Record<string, { label: string; desc: string; color: string; score: number }> = {
+                  A: { label: 'A', desc: 'Alert', color: '#22c55e', score: 0 },
+                  V: { label: 'V', desc: 'Voice', color: '#f59e0b', score: 3 },
+                  P: { label: 'P', desc: 'Pain', color: '#f97316', score: 3 },
+                  U: { label: 'U', desc: 'Unresponsive', color: '#ef4444', score: 3 },
+                };
+                const cfg = avpuConfig[derivedAVPU];
+                return (
                   <div style={{
-                    fontSize: '18px', fontWeight: 900, color: avpu === opt.value ? opt.color : '#475569',
-                    lineHeight: 1,
-                  }}>{opt.value}</div>
-                  <div style={{
-                    fontSize: '9px', fontWeight: 600,
-                    color: avpu === opt.value ? opt.color : '#94a3b8',
-                    marginTop: '3px',
-                  }}>{opt.desc}</div>
-                </button>
-              ))}
+                    padding: '8px 14px', borderRadius: '12px',
+                    border: `2px solid ${cfg.color}`,
+                    background: `${cfg.color}10`,
+                    textAlign: 'center', minWidth: '90px',
+                    flexShrink: 0,
+                  }}>
+                    <div style={{ fontSize: '18px', fontWeight: 900, color: cfg.color, lineHeight: 1 }}>
+                      {cfg.label}
+                    </div>
+                    <div style={{ fontSize: '9px', fontWeight: 600, color: cfg.color, marginTop: '3px' }}>
+                      {cfg.desc} (+{cfg.score})
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+            <div style={{ fontSize: '9px', color: '#94a3b8', marginTop: '4px' }}>
+              GCS 15 = A (0 คะแนน) | GCS 9-14 = V (+3) | GCS 4-8 = P (+3) | GCS 3 = U (+3)
             </div>
           </div>
 

@@ -6,8 +6,21 @@
 // Enums & Literal Types
 // ---------------------------------------------------------------------------
 
-/** AVPU consciousness scale */
+/** AVPU consciousness scale (derived from GCS) */
 export type AVPULevel = 'A' | 'V' | 'P' | 'U';
+
+/** Convert GCS score to AVPU level.
+ * GCS 15 = A (Alert, 0 points)
+ * GCS 9-14 = V (Voice, +3 points)
+ * GCS 4-8 = P (Pain, +3 points)
+ * GCS 3 = U (Unresponsive, +3 points)
+ */
+export function gcsToAVPU(gcs: number): AVPULevel {
+  if (gcs >= 15) return 'A';
+  if (gcs >= 9) return 'V';
+  if (gcs >= 4) return 'P';
+  return 'U';
+}
 
 /** Supplemental oxygen status */
 export type OxygenStatus = 'room_air' | 'supplemental';
@@ -64,7 +77,10 @@ export interface VitalSigns {
   /** Heart rate (beats per minute) */
   heartRate: number | null;
 
-  /** AVPU consciousness level */
+  /** GCS score (3-15) — auto-converted to AVPU for NEWS scoring */
+  gcs: number;
+
+  /** Derived AVPU level from GCS (computed, not stored directly) */
   avpu: AVPULevel;
 }
 

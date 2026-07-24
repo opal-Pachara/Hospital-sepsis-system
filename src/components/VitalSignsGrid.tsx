@@ -6,7 +6,7 @@ const paramConfig: Record<string, { icon: string; label: string; unit: string }>
   temperature: { icon: '🌡️', label: 'Temp', unit: '°C' },
   systolicBP: { icon: '❤️', label: 'SBP', unit: 'mmHg' },
   heartRate: { icon: '🫀', label: 'HR', unit: 'ครั้ง/นาที' },
-  avpu: { icon: '🧠', label: 'AVPU', unit: '' },
+  avpu: { icon: '🧠', label: 'GCS/AVPU', unit: '' },
   oxygenSupplementation: { icon: '🔵', label: 'O₂', unit: '' },
 };
 
@@ -55,7 +55,7 @@ function VitalCard({ param }: { param: NEWSParameterScore }) {
   // Unit label for below the value
   let unitLabel = config.unit;
   if (isAvpu) {
-    unitLabel = cleanValue === 'A' ? 'Alert' : cleanValue === 'V' ? 'Voice' : cleanValue === 'P' ? 'Pain' : cleanValue === 'U' ? 'Unresponsive' : cleanValue;
+    unitLabel = cleanValue === 'A' ? 'Alert (GCS 15)' : cleanValue === 'V' ? 'Voice (GCS 9-14)' : cleanValue === 'P' ? 'Pain (GCS 4-8)' : cleanValue === 'U' ? 'Unresponsive (GCS 3)' : cleanValue;
   }
 
   return (
