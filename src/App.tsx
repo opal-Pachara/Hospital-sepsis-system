@@ -1,8 +1,6 @@
-import { useEffect } from 'react';
 import { useRTSASStore } from './store/useRTSASStore';
-import { maskHN } from './utils/hnMask';
-import { MOCK_PATIENTS } from './data/mockData';
 import { useAssessmentReminders } from './hooks/useTimers';
+import { usePatientData, useWebSocketAlerts } from './hooks/useBackend';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import PatientInfoBar from './components/PatientInfoBar';
@@ -112,31 +110,14 @@ function WorkflowPanel() {
 }
 
 export default function App() {
-  const { setPatients, selectPatient, addTimelineEvent } = useRTSASStore();
-
   // Wire up assessment reminder auto-triggering
   useAssessmentReminders();
 
-  useEffect(() => {
-    // Initialize with mock data
-    setPatients(MOCK_PATIENTS);
-
-    // Auto-select the highest risk patient
-    if (MOCK_PATIENTS.length > 0) {
-      const highestRisk = [...MOCK_PATIENTS].sort(
-        (a, b) => b.latestNewsScore - a.latestNewsScore
-      )[0];
-      selectPatient(highestRisk.id);
-
-      // Add initial system event (EC: use masked HN, no fullName)
-      addTimelineEvent(
-        `🏥 เลือกผู้ป่วย ${maskHN(highestRisk.hn)} — NEWS: ${highestRisk.latestNewsScore}`,
-        highestRisk.latestNewsScore >= 7 ? 'red' : highestRisk.latestNewsScore >= 5 ? 'orange' : 'green',
-        'System'
-      );
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // --- Real-time backend integration ---
+  // 1. Initial HTTP fetch + 30s refresh from GET /api/patients
+  usePatientData();
+  // 2. WebSocket connection for real-time alerts from /ws/alerts
+  useWebSocketAlerts();
 
   return (
     <div className="h-screen flex flex-col bg-surface-base">
