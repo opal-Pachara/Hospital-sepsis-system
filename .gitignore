@@ -24,5 +24,9 @@ dist-ssr
 *.sw?
 
 # folder
-backend/
 node_modules/
+
+# Environment files — never commit credentials
+backend/.env
+.env
+.env.*
