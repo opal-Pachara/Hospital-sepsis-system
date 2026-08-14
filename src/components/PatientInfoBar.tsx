@@ -2,15 +2,28 @@ import { useEffect, useState } from 'react';
 import type { Patient } from '../types';
 
 export default function PatientInfoBar({ patient }: { patient: Patient }) {
-  const [erElapsed, setErElapsed] = useState('00:00');
+  const [erElapsed, setErElapsed] = useState('');
+  const [isOldData, setIsOldData] = useState(false);
 
   useEffect(() => {
+    const arrivalMs = new Date(patient.arrivalTime).getTime();
+
     const update = () => {
-      const diff = Date.now() - new Date(patient.arrivalTime).getTime();
-      const mins = Math.floor(diff / 60000);
-      const secs = Math.floor((diff % 60000) / 1000);
-      setErElapsed(`${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`);
+      const diff = Date.now() - arrivalMs;
+      const hours = diff / 3600000;
+
+      if (hours > 24) {
+        // Data is from a previous day — don't show a meaningless elapsed counter
+        setIsOldData(true);
+        setErElapsed('');
+      } else {
+        setIsOldData(false);
+        const mins = Math.floor(diff / 60000);
+        const secs = Math.floor((diff % 60000) / 1000);
+        setErElapsed(`${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`);
+      }
     };
+
     update();
     const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
@@ -42,9 +55,18 @@ export default function PatientInfoBar({ patient }: { patient: Patient }) {
           }}
         />
 
-      {/* Row 1: HN + Alert badge */}
+      {/* Row 1: Name/HN + Alert badge */}
         <div className="flex items-center justify-between gap-2" style={{ marginBottom: '5px' }}>
-        <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b' }}>{patient.hn}</div>
+          <div>
+            {patient.fullName && patient.fullName !== patient.hn ? (
+              <>
+                <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b' }}>{patient.fullName}</div>
+                <div style={{ fontSize: '11px', color: '#94a3b8' }}>HN: {patient.hn}</div>
+              </>
+            ) : (
+              <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b' }}>{patient.hn}</div>
+            )}
+          </div>
           {patient.hasSepsisAlert && (
             <div
               className="animate-pulse-red flex-shrink-0"
@@ -81,13 +103,15 @@ export default function PatientInfoBar({ patient }: { patient: Patient }) {
             }}>
               {genderIcon} {genderLabel}
             </span>
-            <span style={{
-              fontSize: '10px', fontWeight: 600, padding: '2px 8px',
-              borderRadius: '10px', background: '#ecfeff', border: '1px solid #67e8f9', color: '#0891b2',
-              whiteSpace: 'nowrap',
-            }}>
-              {patient.age} ปี
-          </span>
+            {patient.age > 0 && (
+              <span style={{
+                fontSize: '10px', fontWeight: 600, padding: '2px 8px',
+                borderRadius: '10px', background: '#ecfeff', border: '1px solid #67e8f9', color: '#0891b2',
+                whiteSpace: 'nowrap',
+              }}>
+                {patient.age} ปี
+              </span>
+            )}
           <span style={{
             fontSize: '10px', fontWeight: 600, padding: '2px 8px',
             borderRadius: '10px', background: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626',
@@ -97,12 +121,25 @@ export default function PatientInfoBar({ patient }: { patient: Patient }) {
           </span>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            <span style={{ fontSize: '9px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              เวลาใน ER
-            </span>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: '#ea580c', fontVariantNumeric: 'tabular-nums' }}>
-              {erElapsed} นาที
-            </span>
+            {isOldData ? (
+              <>
+                <span style={{ fontSize: '9px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  วันที่คัดกรอง
+                </span>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                  {new Date(patient.arrivalTime).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' })}
+                </span>
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize: '9px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  เวลาใน ER
+                </span>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#ea580c', fontVariantNumeric: 'tabular-nums' }}>
+                  {erElapsed} นาที
+                </span>
+              </>
+            )}
           </div>
         </div>
       </div>

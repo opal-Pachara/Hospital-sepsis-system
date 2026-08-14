@@ -33,12 +33,19 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
   const genderIcon = patient.gender === 'male' ? '♂' : patient.gender === 'female' ? '♀' : '⚥';
   const genderLabel = patient.gender === 'male' ? 'ชาย' : patient.gender === 'female' ? 'หญิง' : 'อื่นๆ';
 
-  const arrivalMinutes = Math.floor(
-    (Date.now() - new Date(patient.arrivalTime).getTime()) / 60000
-  );
+  const arrivalMs = new Date(patient.arrivalTime).getTime();
+  const diffMins = Math.floor((Date.now() - arrivalMs) / 60000);
+  const isOldData = diffMins > 24 * 60; // older than 24 hours
+
   const arrivalTime = new Date(patient.arrivalTime).toLocaleTimeString('th-TH', {
     hour: '2-digit',
     minute: '2-digit',
+  });
+
+  const arrivalDateStr = new Date(patient.arrivalTime).toLocaleDateString('th-TH', {
+    day: '2-digit',
+    month: 'short',
+    year: '2-digit',
   });
 
   const isHighRisk = patient.currentRiskLevel === 'high';
@@ -62,9 +69,18 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
         style={{ width: '4px', background: risk.barColor, borderRadius: '0 2px 2px 0' }}
       />
 
-      {/* Top row: HN + Badge */}
+      {/* Top row: Name/HN + Badge */}
       <div className="flex justify-between items-start" style={{ marginLeft: '8px' }}>
-        <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b' }}>{maskHN(patient.hn)}</div>
+        <div>
+          {patient.fullName && patient.fullName !== patient.hn ? (
+            <>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b' }}>{patient.fullName}</div>
+              <div style={{ fontSize: '10px', color: '#94a3b8' }}>HN: {maskHN(patient.hn)}</div>
+            </>
+          ) : (
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b' }}>{maskHN(patient.hn)}</div>
+          )}
+        </div>
         <span
           className={isHighRisk ? 'animate-blink-badge' : ''}
           style={{
@@ -83,7 +99,7 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
 
       {/* Info */}
       <div style={{ fontSize: '10px', color: '#475569', marginTop: '3px', marginLeft: '8px' }}>
-        {genderIcon} {genderLabel} · {patient.age} ปี · {patient.location}
+        {genderIcon} {genderLabel}{patient.age > 0 ? ` · ${patient.age} ปี` : ''} · {patient.location}
       </div>
 
       {/* Score Chip */}
@@ -119,7 +135,10 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
 
       {/* Time */}
       <div style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '8px', marginTop: '3px' }}>
-        🕐 {arrivalTime} · {isSelected ? 'กำลังดูแล' : `${arrivalMinutes} นาทีที่แล้ว`}
+        {isOldData
+          ? `📅 ${arrivalDateStr} · ${arrivalTime}`
+          : `🕐 ${arrivalTime} · ${isSelected ? 'กำลังดูแล' : `${diffMins} นาทีที่แล้ว`}`
+        }
       </div>
     </button>
   );

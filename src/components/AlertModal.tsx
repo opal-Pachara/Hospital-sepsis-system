@@ -108,10 +108,12 @@ export default function AlertModal() {
             }}>👤</div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: '16px', fontWeight: 800, color: '#1e293b', letterSpacing: '-0.2px' }}>
-                {maskHN(patient?.hn || 'N/A')}
+                {patient?.fullName && patient.fullName !== patient?.hn
+                  ? patient.fullName
+                  : maskHN(patient?.hn || 'N/A')}
               </div>
               <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px' }}>
-                {genderLabel} · อายุ {patient?.age || '—'} ปี · เวลาคัดกรอง {arrivalTimeStr}
+                {genderLabel}{patient?.age ? ` · อายุ ${patient.age} ปี` : ''} · เวลาคัดกรอง {arrivalTimeStr}
               </div>
             </div>
             <div style={{
