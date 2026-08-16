@@ -252,6 +252,9 @@ export interface RTSASState {
   // ---- UI State ----
   ui: UIState;
 
+  // ---- Alert Queue (multiple simultaneous high-risk patients) ----
+  pendingAlerts: Array<{ hn: string; newsScore: number; timestamp: string }>;
+
   // ---- Auth State (EC Privacy) ----
   isAuthenticated: boolean;
   currentUser: AuthUser | null;
@@ -306,6 +309,9 @@ export interface RTSASState {
   updateCurrentTime: () => void;
   openModal: (type: ModalType, data?: Record<string, unknown>) => void;
   closeModal: () => void;
+  // Alert queue for multiple simultaneous high-risk patients
+  queueAlert: (hn: string, newsScore: number) => void;
+  dismissNextAlert: () => void;
 
   // --- Auth Actions (EC Privacy) ---
   authenticateUser: (pin: string, name: string, role: UserRole) => boolean;
@@ -352,6 +358,7 @@ export const useRTSASStore = create<RTSASState>()(
         modalData: null,
       },
     },
+    pendingAlerts: [] as Array<{ hn: string; newsScore: number; timestamp: string }>,
 
     // ---- Auth State (EC Privacy) ----
     isAuthenticated: false,
@@ -937,13 +944,51 @@ export const useRTSASStore = create<RTSASState>()(
         },
       })),
 
-    closeModal: () =>
-      set((state) => ({
-        ui: {
-          ...state.ui,
-          modal: { activeModal: null, modalData: null },
-        },
-      })),
+    closeModal: () => {
+      const state = get();
+      const next = state.pendingAlerts[0];
+
+      if (next) {
+        // Auto-show the next queued alert immediately after closing current
+        set((s) => ({
+          pendingAlerts: s.pendingAlerts.slice(1),
+          ui: {
+            ...s.ui,
+            modal: {
+              activeModal: 'alert',
+              modalData: { newsScore: next.newsScore, patientName: next.hn },
+            },
+          },
+        }));
+      } else {
+        set((s) => ({
+          ui: { ...s.ui, modal: { activeModal: null, modalData: null } },
+        }));
+      }
+    },
+
+    // Queue an alert for a high-risk patient instead of forcing modal open
+    queueAlert: (hn, newsScore) => {
+      const state = get();
+      const isModalOpen = state.ui.modal.activeModal === 'alert';
+
+      if (isModalOpen) {
+        // Modal already showing another patient — add to queue
+        set((s) => ({
+          pendingAlerts: [
+            ...s.pendingAlerts,
+            { hn, newsScore, timestamp: new Date().toISOString() },
+          ],
+        }));
+      } else {
+        // No active modal — show immediately
+        get().openModal('alert', { newsScore, patientName: hn });
+      }
+    },
+
+    dismissNextAlert: () => {
+      set((s) => ({ pendingAlerts: s.pendingAlerts.slice(1) }));
+    },
 
     // ===========================================================================
     // AUTH ACTIONS (EC Privacy)

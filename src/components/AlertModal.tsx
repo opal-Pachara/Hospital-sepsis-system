@@ -2,7 +2,7 @@ import { useRTSASStore } from '../store/useRTSASStore';
 import { maskHN } from '../utils/hnMask';
 
 export default function AlertModal() {
-  const { ui, closeModal, selectedPatient, completeChecklistItem, addTimelineEvent } = useRTSASStore();
+  const { ui, closeModal, selectedPatient, completeChecklistItem, addTimelineEvent, pendingAlerts, selectPatient } = useRTSASStore();
 
   if (ui.modal.activeModal !== 'alert') return null;
 
@@ -13,13 +13,24 @@ export default function AlertModal() {
 
   if (!data) return null;
 
-  const patient = selectedPatient;
+  // Use modal data as primary source (patient may not be selected when alert queued)
+  const alertHN = data.patientName;     // HN from the alert payload
+  const alertNewsScore = data.newsScore;
+
+  // Try to find the alerted patient in the list
+  const alertedPatient = useRTSASStore.getState().patients.find((p) => p.hn === alertHN);
+  const patient = alertedPatient ?? selectedPatient;
+
   const genderLabel = patient?.gender === 'male' ? 'เพศชาย' : patient?.gender === 'female' ? 'เพศหญิง' : 'ไม่ระบุ';
   const arrivalTimeStr = patient
     ? new Date(patient.arrivalTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : '--:--:--';
 
   const handleAcknowledge = () => {
+    // If the alerted patient is not currently selected, select them first
+    if (alertedPatient && alertedPatient.id !== selectedPatient?.id) {
+      selectPatient(alertedPatient.id);
+    }
     // Auto-complete the 'doctor_confirm' checklist item.
     // This single call will:
     //   1. Mark 'doctor_confirm' as completed
@@ -46,6 +57,19 @@ export default function AlertModal() {
       className="fixed inset-0 z-[100] flex items-center justify-center animate-fade-in"
       style={{ background: 'rgba(10, 10, 20, 0.7)', backdropFilter: 'blur(8px)' }}
     >
+      {/* Queue badge — shows how many more alerts are waiting */}
+      {pendingAlerts.length > 0 && (
+        <div style={{
+          position: 'absolute', top: '20px', right: '20px',
+          background: '#dc2626', color: '#fff',
+          borderRadius: '999px', padding: '6px 14px',
+          fontSize: '12px', fontWeight: 700,
+          boxShadow: '0 4px 12px rgba(220,38,38,.4)',
+          zIndex: 110,
+        }}>
+          🔔 รอแจ้งเตือนอีก {pendingAlerts.length} ราย
+        </div>
+      )}
       <div
         className="animate-slideUp"
         style={{

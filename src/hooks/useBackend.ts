@@ -180,7 +180,7 @@ export function usePatientData() {
 // ---------------------------------------------------------------------------
 
 export function useWebSocketAlerts() {
-  const { patients, setPatients, setConnectionStatus, addTimelineEvent, openModal, selectPatient } = useRTSASStore();
+  const { patients, setPatients, setConnectionStatus, addTimelineEvent, openModal, queueAlert } = useRTSASStore();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMounted = useRef(true);
@@ -266,19 +266,15 @@ export function useWebSocketAlerts() {
           setPatients(updatedPatients);
         }
 
-        // 🚨 Trigger alert modal for high-risk patients (new readings only)
+        // 🚨 Queue alert for high-risk patients (new readings only)
+        // Use queueAlert instead of openModal to avoid interrupting the current patient view
         if (payload.is_new_alert &&
            (payload.news_result.totalScore >= 5 || payload.news_result.hasSingleParameterAlert)) {
 
-          // Select this patient so the detail panel updates
-          selectPatient(patient.id);
+          // Queue the alert — if modal is already open it will stack, not override
+          queueAlert(payload.hn, payload.news_result.totalScore);
 
-          openModal('alert', {
-            newsScore: payload.news_result.totalScore,
-            patientName: payload.hn,
-          });
-
-          // ✅ Only clinical-relevant alert goes to Timeline (no HN for privacy)
+          // ✅ Clinical alert in Timeline (no HN for privacy)
           addTimelineEvent(
             `⚠️ ระบบตรวจพบ NEWS ${payload.news_result.totalScore} — ต้องประเมินทันที`,
             payload.news_result.totalScore >= 7 ? 'red' : 'orange',

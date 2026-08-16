@@ -28,7 +28,31 @@ const riskConfig: Record<RiskLevel, { label: string; labelTh: string; badgeBg: s
 
 function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: boolean }) {
   const selectPatient = useRTSASStore((s) => s.selectPatient);
+  const patientData = useRTSASStore((s) => s.patientData);
   const risk = riskConfig[patient.currentRiskLevel];
+
+  // Live countdown badge for this specific patient
+  const [countdownLabel, setCountdownLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    const updateBadge = () => {
+      const data = patientData[patient.id];
+      const timer = data?.countdownTimer;
+      if (timer?.isActive && !timer.isExpired && timer.startedAt) {
+        const elapsed = Math.floor((Date.now() - new Date(timer.startedAt).getTime()) / 1000);
+        const remaining = Math.max(0, timer.totalDurationSeconds - elapsed);
+        const mins = Math.floor(remaining / 60);
+        const secs = remaining % 60;
+        const label = `⏱ ${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+        setCountdownLabel(timer.isExpired ? '🔴 หมดเวลา' : label);
+      } else {
+        setCountdownLabel(null);
+      }
+    };
+    updateBadge();
+    const iv = setInterval(updateBadge, 1000);
+    return () => clearInterval(iv);
+  }, [patient.id, patientData]);
 
   const genderIcon = patient.gender === 'male' ? '♂' : patient.gender === 'female' ? '♀' : '⚥';
   const genderLabel = patient.gender === 'male' ? 'ชาย' : patient.gender === 'female' ? 'หญิง' : 'อื่นๆ';
@@ -131,6 +155,22 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
           : `🕐 ${arrivalTime} · ${isSelected ? 'กำลังดูแล' : `${diffMins} นาทีที่แล้ว`}`
         }
       </div>
+
+      {/* Countdown badge — only shows when Sepsis Bundle timer is active */}
+      {countdownLabel && (
+        <div style={{
+          marginLeft: '8px', marginTop: '4px',
+          display: 'inline-flex', alignItems: 'center', gap: '4px',
+          fontSize: '10px', fontWeight: 700,
+          background: countdownLabel.startsWith('🔴') ? '#fef2f2' : '#fff7ed',
+          color: countdownLabel.startsWith('🔴') ? '#dc2626' : '#c2410c',
+          border: `1px solid ${countdownLabel.startsWith('🔴') ? '#fca5a5' : '#fdba74'}`,
+          borderRadius: '6px', padding: '2px 7px',
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          {countdownLabel} Sepsis Bundle
+        </div>
+      )}
     </button>
   );
 }
