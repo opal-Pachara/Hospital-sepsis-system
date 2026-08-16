@@ -146,11 +146,9 @@ export function usePatientData() {
       if (patients.length > 0) {
         const highest = patients[0]; // Already sorted by NEWS desc from backend
         selectPatient(highest.id);
-        addTimelineEvent(
-          `🏥 โหลดข้อมูลผู้ป่วย ${data.count} ราย — เลือก HN: ${highest.hn} (NEWS: ${highest.latestNewsScore})`,
-          highest.latestNewsScore >= 7 ? 'red' : highest.latestNewsScore >= 5 ? 'orange' : 'green',
-          'System'
-        );
+
+        // Log to console only — not to clinical Timeline
+        console.log(`[RTSAS] Loaded ${data.count} patients. Top risk: HN ${highest.hn} NEWS ${highest.latestNewsScore}`);
 
         // 🚨 Open alert modal if the top patient is high risk
         if (highest.hasSepsisAlert) {
@@ -166,7 +164,7 @@ export function usePatientData() {
       console.error('[usePatientData] Failed to fetch patients:', err);
       setConnectionStatus('disconnected');
     }
-  }, [setPatients, selectPatient, addTimelineEvent, setConnectionStatus]);
+  }, [setPatients, selectPatient, setConnectionStatus, openModal]);
 
   useEffect(() => {
     fetchPatients();
@@ -257,15 +255,11 @@ export function useWebSocketAlerts() {
         const exists = currentPatients.find((p) => p.id === patient.id);
 
         if (!exists) {
-          // New patient — add to list
+          // New patient arrived — log to console only, not clinical Timeline
           setPatients([patient, ...currentPatients]);
-          addTimelineEvent(
-            `🆕 ผู้ป่วยใหม่ HN: ${patient.hn} — NEWS: ${patient.latestNewsScore} (${patient.currentRiskLevel})`,
-            patient.latestNewsScore >= 7 ? 'red' : patient.latestNewsScore >= 5 ? 'orange' : 'green',
-            'System'
-          );
+          console.log(`[RTSAS] New patient added: HN ${patient.hn} NEWS ${patient.latestNewsScore}`);
         } else {
-          // Existing patient — update vitals
+          // Existing patient — update vitals silently
           const updatedPatients = currentPatients.map((p) =>
             p.id === patient.id ? { ...p, ...patient } : p
           );
@@ -284,8 +278,9 @@ export function useWebSocketAlerts() {
             patientName: payload.hn,
           });
 
+          // ✅ Only clinical-relevant alert goes to Timeline (no HN for privacy)
           addTimelineEvent(
-            `⚠️ แจ้งเตือนอัตโนมัติ — HN: ${payload.hn} NEWS: ${payload.news_result.totalScore}`,
+            `⚠️ ระบบตรวจพบ NEWS ${payload.news_result.totalScore} — ต้องประเมินทันที`,
             payload.news_result.totalScore >= 7 ? 'red' : 'orange',
             'System'
           );
