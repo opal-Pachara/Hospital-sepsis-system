@@ -2,7 +2,7 @@ import { useRTSASStore } from '../store/useRTSASStore';
 import { maskHN } from '../utils/hnMask';
 
 export default function AlertModal() {
-  const { ui, closeModal, selectedPatient, startCountdown, addTimelineEvent } = useRTSASStore();
+  const { ui, closeModal, selectedPatient, completeChecklistItem, addTimelineEvent } = useRTSASStore();
 
   if (ui.modal.activeModal !== 'alert') return null;
 
@@ -20,12 +20,14 @@ export default function AlertModal() {
     : '--:--:--';
 
   const handleAcknowledge = () => {
-    const now = new Date().toISOString();
+    // Auto-complete the 'doctor_confirm' checklist item.
+    // This single call will:
+    //   1. Mark 'doctor_confirm' as completed
+    //   2. Start the 60-min Sepsis Bundle countdown
+    //   3. Generate the assessment schedule
+    //   4. Unlock the Sepsis Bundle phase (Phase 3)
+    completeChecklistItem('doctor_confirm', 'Nurse/System');
 
-    // 🚨 Start 60-min Sepsis Bundle countdown immediately
-    startCountdown(now);
-
-    // ✅ Record clinical action in Timeline
     addTimelineEvent(
       `✅ รับทราบและเริ่มกระบวนการ Sepsis Bundle — เริ่มนับ 60 นาที`,
       'orange',
