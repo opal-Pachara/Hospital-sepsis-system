@@ -2,7 +2,7 @@ import { useRTSASStore } from '../store/useRTSASStore';
 import { maskHN } from '../utils/hnMask';
 
 export default function AlertModal() {
-  const { ui, closeModal, selectedPatient } = useRTSASStore();
+  const { ui, closeModal, selectedPatient, startCountdown, addTimelineEvent } = useRTSASStore();
 
   if (ui.modal.activeModal !== 'alert') return null;
 
@@ -20,6 +20,18 @@ export default function AlertModal() {
     : '--:--:--';
 
   const handleAcknowledge = () => {
+    const now = new Date().toISOString();
+
+    // 🚨 Start 60-min Sepsis Bundle countdown immediately
+    startCountdown(now);
+
+    // ✅ Record clinical action in Timeline
+    addTimelineEvent(
+      `✅ รับทราบและเริ่มกระบวนการ Sepsis Bundle — เริ่มนับ 60 นาที`,
+      'orange',
+      'Nurse'
+    );
+
     closeModal();
   };
 
