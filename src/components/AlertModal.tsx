@@ -2,7 +2,7 @@ import { useRTSASStore } from '../store/useRTSASStore';
 import { maskHN } from '../utils/hnMask';
 
 export default function AlertModal() {
-  const { ui, closeModal, addTimelineEvent, selectedPatient } = useRTSASStore();
+  const { ui, closeModal, selectedPatient } = useRTSASStore();
 
   if (ui.modal.activeModal !== 'alert') return null;
 
@@ -20,12 +20,6 @@ export default function AlertModal() {
     : '--:--:--';
 
   const handleAcknowledge = () => {
-    const now = new Date().toISOString();
-    addTimelineEvent(
-      `✅ รับทราบการแจ้งเตือน — บันทึก Timestamp: ${new Date(now).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} น.`,
-      'orange',
-      'Nurse'
-    );
     closeModal();
   };
 
