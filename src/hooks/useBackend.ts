@@ -130,7 +130,7 @@ function riskToTriageLevel(risk: string): Patient['triageLevel'] {
 // ---------------------------------------------------------------------------
 
 export function usePatientData() {
-  const { setPatients, selectPatient, addTimelineEvent, setConnectionStatus } = useRTSASStore();
+  const { setPatients, selectPatient, addTimelineEvent, setConnectionStatus, openModal } = useRTSASStore();
 
   const fetchPatients = useCallback(async () => {
     try {
@@ -142,7 +142,7 @@ export function usePatientData() {
 
       setPatients(patients);
 
-      // Auto-select the highest risk patient
+      // Auto-select the highest risk patient on first load
       if (patients.length > 0) {
         const highest = patients[0]; // Already sorted by NEWS desc from backend
         selectPatient(highest.id);
@@ -151,6 +151,14 @@ export function usePatientData() {
           highest.latestNewsScore >= 7 ? 'red' : highest.latestNewsScore >= 5 ? 'orange' : 'green',
           'System'
         );
+
+        // 🚨 Open alert modal if the top patient is high risk
+        if (highest.hasSepsisAlert) {
+          openModal('alert', {
+            newsScore: highest.latestNewsScore,
+            patientName: highest.hn,
+          });
+        }
       }
 
       console.log(`[usePatientData] Loaded ${data.count} patients from backend.`);
@@ -174,7 +182,7 @@ export function usePatientData() {
 // ---------------------------------------------------------------------------
 
 export function useWebSocketAlerts() {
-  const { patients, setPatients, setConnectionStatus, addTimelineEvent } = useRTSASStore();
+  const { patients, setPatients, setConnectionStatus, addTimelineEvent, openModal, selectPatient } = useRTSASStore();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMounted = useRef(true);
@@ -264,8 +272,18 @@ export function useWebSocketAlerts() {
           setPatients(updatedPatients);
         }
 
-        // Show timeline alert for high-risk patients
-        if (payload.news_result.totalScore >= 5 || payload.news_result.hasSingleParameterAlert) {
+        // 🚨 Trigger alert modal for high-risk patients (new readings only)
+        if (payload.is_new_alert &&
+           (payload.news_result.totalScore >= 5 || payload.news_result.hasSingleParameterAlert)) {
+
+          // Select this patient so the detail panel updates
+          selectPatient(patient.id);
+
+          openModal('alert', {
+            newsScore: payload.news_result.totalScore,
+            patientName: payload.hn,
+          });
+
           addTimelineEvent(
             `⚠️ แจ้งเตือนอัตโนมัติ — HN: ${payload.hn} NEWS: ${payload.news_result.totalScore}`,
             payload.news_result.totalScore >= 7 ? 'red' : 'orange',
