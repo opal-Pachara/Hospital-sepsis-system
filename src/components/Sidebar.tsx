@@ -69,18 +69,9 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
         style={{ width: '4px', background: risk.barColor, borderRadius: '0 2px 2px 0' }}
       />
 
-      {/* Top row: Name/HN + Badge */}
+      {/* Top row: HN (masked) + Badge */}
       <div className="flex justify-between items-start" style={{ marginLeft: '8px' }}>
-        <div>
-          {patient.fullName && patient.fullName !== patient.hn ? (
-            <>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b' }}>{patient.fullName}</div>
-              <div style={{ fontSize: '10px', color: '#94a3b8' }}>HN: {maskHN(patient.hn)}</div>
-            </>
-          ) : (
-            <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b' }}>{maskHN(patient.hn)}</div>
-          )}
-        </div>
+        <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b' }}>{maskHN(patient.hn)}</div>
         <span
           className={isHighRisk ? 'animate-blink-badge' : ''}
           style={{

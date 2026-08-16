@@ -55,18 +55,9 @@ export default function PatientInfoBar({ patient }: { patient: Patient }) {
           }}
         />
 
-      {/* Row 1: Name/HN + Alert badge */}
+      {/* Row 1: HN + Alert badge */}
         <div className="flex items-center justify-between gap-2" style={{ marginBottom: '5px' }}>
-          <div>
-            {patient.fullName && patient.fullName !== patient.hn ? (
-              <>
-                <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b' }}>{patient.fullName}</div>
-                <div style={{ fontSize: '11px', color: '#94a3b8' }}>HN: {patient.hn}</div>
-              </>
-            ) : (
-              <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b' }}>{patient.hn}</div>
-            )}
-          </div>
+          <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b' }}>{patient.hn}</div>
           {patient.hasSepsisAlert && (
             <div
               className="animate-pulse-red flex-shrink-0"
