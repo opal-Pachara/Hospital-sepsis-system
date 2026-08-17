@@ -130,7 +130,7 @@ function riskToTriageLevel(risk: string): Patient['triageLevel'] {
 // ---------------------------------------------------------------------------
 
 export function usePatientData() {
-  const { setPatients, selectPatient, addTimelineEvent, setConnectionStatus, openModal } = useRTSASStore();
+  const { setPatients, selectPatient, setConnectionStatus, openModal, queueAlert } = useRTSASStore();
 
   const fetchPatients = useCallback(async () => {
     try {
@@ -142,29 +142,40 @@ export function usePatientData() {
 
       setPatients(patients);
 
-      // Auto-select the highest risk patient on first load
-      if (patients.length > 0) {
-        const highest = patients[0]; // Already sorted by NEWS desc from backend
-        selectPatient(highest.id);
+      // ✅ Bug #3 Fix: Only auto-select + alert on FIRST load (no patient selected yet)
+      // On subsequent 60s refreshes, do NOT switch the selected patient
+      const currentSelected = useRTSASStore.getState().selectedPatient;
+      const isFirstLoad = !currentSelected;
 
-        // Log to console only — not to clinical Timeline
-        console.log(`[RTSAS] Loaded ${data.count} patients. Top risk: HN ${highest.hn} NEWS ${highest.latestNewsScore}`);
+      if (isFirstLoad && patients.length > 0) {
+        // Select the highest-risk patient
+        selectPatient(patients[0].id);
+        console.log(`[RTSAS] Initial load: ${data.count} patients. Top: HN ${patients[0].hn} NEWS ${patients[0].latestNewsScore}`);
 
-        // 🚨 Open alert modal if the top patient is high risk
-        if (highest.hasSepsisAlert) {
+        // ✅ Bug #2 Fix: Queue alerts for ALL high-risk patients, not just the top one
+        const highRisk = patients.filter(p => p.hasSepsisAlert);
+        if (highRisk.length > 0) {
+          // Show first alert immediately
           openModal('alert', {
-            newsScore: highest.latestNewsScore,
-            patientName: highest.hn,
+            newsScore: highRisk[0].latestNewsScore,
+            patientName: highRisk[0].hn,
           });
+          // Queue the rest
+          highRisk.slice(1).forEach(p => {
+            queueAlert(p.hn, p.latestNewsScore);
+          });
+          console.log(`[RTSAS] Queued ${highRisk.length} high-risk alerts.`);
         }
+      } else {
+        // Subsequent refresh — silently update patient list, no disruption
+        console.log(`[RTSAS] Refreshed ${data.count} patients (silent update).`);
       }
-
-      console.log(`[usePatientData] Loaded ${data.count} patients from backend.`);
     } catch (err) {
       console.error('[usePatientData] Failed to fetch patients:', err);
       setConnectionStatus('disconnected');
     }
-  }, [setPatients, selectPatient, setConnectionStatus, openModal]);
+  }, [setPatients, selectPatient, setConnectionStatus, openModal, queueAlert]);
+
 
   useEffect(() => {
     fetchPatients();

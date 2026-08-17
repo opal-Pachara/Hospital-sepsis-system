@@ -31,19 +31,24 @@ export default function AlertModal() {
     if (alertedPatient && alertedPatient.id !== selectedPatient?.id) {
       selectPatient(alertedPatient.id);
     }
-    // Auto-complete the 'doctor_confirm' checklist item.
-    // This single call will:
-    //   1. Mark 'doctor_confirm' as completed
-    //   2. Start the 60-min Sepsis Bundle countdown
-    //   3. Generate the assessment schedule
-    //   4. Unlock the Sepsis Bundle phase (Phase 3)
-    completeChecklistItem('doctor_confirm', 'Nurse/System');
 
-    addTimelineEvent(
-      `✅ รับทราบและเริ่มกระบวนการ Sepsis Bundle — เริ่มนับ 60 นาที`,
-      'orange',
-      'Nurse'
-    );
+    // ✅ Bug #1 Fix: Check if countdown is already running for this patient
+    // completeChecklistItem('doctor_confirm') calls startCountdown() internally,
+    // which would reset the timer back to 60:00 if called again.
+    const patientId = alertedPatient?.id ?? selectedPatient?.id ?? '';
+    const existingTimer = useRTSASStore.getState().patientData[patientId]?.countdownTimer;
+    const alreadyRunning = existingTimer?.isActive && !existingTimer?.isExpired;
+
+    if (!alreadyRunning) {
+      // First acknowledgement — start the full Sepsis Bundle workflow
+      completeChecklistItem('doctor_confirm', 'Nurse/System');
+      addTimelineEvent(
+        `✅ รับทราบและเริ่มกระบวนการ Sepsis Bundle — เริ่มนับ 60 นาที`,
+        'orange',
+        'Nurse'
+      );
+    }
+    // If timer already running — just close popup, do NOT reset the countdown
 
     closeModal();
   };
