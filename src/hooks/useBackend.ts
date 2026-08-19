@@ -101,7 +101,7 @@ function mapBackendToPatient(bp: BackendPatient): Patient {
     hn: bp.hn,
     vn: bp.vn ?? '',
     fullName: bp.patient_name ?? bp.hn,  // Use real name if available
-    age: bp.age ?? 0,
+    age: (bp.age != null && bp.age > 0) ? bp.age : null,
     gender: bp.sex ?? 'other',
     triageLevel: riskToTriageLevel(bp.news_result.riskLevel),
     arrivalTime: bp.arrival_time,
@@ -243,7 +243,7 @@ export function useWebSocketAlerts() {
           hn: payload.hn,
           vn: payload.vn,
           patient_name: payload.patient_name,
-          age: payload.age,
+          age: (payload.age != null && payload.age > 0) ? payload.age : null,
           vstdate: payload.vstdate,
           vsttime: payload.vsttime,
           sex: payload.sex,

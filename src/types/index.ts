@@ -159,7 +159,7 @@ export interface Patient {
   fullName: string;
 
   /** Age in years */
-  age: number;
+  age: number | null;
 
   /** Gender */
   gender: 'male' | 'female' | 'other';
