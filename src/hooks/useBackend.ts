@@ -111,7 +111,7 @@ function mapBackendToPatient(bp: BackendPatient): Patient {
     latestNewsScore: bp.news_result.totalScore,
     latestVitals: vitals,
     latestNewsResult: newsResult,
-    hasSepsisAlert: bp.news_result.totalScore >= 5 || bp.news_result.hasSingleParameterAlert,
+    hasSepsisAlert: bp.news_result.totalScore >= 5 && bp.news_result.riskLevel === 'high',
     attendingPhysician: null,
     primaryNurse: null,
     location: `VN: ${bp.vn ?? '-'}`,
@@ -152,19 +152,20 @@ export function usePatientData() {
         selectPatient(patients[0].id);
         console.log(`[RTSAS] Initial load: ${data.count} patients. Top: HN ${patients[0].hn} NEWS ${patients[0].latestNewsScore}`);
 
-        // ✅ Bug #2 Fix: Queue alerts for ALL high-risk patients, not just the top one
-        const highRisk = patients.filter(p => p.hasSepsisAlert);
+        // ✅ Bug #2 Fix: Queue alerts for high-risk patients only (NEWS >= 5 + riskLevel=high)
+        // Cap at 3 to prevent popup flood
+        const highRisk = patients.filter(p => p.hasSepsisAlert).slice(0, 3);
         if (highRisk.length > 0) {
           // Show first alert immediately
           openModal('alert', {
             newsScore: highRisk[0].latestNewsScore,
             patientName: highRisk[0].hn,
           });
-          // Queue the rest
+          // Queue the rest (max 2 more)
           highRisk.slice(1).forEach(p => {
             queueAlert(p.hn, p.latestNewsScore);
           });
-          console.log(`[RTSAS] Queued ${highRisk.length} high-risk alerts.`);
+          console.log(`[RTSAS] Queued ${highRisk.length} high-risk alerts (NEWS >= 5).`);
         }
       } else {
         // Subsequent refresh — silently update patient list, no disruption
