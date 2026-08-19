@@ -73,7 +73,7 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
   });
 
   const isHighRisk = patient.currentRiskLevel === 'high';
-  const isMissingData = patient.latestNewsResult?.missingDataCount && patient.latestNewsResult.missingDataCount > 0;
+  const isMissingData = !!(patient.latestNewsResult?.missingDataCount && patient.latestNewsResult.missingDataCount > 0);
 
   return (
     <button
