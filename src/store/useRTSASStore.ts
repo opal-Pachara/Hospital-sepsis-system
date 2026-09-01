@@ -229,6 +229,12 @@ export interface PatientData {
   timeline: TimelineEvent[];
   countdownTimer: CountdownTimer;
   assessmentSchedule: AssessmentSchedule | null;
+  /** Set when doctor rules out sepsis — ends the protocol loop */
+  sepsisRuledOut: boolean;
+  /** Timestamp when doctor ruled out */
+  ruledOutAt: string | null;
+  /** Doctor who ruled out */
+  ruledOutBy: string | null;
 }
 
 export interface RTSASState {
@@ -277,6 +283,8 @@ export interface RTSASState {
   updateChecklistInput: (itemId: string, inputValue: string) => void;
   skipChecklistItem: (itemId: string, actor: string) => void;
   resetChecklist: () => void;
+  /** Doctor rules out sepsis — ends the protocol loop for this patient */
+  ruleOutSepsis: (actor: string) => void;
 
   // --- Timeline Actions ---
   addTimelineEvent: (
@@ -346,6 +354,9 @@ export const useRTSASStore = create<RTSASState>()(
     },
 
     assessmentSchedule: null,
+    sepsisRuledOut: false,
+    ruledOutAt: null,
+    ruledOutBy: null,
 
     ui: {
       selectedPatientId: null,
@@ -394,6 +405,9 @@ export const useRTSASStore = create<RTSASState>()(
           remainingSeconds: 3600, isExpired: false, isWarning: false, isCritical: false,
         },
         assessmentSchedule: null,
+        sepsisRuledOut: false,
+        ruledOutAt: null,
+        ruledOutBy: null,
       };
 
       // 3. Ensure the newly loaded data is in the map
@@ -616,6 +630,45 @@ export const useRTSASStore = create<RTSASState>()(
               checklist: newChecklist,
             }
           } : state.patientData
+        };
+      });
+    },
+
+    // Doctor rules out sepsis — ends protocol loop for this patient
+    ruleOutSepsis: (actor: string) => {
+      set((state) => {
+        if (!state.selectedPatient) return {};
+        const patientId = state.selectedPatient.id;
+        const now = new Date().toISOString();
+
+        // Update patientData with rule-out flag
+        const updatedPatientData: Record<string, PatientData> = {
+          ...state.patientData,
+          [patientId]: {
+            ...(state.patientData[patientId] || {}),
+            sepsisRuledOut: true,
+            ruledOutAt: now,
+            ruledOutBy: actor,
+          },
+        };
+
+        // Add timeline event
+        const event: TimelineEvent = {
+          id: generateId(),
+          timestamp: now,
+          actionText: `🟢 แพทย์ไม่ยืนยันภาวะติดเชื้อในกระแสเลือด — จบกระบวนการสำหรับผู้ป่วยรายนี้`,
+          color: 'green',
+          actor,
+        };
+
+        const updatedTimeline = [event, ...(state.timeline || [])];
+
+        return {
+          patientData: updatedPatientData,
+          sepsisRuledOut: true,
+          ruledOutAt: now,
+          ruledOutBy: actor,
+          timeline: updatedTimeline,
         };
       });
     },

@@ -23,24 +23,45 @@ const thaiPhaseLabels: Record<string, { icon: string; title: string }> = {
 };
 
 function DoctorConfirmButton({ item, phaseUnlocked }: { item: ChecklistItem; phaseUnlocked: boolean }) {
-  const { completeChecklistItem } = useRTSASStore();
-  const [confirming, setConfirming] = useState(false);
-  const actor = 'นพ.วิชัย';
+  const { completeChecklistItem, ruleOutSepsis, patientData, selectedPatient } = useRTSASStore();
+  const [step, setStep] = useState<'idle' | 'choosing' | 'confirmYes' | 'confirmNo'>('idle');
+  const actor = 'แพทย์เวร';
 
   const isCompleted = item.status === 'completed';
   const canComplete = phaseUnlocked && !isCompleted;
 
-  const handleConfirm = () => {
-    if (!canComplete) return;
-    if (!confirming) {
-      setConfirming(true);
-      return;
-    }
-    completeChecklistItem(item.id, actor);
-    showToast('แพทย์ยืนยันแล้ว — เริ่มนับถอยหลัง 60 นาที!', 'warning', 5000);
-    setConfirming(false);
-  };
+  // Check if this patient has been ruled out
+  const currentData = selectedPatient ? patientData[selectedPatient.id] : null;
+  const isRuledOut = currentData?.sepsisRuledOut ?? false;
 
+  // ─── Already ruled out ───────────────────────────────────────
+  if (isRuledOut && currentData) {
+    return (
+      <div style={{
+        margin: '8px 12px', padding: '12px', borderRadius: '10px',
+        background: '#f0fdf4', border: '2px solid #86efac',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '20px' }}>🟢</span>
+          <div>
+            <div style={{ fontSize: '11px', fontWeight: 800, color: '#16a34a' }}>
+              ไม่ใช่ภาวะติดเชื้อในกระแสเลือด
+            </div>
+            <div style={{ fontSize: '10px', color: '#4ade80', marginTop: '2px' }}>
+              แพทย์ Rule Out Sepsis — จบกระบวนการสำหรับผู้ป่วยรายนี้
+            </div>
+            <div style={{ fontSize: '9px', color: '#86efac', marginTop: '2px' }}>
+              โดย {currentData.ruledOutBy} · {currentData.ruledOutAt
+                ? new Date(currentData.ruledOutAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+                : '--'} น.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Already confirmed ────────────────────────────────────────
   if (isCompleted) {
     return (
       <div
@@ -67,6 +88,99 @@ function DoctorConfirmButton({ item, phaseUnlocked }: { item: ChecklistItem; pha
     );
   }
 
+  // ─── Confirm YES flow ─────────────────────────────────────────
+  if (step === 'confirmYes') {
+    return (
+      <div style={{ padding: '4px 12px', marginBottom: '4px' }}>
+        <div style={{
+          background: '#fefce8', border: '2px solid #fbbf24', borderRadius: '8px', padding: '10px',
+        }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#92400e', marginBottom: '8px' }}>
+            ⚠️ ยืนยันอีกครั้ง — แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด?
+          </div>
+          <div style={{ fontSize: '9px', color: '#78350f', marginBottom: '8px' }}>
+            ระบบจะเริ่มนับถอยหลัง 60 นาที และสร้างตาราง Sepsis Bundle ทันที
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button
+              type="button"
+              onClick={() => {
+                completeChecklistItem(item.id, actor);
+                showToast('แพทย์ยืนยันแล้ว — เริ่มนับถอยหลัง 60 นาที!', 'warning', 5000);
+                setStep('idle');
+              }}
+              style={{
+                flex: 1, padding: '7px', borderRadius: '7px', fontSize: '11px', fontWeight: 700,
+                background: 'linear-gradient(135deg, #10b981, #059669)', color: 'white',
+                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              ✅ ยืนยัน — เริ่มนับ 60 นาที
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep('idle')}
+              style={{
+                padding: '7px 12px', borderRadius: '7px', fontSize: '10px',
+                background: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0',
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              ยกเลิก
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Confirm NO flow ──────────────────────────────────────────
+  if (step === 'confirmNo') {
+    return (
+      <div style={{ padding: '4px 12px', marginBottom: '4px' }}>
+        <div style={{
+          background: '#f0fdf4', border: '2px solid #4ade80', borderRadius: '8px', padding: '10px',
+        }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#14532d', marginBottom: '8px' }}>
+            🟢 ยืนยันอีกครั้ง — แพทย์ไม่ยืนยันภาวะติดเชื้อในกระแสเลือด?
+          </div>
+          <div style={{ fontSize: '9px', color: '#166534', marginBottom: '8px' }}>
+            ระบบจะจบกระบวนการสำหรับผู้ป่วยรายนี้ และไม่เริ่ม Sepsis Bundle
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button
+              type="button"
+              onClick={() => {
+                ruleOutSepsis(actor);
+                showToast('จบกระบวนการ — แพทย์ Rule Out Sepsis', 'success', 5000);
+                setStep('idle');
+              }}
+              style={{
+                flex: 1, padding: '7px', borderRadius: '7px', fontSize: '11px', fontWeight: 700,
+                background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: 'white',
+                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              🟢 ยืนยัน — ไม่ใช่ภาวะติดเชื้อ
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep('idle')}
+              style={{
+                padding: '7px 12px', borderRadius: '7px', fontSize: '10px',
+                background: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0',
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              ยกเลิก
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Default: Choose YES or NO ────────────────────────────────
   return (
     <div style={{ padding: '4px 12px', marginBottom: '4px' }}>
       <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', marginBottom: '4px' }}>
@@ -77,40 +191,51 @@ function DoctorConfirmButton({ item, phaseUnlocked }: { item: ChecklistItem; pha
         background: '#eff6ff', padding: '6px 8px', borderRadius: '6px',
         border: '1px solid #bfdbfe', lineHeight: 1.6,
       }}>
-        <span style={{ fontWeight: 700, color: '#2563eb' }}>เมื่อแพทย์ยืนยัน</span> — ระบบจะเริ่มจับเวลา 60 นาที<br />
-        และสร้างตารางประเมินสัญญาณชีพอัตโนมัติ
+        <span style={{ fontWeight: 700, color: '#2563eb' }}>แพทย์ตัดสินใจ</span> — ยืนยันหรือไม่ยืนยันภาวะติดเชื้อในกระแสเลือด
       </div>
-      <button
-        type="button"
-        id="doctor-confirm-btn"
-        onClick={handleConfirm}
-        disabled={!canComplete}
-        className={`w-full transition-all ${!canComplete ? 'cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 active:translate-y-0'}`}
-        style={{
-          padding: '8px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-          fontFamily: 'inherit',
-          ...(!canComplete
-            ? { background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' }
-            : confirming
-            ? { background: '#fef2f2', border: '2px solid #ef4444', color: '#dc2626' }
-            : { background: 'linear-gradient(135deg, #10b981, #059669)', color: 'white', boxShadow: '0 4px 12px -2px rgba(16,185,129,.4)' }),
-        }}
-      >
-        {confirming ? '⚠️ ยืนยันอีกครั้ง — เริ่มนับ 60 นาที' : '✅ บันทึก: แพทย์ยืนยันภาวะติดเชื้อ'}
-      </button>
-      {confirming && (
-        <button
-          type="button"
-          onClick={() => setConfirming(false)}
-          style={{
-            width: '100%', padding: '4px', fontSize: '10px', color: '#94a3b8',
-            background: 'transparent', border: 'none', cursor: 'pointer',
-            marginTop: '4px', fontFamily: 'inherit',
-          }}
-        >
-          ยกเลิก
-        </button>
+      {!canComplete ? (
+        <div style={{
+          padding: '8px', borderRadius: '8px', fontSize: '10px', color: '#94a3b8',
+          background: '#f1f5f9', border: '1px solid #e2e8f0', textAlign: 'center',
+        }}>
+          🔒 รอดำเนินการ Phase ก่อนหน้าให้ครบก่อน
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {/* ✅ ยืนยันติดเชื้อ */}
+          <button
+            type="button"
+            id="doctor-confirm-yes-btn"
+            onClick={() => setStep('confirmYes')}
+            className="transition-all hover:-translate-y-0.5 active:translate-y-0"
+            style={{
+              flex: 1, padding: '8px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+              background: 'linear-gradient(135deg, #dc2626, #b91c1c)', color: 'white',
+              border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              boxShadow: '0 4px 12px -2px rgba(220,38,38,.35)',
+            }}
+          >
+            🔴 ยืนยัน — ติดเชื้อ<br />
+            <span style={{ fontSize: '9px', fontWeight: 500, opacity: 0.9 }}>เริ่มนับ 60 นาที</span>
+          </button>
+
+          {/* 🟢 ไม่ยืนยัน — Rule Out */}
+          <button
+            type="button"
+            id="doctor-confirm-no-btn"
+            onClick={() => setStep('confirmNo')}
+            className="transition-all hover:-translate-y-0.5 active:translate-y-0"
+            style={{
+              flex: 1, padding: '8px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+              background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: 'white',
+              border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              boxShadow: '0 4px 12px -2px rgba(34,197,94,.3)',
+            }}
+          >
+            🟢 ไม่ยืนยัน — Rule Out<br />
+            <span style={{ fontSize: '9px', fontWeight: 500, opacity: 0.9 }}>จบกระบวนการ</span>
+          </button>
+        </div>
       )}
     </div>
   );
