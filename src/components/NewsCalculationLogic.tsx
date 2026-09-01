@@ -40,7 +40,7 @@ export default function NewsCalculationLogic({ newsResult }: { newsResult: NEWSR
   return (
     <div className="section-card">
       <div className="section-card-header">
-        <div className="section-card-title"><span>🔍</span> การคำนวณ NEWS — Transparent Rule-Based</div>
+        <div className="section-card-title"><span>🔍</span> การคำนวณ NEWS Score</div>
         <div style={{ fontSize: '9px', color: '#0891b2', background: '#ecfeff', padding: '3px 8px', borderRadius: '6px', border: '1px solid #a5f3fc' }}>
           ✅ ตรวจสอบย้อนกลับได้
         </div>

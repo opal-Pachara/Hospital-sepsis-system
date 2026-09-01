@@ -112,9 +112,9 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
         </span>
       </div>
 
-      {/* Info */}
+      {/* Info — แสดงเฉพาะเพศ + อายุ ตาม privacy requirements */}
       <div style={{ fontSize: '10px', color: '#475569', marginTop: '3px', marginLeft: '8px' }}>
-        {genderIcon} {genderLabel}{patient.age > 0 ? ` · ${patient.age} ปี` : ''} · {patient.location}
+        {genderIcon} {genderLabel}{patient.age && patient.age > 0 ? ` · ${patient.age} ปี` : ''}
       </div>
 
       {/* Score Chip */}
