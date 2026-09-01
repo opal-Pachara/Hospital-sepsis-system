@@ -241,9 +241,10 @@ function CompletedPatientCard({ patient, isSelected }: { patient: Patient; isSel
 
 export default function Sidebar() {
   const { patients, selectedPatient, patientData } = useRTSASStore();
-  const [filter, setFilter] = useState<'all' | 'alert'>('all');
+  const [filter, setFilter] = useState<'all' | 'alert' | 'completed'>('all');
   const [lastRefresh, setLastRefresh] = useState('');
   const [completedOpen, setCompletedOpen] = useState(true);
+  void completedOpen; void setCompletedOpen;
 
   // Determine which patients have completed their loop
   const isPatientCompleted = (p: Patient): boolean => {
@@ -362,63 +363,68 @@ export default function Sidebar() {
         >
           🔴 เสี่ยง {alertCount}
         </button>
+        <button
+          className="transition-all"
+          onClick={() => setFilter('completed')}
+          style={{
+            padding: '3px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'inherit',
+            border: `1px solid #16a34a`,
+            background: filter === 'completed' ? '#16a34a' : 'transparent',
+            color: filter === 'completed' ? '#fff' : '#16a34a',
+          }}
+        >
+          ✅ รักษาแล้ว {completedPatients.length}
+        </button>
       </div>
 
-      {/* ─── Active Patient List ─── */}
+      {/* ─── Patient List Area ─── */}
       <div className="flex-1 overflow-y-auto">
-        {filteredActive.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '24px 0', fontSize: '11px', color: '#94a3b8' }}>
-            {filter === 'alert' ? 'ไม่มีผู้ป่วยเสี่ยงขณะนี้' : 'ไม่พบผู้ป่วยที่อยู่ในกระบวนการ'}
-          </div>
-        ) : (
-          filteredActive.map((patient) => (
-            <PatientCard
-              key={patient.id}
-              patient={patient}
-              isSelected={selectedPatient?.id === patient.id}
-            />
-          ))
-        )}
 
-        {/* ─── Completed Section ─── */}
-        {completedPatients.length > 0 && (
-          <div style={{ borderTop: '2px dashed #d1fae5', marginTop: '4px' }}>
-            {/* Section header — collapsible */}
-            <button
-              onClick={() => setCompletedOpen((v) => !v)}
-              className="w-full text-left flex items-center justify-between transition-all hover:bg-emerald-50"
-              style={{
-                padding: '7px 14px',
-                fontFamily: 'inherit',
+        {/* Tab: completed patients */}
+        {filter === 'completed' ? (
+          completedPatients.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '32px 16px', fontSize: '11px', color: '#94a3b8' }}>
+              <div style={{ fontSize: '24px', marginBottom: '8px' }}>✅</div>
+              ยังไม่มีผู้ป่วยที่จบกระบวนการ
+            </div>
+          ) : (
+            <>
+              {/* Summary bar */}
+              <div style={{
+                padding: '6px 14px',
                 background: '#f0fdf4',
-                border: 'none',
-                cursor: 'pointer',
-                borderBottom: completedOpen ? '1px solid #d1fae5' : 'none',
-              }}
-            >
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                ✅ จบกระบวนการแล้ว
-                <span style={{
-                  background: '#16a34a', color: '#fff', borderRadius: '8px',
-                  padding: '0px 6px', fontSize: '9px',
-                }}>
-                  {completedPatients.length}
-                </span>
-              </span>
-              <span style={{ fontSize: '10px', color: '#86efac' }}>
-                {completedOpen ? '▲' : '▼'}
-              </span>
-            </button>
-
-            {/* Completed cards */}
-            {completedOpen && completedPatients.map((patient) => (
-              <CompletedPatientCard
+                borderBottom: '1px solid #d1fae5',
+                fontSize: '9px',
+                color: '#16a34a',
+                fontWeight: 600,
+              }}>
+                📋 ผู้ป่วยที่รักษาแล้ววันนี้ — {completedPatients.length} ราย (Timeline ยังเก็บอยู่)
+              </div>
+              {completedPatients.map((patient) => (
+                <CompletedPatientCard
+                  key={patient.id}
+                  patient={patient}
+                  isSelected={selectedPatient?.id === patient.id}
+                />
+              ))}
+            </>
+          )
+        ) : (
+          /* Tab: active / alert patients */
+          filteredActive.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px 0', fontSize: '11px', color: '#94a3b8' }}>
+              {filter === 'alert' ? 'ไม่มีผู้ป่วยเสี่ยงขณะนี้' : 'ไม่พบผู้ป่วยที่อยู่ในกระบวนการ'}
+            </div>
+          ) : (
+            filteredActive.map((patient) => (
+              <PatientCard
                 key={patient.id}
                 patient={patient}
                 isSelected={selectedPatient?.id === patient.id}
               />
-            ))}
-          </div>
+            ))
+          )
         )}
       </div>
     </aside>
