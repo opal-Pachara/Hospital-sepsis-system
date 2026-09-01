@@ -175,22 +175,100 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
   );
 }
 
+// ─── Completed Patient Card (Rule Out or Bundle Done) ───────────────────────
+function CompletedPatientCard({ patient, isSelected }: { patient: Patient; isSelected: boolean }) {
+  const selectPatient = useRTSASStore((s) => s.selectPatient);
+  const patientData = useRTSASStore((s) => s.patientData);
+  const data = patientData[patient.id];
+
+  const genderIcon = patient.gender === 'male' ? '♂' : patient.gender === 'female' ? '♀' : '⚥';
+  const genderLabel = patient.gender === 'male' ? 'ชาย' : patient.gender === 'female' ? 'หญิง' : 'อื่นๆ';
+
+  const isRuledOut = data?.sepsisRuledOut ?? false;
+  const isBundleDone = !isRuledOut; // completed via full Sepsis Bundle
+
+  const completedTime = isRuledOut
+    ? data?.ruledOutAt
+    : data?.countdownTimer?.startedAt; // fallback — could be improved
+
+  const timeStr = completedTime
+    ? new Date(completedTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+    : '--:--';
+
+  return (
+    <button
+      id={`completed-card-${patient.id}`}
+      onClick={() => selectPatient(patient.id)}
+      className="w-full text-left border-b border-[#e2e8f0] relative transition-all hover:bg-slate-50"
+      style={{
+        padding: '8px 14px',
+        fontFamily: 'inherit',
+        cursor: 'pointer',
+        background: isSelected ? '#f0fdf4' : '#f8fafc',
+        borderLeft: isSelected ? '3px solid #16a34a' : '3px solid transparent',
+        opacity: 0.85,
+      }}
+    >
+      {/* Left accent bar */}
+      <div className="absolute left-0 top-0 bottom-0"
+        style={{ width: '3px', background: isRuledOut ? '#86efac' : '#4ade80', borderRadius: '0 2px 2px 0' }}
+      />
+
+      <div className="flex justify-between items-center" style={{ marginLeft: '6px' }}>
+        <div style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>
+          {maskHN(patient.hn)}
+        </div>
+        <span style={{
+          fontSize: '8px', fontWeight: 700, padding: '2px 6px', borderRadius: '8px',
+          background: isRuledOut ? '#f0fdf4' : '#dcfce7',
+          color: isRuledOut ? '#16a34a' : '#15803d',
+          border: `1px solid ${isRuledOut ? '#86efac' : '#4ade80'}`,
+        }}>
+          {isRuledOut ? '🟢 Rule Out' : '✅ จบกระบวนการ'}
+        </span>
+      </div>
+
+      <div style={{ fontSize: '9px', color: '#94a3b8', marginTop: '2px', marginLeft: '6px' }}>
+        {genderIcon} {genderLabel}{patient.age && patient.age > 0 ? ` · ${patient.age} ปี` : ''}
+        {' · '}NEWS {patient.latestNewsScore}
+        {completedTime && (
+          <span> · {isRuledOut ? 'Rule Out' : 'เสร็จ'} {timeStr} น.</span>
+        )}
+      </div>
+    </button>
+  );
+}
+
 export default function Sidebar() {
-  const { patients, selectedPatient } = useRTSASStore();
+  const { patients, selectedPatient, patientData } = useRTSASStore();
   const [filter, setFilter] = useState<'all' | 'alert'>('all');
   const [lastRefresh, setLastRefresh] = useState('');
+  const [completedOpen, setCompletedOpen] = useState(true);
+
+  // Determine which patients have completed their loop
+  const isPatientCompleted = (p: Patient): boolean => {
+    const data = patientData[p.id];
+    if (!data) return false;
+    // Rule Out OR timer expired (bundle done)
+    return data.sepsisRuledOut === true || (data.countdownTimer?.isExpired === true);
+  };
 
   // Sort patients by risk: high → medium → low_medium → low
   const riskOrder: Record<RiskLevel, number> = { high: 0, medium: 1, low_medium: 2, low: 3 };
-  const sortedPatients = [...patients].sort(
-    (a, b) => riskOrder[a.currentRiskLevel] - riskOrder[b.currentRiskLevel]
-  );
 
-  const alertCount = patients.filter((p) => p.hasSepsisAlert).length;
+  const activePatients = [...patients]
+    .filter((p) => !isPatientCompleted(p))
+    .sort((a, b) => riskOrder[a.currentRiskLevel] - riskOrder[b.currentRiskLevel]);
 
-  const filteredPatients = filter === 'alert'
-    ? sortedPatients.filter((p) => p.hasSepsisAlert)
-    : sortedPatients;
+  const completedPatients = [...patients]
+    .filter((p) => isPatientCompleted(p))
+    .sort((a, b) => riskOrder[a.currentRiskLevel] - riskOrder[b.currentRiskLevel]);
+
+  const alertCount = activePatients.filter((p) => p.hasSepsisAlert).length;
+
+  const filteredActive = filter === 'alert'
+    ? activePatients.filter((p) => p.hasSepsisAlert)
+    : activePatients;
 
   useEffect(() => {
     const update = () => {
@@ -221,12 +299,22 @@ export default function Sidebar() {
         <span style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '1px' }}>
           📋 รายชื่อผู้ป่วย
         </span>
-        <span style={{
-          background: '#2563eb', color: '#fff', borderRadius: '10px',
-          padding: '1px 8px', fontSize: '11px', fontWeight: 700,
-        }}>
-          {patients.length}
-        </span>
+        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+          <span style={{
+            background: '#2563eb', color: '#fff', borderRadius: '10px',
+            padding: '1px 8px', fontSize: '11px', fontWeight: 700,
+          }}>
+            {activePatients.length}
+          </span>
+          {completedPatients.length > 0 && (
+            <span style={{
+              background: '#16a34a', color: '#fff', borderRadius: '10px',
+              padding: '1px 8px', fontSize: '11px', fontWeight: 700,
+            }}>
+              ✓{completedPatients.length}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Refresh bar */}
@@ -259,7 +347,7 @@ export default function Sidebar() {
             color: filter === 'all' ? '#fff' : '#2563eb',
           }}
         >
-          ทั้งหมด {patients.length}
+          กำลังรักษา {activePatients.length}
         </button>
         <button
           className="transition-all"
@@ -276,20 +364,61 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* Patient List */}
+      {/* ─── Active Patient List ─── */}
       <div className="flex-1 overflow-y-auto">
-        {filteredPatients.length === 0 ? (
+        {filteredActive.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '24px 0', fontSize: '11px', color: '#94a3b8' }}>
-            ไม่พบผู้ป่วย
+            {filter === 'alert' ? 'ไม่มีผู้ป่วยเสี่ยงขณะนี้' : 'ไม่พบผู้ป่วยที่อยู่ในกระบวนการ'}
           </div>
         ) : (
-          filteredPatients.map((patient) => (
+          filteredActive.map((patient) => (
             <PatientCard
               key={patient.id}
               patient={patient}
               isSelected={selectedPatient?.id === patient.id}
             />
           ))
+        )}
+
+        {/* ─── Completed Section ─── */}
+        {completedPatients.length > 0 && (
+          <div style={{ borderTop: '2px dashed #d1fae5', marginTop: '4px' }}>
+            {/* Section header — collapsible */}
+            <button
+              onClick={() => setCompletedOpen((v) => !v)}
+              className="w-full text-left flex items-center justify-between transition-all hover:bg-emerald-50"
+              style={{
+                padding: '7px 14px',
+                fontFamily: 'inherit',
+                background: '#f0fdf4',
+                border: 'none',
+                cursor: 'pointer',
+                borderBottom: completedOpen ? '1px solid #d1fae5' : 'none',
+              }}
+            >
+              <span style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                ✅ จบกระบวนการแล้ว
+                <span style={{
+                  background: '#16a34a', color: '#fff', borderRadius: '8px',
+                  padding: '0px 6px', fontSize: '9px',
+                }}>
+                  {completedPatients.length}
+                </span>
+              </span>
+              <span style={{ fontSize: '10px', color: '#86efac' }}>
+                {completedOpen ? '▲' : '▼'}
+              </span>
+            </button>
+
+            {/* Completed cards */}
+            {completedOpen && completedPatients.map((patient) => (
+              <CompletedPatientCard
+                key={patient.id}
+                patient={patient}
+                isSelected={selectedPatient?.id === patient.id}
+              />
+            ))}
+          </div>
         )}
       </div>
     </aside>
