@@ -291,6 +291,9 @@ export interface AssessmentScheduleEntry {
 
   /** Whether the assessment has been completed */
   isCompleted: boolean;
+  
+  /** Whether the assessment was canceled due to treatment termination */
+  isCanceled?: boolean;
 
   /** ISO 8601 actual completion time */
   completedAt: string | null;

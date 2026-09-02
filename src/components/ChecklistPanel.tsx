@@ -242,7 +242,7 @@ function DoctorConfirmButton({ item, phaseUnlocked }: { item: ChecklistItem; pha
 }
 
 function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseUnlocked: boolean }) {
-  const { completeChecklistItem, updateChecklistInput, skipChecklistItem } = useRTSASStore();
+  const { completeChecklistItem, updateChecklistInput, skipChecklistItem, patientData, selectedPatient } = useRTSASStore();
   const [inputVal, setInputVal] = useState(item.inputValue ?? '');
   const [actor] = useState('พย.สุกัญญา');
 
@@ -250,10 +250,13 @@ function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseU
     return <DoctorConfirmButton item={item} phaseUnlocked={phaseUnlocked} />;
   }
 
+  const currentData = selectedPatient ? patientData[selectedPatient.id] : null;
+  const isGloballyCompleted = (currentData?.sepsisRuledOut ?? false) || (currentData?.treatmentCompleted ?? false);
+
   const isCompleted = item.status === 'completed';
   const isSkipped = item.status === 'skipped';
   const isDone = isCompleted || isSkipped;
-  const canComplete = phaseUnlocked && !isDone;
+  const canComplete = phaseUnlocked && !isDone && !isGloballyCompleted;
   const label = thaiLabels[item.id] || item.label;
 
   const handleComplete = () => {
@@ -473,7 +476,14 @@ function PhaseSection({ phase }: { phase: ChecklistPhase }) {
 }
 
 export default function ChecklistPanel() {
-  const { checklist, assessmentSchedule } = useRTSASStore();
+  const { checklist, assessmentSchedule, patientData, selectedPatient } = useRTSASStore();
+
+  // Check if patient is globally completed
+  const currentData = selectedPatient ? patientData[selectedPatient.id] : null;
+  const isGloballyCompleted = (currentData?.sepsisRuledOut ?? false) || (currentData?.treatmentCompleted ?? false);
+  
+  // Check if Phase 4 is unlocked
+  const isPhase4Unlocked = checklist.find(p => p.phase === 'assessment_schedule')?.isUnlocked ?? false;
 
   // Calculate overall progress
   const allItems = checklist.flatMap((p) => p.items);
@@ -540,7 +550,7 @@ export default function ChecklistPanel() {
             {/* Table header — matches .at-head */}
             <div
               style={{
-                display: 'grid', gridTemplateColumns: '30px 1fr 46px 64px', gap: '4px',
+                display: 'grid', gridTemplateColumns: '30px 1fr 46px 80px', gap: '4px',
                 padding: '5px 8px', background: '#eff6ff', borderBottom: '1px solid #bfdbfe',
                 fontSize: '9px', fontWeight: 700, color: '#2563eb',
                 letterSpacing: '0.5px', textTransform: 'uppercase',
@@ -554,8 +564,12 @@ export default function ChecklistPanel() {
 
             {/* Rows */}
             <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
-              {assessmentSchedule.entries.map((entry) => {
-                const isDone = entry.isCompleted;
+              {(() => {
+                const firstUncompletedSeq = assessmentSchedule.entries.find(e => !e.isCompleted && !e.isCanceled)?.sequence ?? -1;
+                const firstCanceledSeq = assessmentSchedule.entries.find(e => e.isCanceled)?.sequence ?? -1;
+                
+                return assessmentSchedule.entries.map((entry) => {
+                  const isDone = entry.isCompleted;
                 const isDue = !isDone && new Date() >= new Date(entry.scheduledTime);
                 const timeStr = new Date(entry.scheduledTime).toLocaleTimeString('th-TH', {
                   hour: '2-digit',
@@ -566,7 +580,7 @@ export default function ChecklistPanel() {
                   <div
                     key={entry.id}
                     style={{
-                      display: 'grid', gridTemplateColumns: '30px 1fr 46px 64px', gap: '4px',
+                      display: 'grid', gridTemplateColumns: '30px 1fr 46px 80px', gap: '4px',
                       padding: '5px 8px', borderBottom: '1px solid #f1f5f9',
                       alignItems: 'center', fontSize: '10px',
                       ...(isDone ? { background: '#f0fdf430' } : isDue ? { background: '#fef2f230' } : {}),
@@ -594,14 +608,37 @@ export default function ChecklistPanel() {
                       )}
                     </span>
                     <span style={{ textAlign: 'center' }}>
-                      {isDone ? (
+                      {entry.isCanceled ? (
+                        <span style={{
+                          padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
+                          background: entry.sequence === firstCanceledSeq ? '#dcfce7' : '#f1f5f9',
+                          color: entry.sequence === firstCanceledSeq ? '#16a34a' : '#64748b',
+                          border: `1px solid ${entry.sequence === firstCanceledSeq ? '#16a34a' : '#cbd5e1'}`,
+                        }}>
+                          {entry.sequence === firstCanceledSeq ? '✅ เสร็จตรงนี้' : '— ยกเลิก'}
+                        </span>
+                      ) : isDone ? (
                         <span style={{
                           padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
                           background: '#dcfce7', color: '#16a34a', border: '1px solid #bbf7d0',
                         }}>
-                          ✓ เสร็จสิ้น
+                          ✓ บันทึกแล้ว
                         </span>
-                      ) : isDue ? (
+                      ) : !isPhase4Unlocked ? (
+                        <span style={{
+                          padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
+                          background: '#f1f5f9', color: '#94a3b8', border: '1px solid #cbd5e1',
+                        }}>
+                          🔒 รอ Phase 3
+                        </span>
+                      ) : entry.sequence !== firstUncompletedSeq ? (
+                        <span style={{
+                          padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
+                          background: '#f1f5f9', color: '#94a3b8', border: '1px solid #cbd5e1',
+                        }}>
+                          🔒 รอครั้งก่อนหน้า
+                        </span>
+                      ) : isDue && !isGloballyCompleted ? (
                         <button
                           type="button"
                           className="animate-pulse-btn"
@@ -619,7 +656,7 @@ export default function ChecklistPanel() {
                         >
                           ⚡ บันทึกด่วน
                         </button>
-                      ) : (
+                      ) : !isGloballyCompleted ? (
                         <button
                           type="button"
                           onClick={() =>
@@ -636,11 +673,19 @@ export default function ChecklistPanel() {
                         >
                           บันทึก
                         </button>
+                      ) : (
+                        <span style={{
+                          padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
+                          background: '#f1f5f9', color: '#94a3b8', border: '1px solid #cbd5e1',
+                        }}>
+                          — ข้าม
+                        </span>
                       )}
                     </span>
                   </div>
                 );
-              })}
+                });
+              })()}
             </div>
 
             {/* Footer — matches .at-footer */}

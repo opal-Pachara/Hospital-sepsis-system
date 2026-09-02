@@ -7,7 +7,7 @@
 // =============================================================================
 
 import { create } from 'zustand';
-import { subscribeWithSelector } from 'zustand/middleware';
+import { subscribeWithSelector, persist } from 'zustand/middleware';
 import type {
   Patient,
   VitalSigns,
@@ -235,6 +235,9 @@ export interface PatientData {
   ruledOutAt: string | null;
   /** Doctor who ruled out */
   ruledOutBy: string | null;
+  /** Set when treatment is manually marked as completed */
+  treatmentCompleted: boolean;
+  treatmentCompletedAt: string | null;
 }
 
 export interface RTSASState {
@@ -254,6 +257,15 @@ export interface RTSASState {
 
   // ---- Assessment Schedule ----
   assessmentSchedule: AssessmentSchedule | null;
+
+  // ---- Rule Out State ----
+  sepsisRuledOut: boolean;
+  ruledOutAt: string | null;
+  ruledOutBy: string | null;
+
+  // ---- Treatment Completed State ----
+  treatmentCompleted: boolean;
+  treatmentCompletedAt: string | null;
 
   // ---- UI State ----
   ui: UIState;
@@ -283,8 +295,10 @@ export interface RTSASState {
   updateChecklistInput: (itemId: string, inputValue: string) => void;
   skipChecklistItem: (itemId: string, actor: string) => void;
   resetChecklist: () => void;
-  /** Doctor rules out sepsis — ends the protocol loop for this patient */
+  /** Doctor rules out sepsis — ends the protocol loop */
   ruleOutSepsis: (actor: string) => void;
+  // --- Treatment Actions ---
+  completeTreatment: (actor: string) => void;
 
   // --- Timeline Actions ---
   addTimelineEvent: (
@@ -333,7 +347,8 @@ export interface RTSASState {
 // ---------------------------------------------------------------------------
 
 export const useRTSASStore = create<RTSASState>()(
-  subscribeWithSelector((set, get) => ({
+  persist(
+    subscribeWithSelector((set, get) => ({
     // ---- Initial State ----
     patients: [],
     selectedPatient: null,
@@ -357,6 +372,8 @@ export const useRTSASStore = create<RTSASState>()(
     sepsisRuledOut: false,
     ruledOutAt: null,
     ruledOutBy: null,
+    treatmentCompleted: false,
+    treatmentCompletedAt: null,
 
     ui: {
       selectedPatientId: null,
@@ -389,10 +406,16 @@ export const useRTSASStore = create<RTSASState>()(
       const newPatientDataMap = { ...state.patientData };
       if (state.selectedPatient) {
         newPatientDataMap[state.selectedPatient.id] = {
+          ...(state.patientData[state.selectedPatient.id] || {}),
           checklist: state.checklist,
           timeline: state.timeline,
           countdownTimer: state.countdownTimer,
           assessmentSchedule: state.assessmentSchedule,
+          sepsisRuledOut: state.sepsisRuledOut,
+          ruledOutAt: state.ruledOutAt,
+          ruledOutBy: state.ruledOutBy,
+          treatmentCompleted: state.treatmentCompleted,
+          treatmentCompletedAt: state.treatmentCompletedAt,
         };
       }
 
@@ -408,6 +431,8 @@ export const useRTSASStore = create<RTSASState>()(
         sepsisRuledOut: false,
         ruledOutAt: null,
         ruledOutBy: null,
+        treatmentCompleted: false,
+        treatmentCompletedAt: null,
       };
 
       // 3. Ensure the newly loaded data is in the map
@@ -421,6 +446,11 @@ export const useRTSASStore = create<RTSASState>()(
         timeline: dataToLoad.timeline,
         countdownTimer: dataToLoad.countdownTimer,
         assessmentSchedule: dataToLoad.assessmentSchedule,
+        sepsisRuledOut: dataToLoad.sepsisRuledOut,
+        ruledOutAt: dataToLoad.ruledOutAt,
+        ruledOutBy: dataToLoad.ruledOutBy,
+        treatmentCompleted: dataToLoad.treatmentCompleted,
+        treatmentCompletedAt: dataToLoad.treatmentCompletedAt,
         ui: { ...state.ui, selectedPatientId: patientId },
       });
     },
@@ -641,14 +671,33 @@ export const useRTSASStore = create<RTSASState>()(
         const patientId = state.selectedPatient.id;
         const now = new Date().toISOString();
 
-        // Update patientData with rule-out flag
+        // Update patientData with rule-out flag, stop timer, cancel schedule
+        const currentData = state.patientData[patientId] || {};
+        
+        let newTimer = currentData.countdownTimer;
+        if (newTimer?.isActive) {
+          newTimer = { ...newTimer, isActive: false };
+        }
+
+        let newSchedule = currentData.assessmentSchedule;
+        if (newSchedule) {
+          newSchedule = {
+            ...newSchedule,
+            entries: newSchedule.entries.map(entry => 
+              !entry.isCompleted ? { ...entry, isCanceled: true } : entry
+            ),
+          };
+        }
+
         const updatedPatientData: Record<string, PatientData> = {
           ...state.patientData,
           [patientId]: {
-            ...(state.patientData[patientId] || {}),
+            ...currentData,
             sepsisRuledOut: true,
             ruledOutAt: now,
             ruledOutBy: actor,
+            countdownTimer: newTimer,
+            assessmentSchedule: newSchedule,
           },
         };
 
@@ -661,13 +710,73 @@ export const useRTSASStore = create<RTSASState>()(
           actor,
         };
 
-        const updatedTimeline = [event, ...(state.timeline || [])];
+        const updatedTimeline = [...(state.timeline || []), event];
 
         return {
           patientData: updatedPatientData,
           sepsisRuledOut: true,
           ruledOutAt: now,
           ruledOutBy: actor,
+          countdownTimer: updatedPatientData[patientId].countdownTimer,
+          assessmentSchedule: updatedPatientData[patientId].assessmentSchedule,
+          timeline: updatedTimeline,
+        };
+      });
+    },
+
+    // Manually mark patient treatment as completed
+    completeTreatment: (actor: string) => {
+      set((state) => {
+        if (!state.selectedPatient) return {};
+        const patientId = state.selectedPatient.id;
+        const now = new Date().toISOString();
+
+        // Update patientData with treatmentCompleted flag, stop timer, cancel schedule
+        const currentData = state.patientData[patientId] || {};
+        
+        let newTimer = currentData.countdownTimer;
+        if (newTimer?.isActive) {
+          newTimer = { ...newTimer, isActive: false };
+        }
+
+        let newSchedule = currentData.assessmentSchedule;
+        if (newSchedule) {
+          newSchedule = {
+            ...newSchedule,
+            entries: newSchedule.entries.map(entry => 
+              !entry.isCompleted ? { ...entry, isCanceled: true } : entry
+            ),
+          };
+        }
+
+        const updatedPatientData: Record<string, PatientData> = {
+          ...state.patientData,
+          [patientId]: {
+            ...currentData,
+            treatmentCompleted: true,
+            treatmentCompletedAt: now,
+            countdownTimer: newTimer,
+            assessmentSchedule: newSchedule,
+          },
+        };
+
+        // Add timeline event
+        const event: TimelineEvent = {
+          id: generateId(),
+          timestamp: now,
+          actionText: `✅ สิ้นสุดการรักษา — ผู้ป่วยได้รับการรักษาครบถ้วนแล้ว`,
+          color: 'green',
+          actor,
+        };
+
+        const updatedTimeline = [...(state.timeline || []), event];
+
+        return {
+          patientData: updatedPatientData,
+          treatmentCompleted: true,
+          treatmentCompletedAt: now,
+          countdownTimer: updatedPatientData[patientId].countdownTimer,
+          assessmentSchedule: updatedPatientData[patientId].assessmentSchedule,
           timeline: updatedTimeline,
         };
       });
@@ -1093,7 +1202,33 @@ export const useRTSASStore = create<RTSASState>()(
     },
 
     hideHN: () => set({ isHNRevealed: false }),
-  }))
+  })),
+  {
+    name: 'rtsas-storage',
+    partialize: (state) => ({
+      // Only persist essential state, avoid UI state that might cause issues on reload
+      patients: state.patients,
+      patientData: state.patientData,
+      selectedPatient: state.selectedPatient,
+      checklist: state.checklist,
+      timeline: state.timeline,
+      countdownTimer: state.countdownTimer,
+      assessmentSchedule: state.assessmentSchedule,
+      sepsisRuledOut: state.sepsisRuledOut,
+      ruledOutAt: state.ruledOutAt,
+      ruledOutBy: state.ruledOutBy,
+      treatmentCompleted: state.treatmentCompleted,
+      treatmentCompletedAt: state.treatmentCompletedAt,
+      isAuthenticated: state.isAuthenticated,
+      currentUser: state.currentUser,
+      isHNRevealed: state.isHNRevealed,
+      ui: {
+        ...state.ui,
+        currentTime: new Date().toISOString(), // Reset current time so it doesn't freeze
+      }
+    })
+  }
+)
 );
 
 // ---------------------------------------------------------------------------
