@@ -2,32 +2,30 @@
 // HN Privacy Masking Utility
 // =============================================================================
 //
-// ตาม requirement EC: หน้าจอแผงควบคุมส่วนกลางจะไม่แสดง HN แบบเต็ม
-// แสดงเฉพาะ 4 หลักสุดท้าย เช่น HN-660001 → HN-**0001
+// ตาม requirement Privacy:
+// หน้าจอแผงควบคุมส่วนกลางแสดงเฉพาะ "4 หลักสุดท้าย" ของ HN เท่านั้น
+// เช่น HN19086455 → ****6455
+//      HN-660001  → ****0001
 // =============================================================================
 
 /**
- * Mask a Hospital Number (HN) to show only the last 4 digits.
- * 
+ * Mask a Hospital Number (HN) to show ONLY the last 4 digits.
+ * Supports formats: HN19086455, HN-660001, 19086455, etc.
+ *
  * @example
- * maskHN('HN-660001') // → 'HN-**0001'
- * maskHN('HN-660042') // → 'HN-**0042'
- * maskHN('HN-1234')   // → 'HN-1234' (4 digits or fewer — no masking needed)
+ * maskHN('HN19086455') // → '****6455'
+ * maskHN('HN-660001')  // → '****0001'
+ * maskHN('12345678')   // → '****5678'
  */
 export function maskHN(hn: string): string {
-  // Match pattern: prefix (HN-) followed by digits
-  const match = hn.match(/^(HN-)(\d+)$/i);
-  if (!match) return hn; // Return as-is if format doesn't match
+  if (!hn) return '****';
 
-  const prefix = match[1];
-  const digits = match[2];
+  // Extract only the digit portion (strip any prefix like "HN", "HN-", "vn-", etc.)
+  const digitsOnly = hn.replace(/^[a-zA-Z\-]+/, '');
 
-  // If 4 digits or fewer, no masking needed
-  if (digits.length <= 4) return hn;
+  if (!digitsOnly) return '****';
 
-  // Replace leading digits with asterisks, keep last 4
-  const maskedPart = '*'.repeat(digits.length - 4);
-  const visiblePart = digits.slice(-4);
-
-  return `${prefix}${maskedPart}${visiblePart}`;
+  // Always show ONLY the last 4 digits — mask the rest
+  const last4 = digitsOnly.slice(-4).padStart(4, '0');
+  return `****${last4}`;
 }
