@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Patient } from '../types';
+import { maskHN } from '../utils/hnMask';
 
 export default function PatientInfoBar({ patient }: { patient: Patient }) {
   const [erElapsed, setErElapsed] = useState('');
@@ -57,7 +58,7 @@ export default function PatientInfoBar({ patient }: { patient: Patient }) {
 
       {/* Row 1: HN + Alert badge */}
         <div className="flex items-center justify-between gap-2" style={{ marginBottom: '5px' }}>
-          <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b' }}>{patient.hn}</div>
+          <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b' }}>{maskHN(patient.hn)}</div>
           {patient.hasSepsisAlert && (
             <div
               className="animate-pulse-red flex-shrink-0"
