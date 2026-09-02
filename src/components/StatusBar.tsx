@@ -20,9 +20,10 @@ export default function StatusBar() {
   };
 
   const handleReset = () => {
-    resetChecklist();
-    clearTimeline();
-    resetCountdown();
+    // Clear Zustand persist storage and reload to completely reset all state
+    localStorage.clear();
+    sessionStorage.clear();
+    window.location.reload();
   };
 
   return (

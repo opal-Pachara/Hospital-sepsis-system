@@ -39,7 +39,7 @@ const unitStyle: React.CSSProperties = {
 };
 
 export default function AssessmentFormModal() {
-  const { ui, closeModal, completeAssessment, selectedPatient, assessmentSchedule } = useRTSASStore();
+  const { ui, closeModal, completeAssessment, completeTreatment, selectedPatient, assessmentSchedule } = useRTSASStore();
 
   const [rr, setRR] = useState('');
   const [spo2, setSpo2] = useState('');
@@ -109,6 +109,14 @@ export default function AssessmentFormModal() {
 
     // Reset fields
     setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT(''); setGCSInput('');
+  };
+
+  const handleCompleteTreatment = () => {
+    if (confirm('คุณต้องการยืนยันว่าผู้ป่วยได้รับการรักษา Sepsis เสร็จสิ้นครบถ้วนแล้วใช่หรือไม่?')) {
+      completeTreatment('พย.สุกัญญา');
+      showToast('สิ้นสุดการรักษาสำหรับผู้ป่วยรายนี้', 'success');
+      closeModal();
+    }
   };
 
   const handleClose = () => {
@@ -423,6 +431,24 @@ export default function AssessmentFormModal() {
               onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 6px 20px -4px rgba(37, 99, 235, .4)'; }}
             >
               💾 บันทึกการประเมิน
+            </button>
+            <button
+              type="button"
+              onClick={handleCompleteTreatment}
+              style={{
+                flex: 2, padding: '14px', borderRadius: '14px',
+                fontSize: '14px', fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
+                color: '#fff', border: 'none',
+                background: 'linear-gradient(135deg, #10b981, #059669)',
+                boxShadow: '0 6px 20px -4px rgba(16, 185, 129, .4)',
+                transition: 'all 0.25s ease',
+                letterSpacing: '-0.2px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+              }}
+              onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 8px 28px -4px rgba(16, 185, 129, .5)'; }}
+              onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 6px 20px -4px rgba(16, 185, 129, .4)'; }}
+            >
+              ✅ รักษาเสร็จแล้ว
             </button>
             <button
               type="button"

@@ -185,11 +185,14 @@ function CompletedPatientCard({ patient, isSelected }: { patient: Patient; isSel
   const genderLabel = patient.gender === 'male' ? 'ชาย' : patient.gender === 'female' ? 'หญิง' : 'อื่นๆ';
 
   const isRuledOut = data?.sepsisRuledOut ?? false;
-  const isBundleDone = !isRuledOut; // completed via full Sepsis Bundle
+  const isTreatmentCompleted = data?.treatmentCompleted ?? false;
+  const isBundleDone = !isRuledOut && !isTreatmentCompleted; // completed via full Sepsis Bundle
 
   const completedTime = isRuledOut
     ? data?.ruledOutAt
-    : data?.countdownTimer?.startedAt; // fallback — could be improved
+    : isTreatmentCompleted 
+      ? data?.treatmentCompletedAt
+      : data?.countdownTimer?.startedAt; // fallback — could be improved
 
   const timeStr = completedTime
     ? new Date(completedTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
@@ -224,7 +227,7 @@ function CompletedPatientCard({ patient, isSelected }: { patient: Patient; isSel
           color: isRuledOut ? '#16a34a' : '#15803d',
           border: `1px solid ${isRuledOut ? '#86efac' : '#4ade80'}`,
         }}>
-          {isRuledOut ? '🟢 Rule Out' : '✅ จบกระบวนการ'}
+          {isRuledOut ? '🟢 Rule Out' : isTreatmentCompleted ? '✅ สิ้นสุดการรักษา' : '✅ จบกระบวนการ'}
         </span>
       </div>
 
@@ -250,8 +253,12 @@ export default function Sidebar() {
   const isPatientCompleted = (p: Patient): boolean => {
     const data = patientData[p.id];
     if (!data) return false;
-    // Rule Out OR timer expired (bundle done)
-    return data.sepsisRuledOut === true || (data.countdownTimer?.isExpired === true);
+    
+    // Check if phase 3 (Sepsis Bundle) is completely checked off
+    const isPhase3Complete = data.checklist?.find(c => c.phase === 'sepsis_bundle')?.isCompleted === true;
+    
+    // Rule Out OR timer expired OR bundle done OR manually marked as completed
+    return data.sepsisRuledOut === true || (data.countdownTimer?.isExpired === true) || isPhase3Complete || data.treatmentCompleted === true;
   };
 
   // Sort patients by risk: high → medium → low_medium → low
