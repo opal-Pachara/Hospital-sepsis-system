@@ -176,7 +176,7 @@ export default function AlertModal() {
               flexShrink: 0,
               boxShadow: '0 4px 16px rgba(220, 38, 38, .3)',
             }}>
-              <span style={{ fontSize: '34px', fontWeight: 900, color: '#fff', lineHeight: 1 }}>{data.newsScore}</span>
+              <span style={{ fontSize: '34px', fontWeight: 900, color: '#fff', lineHeight: 1 }}>{alertNewsScore}</span>
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>

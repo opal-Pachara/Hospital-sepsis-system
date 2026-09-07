@@ -95,7 +95,7 @@ export default function PatientInfoBar({ patient }: { patient: Patient }) {
             }}>
               {genderIcon} {genderLabel}
             </span>
-            {patient.age > 0 && (
+            {(patient.age && patient.age > 0) ? (
               <span style={{
                 fontSize: '10px', fontWeight: 600, padding: '2px 8px',
                 borderRadius: '10px', background: '#ecfeff', border: '1px solid #67e8f9', color: '#0891b2',
@@ -103,7 +103,7 @@ export default function PatientInfoBar({ patient }: { patient: Patient }) {
               }}>
                 {patient.age} ปี
               </span>
-            )}
+            ) : null}
           <span style={{
             fontSize: '10px', fontWeight: 600, padding: '2px 8px',
             borderRadius: '10px', background: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626',

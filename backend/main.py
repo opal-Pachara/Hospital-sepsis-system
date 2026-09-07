@@ -59,9 +59,12 @@ async def broadcast_message(message: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: create auth DB tables (idempotent)
-    from .auth import models as _auth_models  # noqa: F401 — ensure models are registered
-    AuthBase.metadata.create_all(bind=auth_engine)
-    logger.info("Auth DB tables ready.")
+    try:
+        from .auth import models as _auth_models  # noqa: F401 — ensure models are registered
+        AuthBase.metadata.create_all(bind=auth_engine)
+        logger.info("Auth DB tables ready.")
+    except Exception as e:
+        logger.error(f"Auth DB initialization note: {e}")
 
     # Startup: connect HOSxP pool + scheduler
     await db_pool.connect()

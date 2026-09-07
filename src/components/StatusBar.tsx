@@ -1,7 +1,7 @@
 import { useRTSASStore } from '../store/useRTSASStore';
 
 export default function StatusBar() {
-  const { openModal, resetChecklist, clearTimeline, resetCountdown, ui, setConnectionStatus } = useRTSASStore();
+  const { openModal, ui, setConnectionStatus } = useRTSASStore();
 
   const handleTriggerAlert = () => {
     const patient = useRTSASStore.getState().selectedPatient;

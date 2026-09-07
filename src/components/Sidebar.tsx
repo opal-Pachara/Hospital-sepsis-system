@@ -186,7 +186,6 @@ function CompletedPatientCard({ patient, isSelected }: { patient: Patient; isSel
 
   const isRuledOut = data?.sepsisRuledOut ?? false;
   const isTreatmentCompleted = data?.treatmentCompleted ?? false;
-  const isBundleDone = !isRuledOut && !isTreatmentCompleted; // completed via full Sepsis Bundle
 
   const completedTime = isRuledOut
     ? data?.ruledOutAt

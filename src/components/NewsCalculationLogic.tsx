@@ -32,8 +32,6 @@ export default function NewsCalculationLogic({ newsResult }: { newsResult: NEWSR
     (p) => p.parameter !== 'oxygenSupplementation'
   );
 
-  // Calculate visible score (sum of displayed params only) to avoid mismatch
-  const visibleScore = displayParams.reduce((sum, p) => sum + p.score, 0);
   // Max possible score for displayed params (6 params × max 3 each = 18)
   const maxScore = displayParams.length * 3;
 

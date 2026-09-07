@@ -387,7 +387,7 @@ export interface CountdownTimer {
 // Modal State
 // ---------------------------------------------------------------------------
 
-export type ModalType = 'alert' | 'reminder' | 'assessment_form' | null;
+export type ModalType = 'alert' | 'multi_alert' | 'reminder' | 'assessment_form' | null;
 
 export interface ModalState {
   /** Currently open modal type */
@@ -406,6 +406,9 @@ export type ActiveTab = 'checklist' | 'timeline';
 export interface UIState {
   /** Currently selected patient ID */
   selectedPatientId: string | null;
+
+  /** Is initial data loading? */
+  isLoading: boolean;
 
   /** Active tab in the workflow panel */
   activeTab: ActiveTab;

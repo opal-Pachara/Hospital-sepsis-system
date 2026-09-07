@@ -7,11 +7,17 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from .config import settings
 
+connect_args = {}
+if "sqlite" in settings.AUTH_DB_URL:
+    connect_args = {"check_same_thread": False}
+elif "mysql" in settings.AUTH_DB_URL:
+    connect_args = {"charset": "utf8mb4"}
+
 engine = create_engine(
     settings.AUTH_DB_URL,
     pool_pre_ping=True,       # Re-ping before using connection
     pool_recycle=3600,        # Recycle connections every 1 hour
-    connect_args={"charset": "utf8mb4"},
+    connect_args=connect_args,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
