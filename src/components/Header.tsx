@@ -29,7 +29,7 @@ export default function Header() {
     day: 'numeric',
   });
 
-  const roleLabel = currentUser?.role === 'doctor' ? 'แพทย์' : currentUser?.role === 'nurse' ? 'พยาบาล' : currentUser?.role === 'researcher' ? 'ผู้วิจัย' : 'IT';
+  const roleLabel = currentUser?.role === 'doctor' ? 'แพทย์' : currentUser?.role === 'nurse' ? 'พยาบาล' : 'เจ้าหน้าที่ IT';
 
   return (
     <>

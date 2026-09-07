@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .database import db_pool
+from .database_auth import engine as auth_engine, Base as AuthBase
+from .auth.router import router as auth_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,9 +58,14 @@ async def broadcast_message(message: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup: create auth DB tables (idempotent)
+    from .auth import models as _auth_models  # noqa: F401 — ensure models are registered
+    AuthBase.metadata.create_all(bind=auth_engine)
+    logger.info("Auth DB tables ready.")
+
+    # Startup: connect HOSxP pool + scheduler
     await db_pool.connect()
-    logger.info("Database connected — starting background scheduler...")
+    logger.info("HOSxP Database connected — starting background scheduler...")
 
     from .scheduler import background_scheduler
     task = asyncio.create_task(background_scheduler())
@@ -89,6 +96,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(auth_router)
 
 
 # ---------------------------------------------------------------------------

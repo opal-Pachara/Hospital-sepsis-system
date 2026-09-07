@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useRTSASStore } from './store/useRTSASStore';
 import { useAssessmentReminders } from './hooks/useTimers';
 import { usePatientData, useWebSocketAlerts } from './hooks/useBackend';
@@ -14,6 +15,13 @@ import ReminderModal from './components/ReminderModal';
 import AssessmentFormModal from './components/AssessmentFormModal';
 import StatusBar from './components/StatusBar';
 import { ToastContainer } from './components/Toast';
+import LoadingSkeleton from './components/LoadingSkeleton';
+import ErrorBanner from './components/ErrorBanner';
+import AlertSummaryBanner from './components/AlertSummaryBanner';
+import MultiAlertModal from './components/MultiAlertModal';
+import LoginPage from './components/LoginPage';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 function EmptyState() {
   return (
@@ -110,17 +118,60 @@ function WorkflowPanel() {
 }
 
 export default function App() {
+  const { setAuthUser, isAuthenticated } = useRTSASStore();
+
+  // Auto-login: validate stored JWT on mount
+  useEffect(() => {
+    if (isAuthenticated) return;
+    const token = localStorage.getItem('rtsas_token');
+    if (!token) return;
+    // Verify token with backend
+    fetch(`${API_BASE}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((user) => setAuthUser(
+        { ...user, name: `${user.firstname} ${user.lastname}` },
+        token
+      ))
+      .catch(() => localStorage.removeItem('rtsas_token'));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Wire up assessment reminder auto-triggering
   useAssessmentReminders();
 
   // --- Real-time backend integration ---
-  // 1. Initial HTTP fetch + 30s refresh from GET /api/patients
-  usePatientData();
+  // 1. Initial HTTP fetch + 60s refresh from GET /api/patients
+  const { fetchPatients } = usePatientData();
   // 2. WebSocket connection for real-time alerts from /ws/alerts
   useWebSocketAlerts();
 
+  // ── Login Guard ──
+  if (!isAuthenticated) {
+    return (
+      <>
+        <LoginPage />
+        <ToastContainer />
+      </>
+    );
+  }
+
+  const { ui } = useRTSASStore();
+
+  if (ui.isLoading) {
+    return (
+      <>
+        <ErrorBanner fetchPatients={fetchPatients} />
+        <LoadingSkeleton />
+      </>
+    );
+  }
+
   return (
-    <div className="h-screen flex flex-col bg-surface-base">
+    <div className="h-screen flex flex-col bg-surface-base relative">
+      <AlertSummaryBanner />
+      <ErrorBanner fetchPatients={fetchPatients} />
+      
       <Header />
 
       <div className="flex-1 flex overflow-hidden min-h-0">
@@ -145,6 +196,7 @@ export default function App() {
 
       {/* Modals */}
       <AlertModal />
+      <MultiAlertModal />
       <ReminderModal />
       <AssessmentFormModal />
 

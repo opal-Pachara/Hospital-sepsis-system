@@ -33,15 +33,17 @@ import { maskHN } from '../utils/hnMask';
 // Auth Types
 // ---------------------------------------------------------------------------
 
-export type UserRole = 'doctor' | 'nurse' | 'researcher' | 'it_admin';
+export type UserRole = 'doctor' | 'nurse' | 'it_admin';
 
 export interface AuthUser {
-  name: string;
+  id?: number;
+  username: string;
+  firstname: string;
+  lastname: string;
   role: UserRole;
+  /** Convenience: first + last */
+  name: string;
 }
-
-/** Demo PIN for authentication (Production: use AD/LDAP) */
-const DEMO_PIN = '1234';
 
 // ---------------------------------------------------------------------------
 // Default Checklist Template
@@ -269,6 +271,7 @@ export interface RTSASState {
 
   // ---- UI State ----
   ui: UIState;
+  setLoading: (isLoading: boolean) => void;
 
   // ---- Alert Queue (multiple simultaneous high-risk patients) ----
   pendingAlerts: Array<{ hn: string; newsScore: number; timestamp: string }>;
@@ -335,8 +338,9 @@ export interface RTSASState {
   queueAlert: (hn: string, newsScore: number) => void;
   dismissNextAlert: () => void;
 
-  // --- Auth Actions (EC Privacy) ---
-  authenticateUser: (pin: string, name: string, role: UserRole) => boolean;
+  // --- Auth Actions ---
+  /** Called by LoginPage after successful POST /auth/login */
+  setAuthUser: (user: AuthUser, token: string) => void;
   logoutUser: () => void;
   revealHN: () => void;
   hideHN: () => void;
@@ -377,6 +381,7 @@ export const useRTSASStore = create<RTSASState>()(
 
     ui: {
       selectedPatientId: null,
+      isLoading: true,
       activeTab: 'checklist',
       isSidebarCollapsed: false,
       connectionStatus: 'connected',
@@ -1078,10 +1083,11 @@ export const useRTSASStore = create<RTSASState>()(
     // UI ACTIONS
     // ===========================================================================
 
+    setLoading: (isLoading) =>
+      set((state) => ({ ui: { ...state.ui, isLoading } })),
+
     setActiveTab: (tab) =>
-      set((state) => ({
-        ui: { ...state.ui, activeTab: tab },
-      })),
+      set((state) => ({ ui: { ...state.ui, activeTab: tab } })),
 
     toggleSidebar: () =>
       set((state) => ({
@@ -1129,23 +1135,18 @@ export const useRTSASStore = create<RTSASState>()(
       }
     },
 
-    // Queue an alert for a high-risk patient instead of forcing modal open
+    // Queue an alert for a high-risk patient
     queueAlert: (hn, newsScore) => {
-      const state = get();
-      const isModalOpen = state.ui.modal.activeModal === 'alert';
-
-      if (isModalOpen) {
-        // Modal already showing another patient — add to queue
-        set((s) => ({
+      set((s) => {
+        // Prevent duplicate in queue
+        if (s.pendingAlerts.some((a) => a.hn === hn)) return s;
+        return {
           pendingAlerts: [
             ...s.pendingAlerts,
             { hn, newsScore, timestamp: new Date().toISOString() },
           ],
-        }));
-      } else {
-        // No active modal — show immediately
-        get().openModal('alert', { newsScore, patientName: hn });
-      }
+        };
+      });
     },
 
     dismissNextAlert: () => {
@@ -1153,24 +1154,17 @@ export const useRTSASStore = create<RTSASState>()(
     },
 
     // ===========================================================================
-    // AUTH ACTIONS (EC Privacy)
+    // AUTH ACTIONS
     // ===========================================================================
 
-    authenticateUser: (pin: string, name: string, role: UserRole) => {
-      if (pin !== DEMO_PIN) return false;
-      set({
-        isAuthenticated: true,
-        currentUser: { name, role },
-      });
-      // Log authentication event
+    setAuthUser: (user: AuthUser, token: string) => {
+      localStorage.setItem('rtsas_token', token);
+      set({ isAuthenticated: true, currentUser: user });
       get().addTimelineEvent(
-        `🔐 ยืนยันตัวตน: ${name} (${
-          role === 'doctor' ? 'แพทย์' : role === 'nurse' ? 'พยาบาล' : role === 'researcher' ? 'ผู้วิจัย' : 'IT'
-        })`,
+        `\ud83d\udd10 \u0e40\u0e02\u0e49\u0e32\u0e2a\u0e39\u0e48\u0e23\u0e30\u0e1a\u0e1a: ${user.firstname} ${user.lastname} (${user.role === 'doctor' ? '\u0e41\u0e1e\u0e17\u0e22\u0e4c' : user.role === 'nurse' ? '\u0e1e\u0e22\u0e32\u0e1a\u0e32\u0e25' : 'IT'})`,
         'blue',
-        name
+        user.name
       );
-      return true;
     },
 
     logoutUser: () => {
@@ -1182,6 +1176,8 @@ export const useRTSASStore = create<RTSASState>()(
           user.name
         );
       }
+      // Clear JWT from localStorage
+      localStorage.removeItem('rtsas_token');
       set({
         isAuthenticated: false,
         currentUser: null,
