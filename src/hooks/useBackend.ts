@@ -10,6 +10,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
 import type { Patient, VitalSigns, NEWSResult, NEWSParameterScore } from '../types';
 import { gcsToAVPU } from '../types';
+import { MOCK_PATIENTS } from '../data/mockData';
 
 // ---------------------------------------------------------------------------
 // Types matching the backend JSON response (PatientListItem schema)
@@ -168,8 +169,17 @@ export function usePatientData() {
         console.log(`[RTSAS] Refreshed ${data.count} patients (silent update).`);
       }
     } catch (err) {
-      console.error('[usePatientData] Failed to fetch patients:', err);
+      console.warn('[usePatientData] Backend unavailable — fallback to offline demo patient data:', err);
       setConnectionStatus('disconnected');
+
+      const currentPatients = useRTSASStore.getState().patients;
+      if (!currentPatients || currentPatients.length === 0) {
+        setPatients(MOCK_PATIENTS);
+        const currentSelected = useRTSASStore.getState().selectedPatient;
+        if (!currentSelected && MOCK_PATIENTS.length > 0) {
+          selectPatient(MOCK_PATIENTS[0].id);
+        }
+      }
     } finally {
       setLoading(false);
     }

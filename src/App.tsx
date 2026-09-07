@@ -19,7 +19,6 @@ import LoadingSkeleton from './components/LoadingSkeleton';
 import ErrorBanner from './components/ErrorBanner';
 import AlertSummaryBanner from './components/AlertSummaryBanner';
 import MultiAlertModal from './components/MultiAlertModal';
-import LoginPage from './components/LoginPage';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -145,16 +144,6 @@ export default function App() {
   const { fetchPatients } = usePatientData();
   // 2. WebSocket connection for real-time alerts from /ws/alerts
   useWebSocketAlerts();
-
-  // ── Login Guard ──
-  if (!isAuthenticated) {
-    return (
-      <>
-        <LoginPage />
-        <ToastContainer />
-      </>
-    );
-  }
 
   const { ui } = useRTSASStore();
 

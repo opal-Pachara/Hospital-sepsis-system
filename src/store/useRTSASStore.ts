@@ -28,6 +28,7 @@ import {
   generateId,
 } from '../utils/newsCalculator';
 import { maskHN } from '../utils/hnMask';
+import { MOCK_PATIENTS } from '../data/mockData';
 
 // ---------------------------------------------------------------------------
 // Auth Types
@@ -354,8 +355,8 @@ export const useRTSASStore = create<RTSASState>()(
   persist(
     subscribeWithSelector((set, get) => ({
     // ---- Initial State ----
-    patients: [],
-    selectedPatient: null,
+    patients: MOCK_PATIENTS,
+    selectedPatient: MOCK_PATIENTS.length > 0 ? MOCK_PATIENTS[0] : null,
     patientData: {},
 
     checklist: createDefaultChecklist(),
