@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
 import AuthModal from './AuthModal';
+import ExportReportModal from './ExportReportModal';
 
-export default function Header() {
+export default function Header({ onNavigateAdmin }: { onNavigateAdmin?: () => void }) {
   const { ui, updateCurrentTime, isAuthenticated, currentUser, logoutUser } = useRTSASStore();
   const intervalRef = useRef<number | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
+  const [showExportModal, setShowExportModal] = useState(false);
 
   useEffect(() => {
     intervalRef.current = window.setInterval(() => {
@@ -63,6 +65,48 @@ export default function Header() {
           {/* Auth indicator or Top-Right Login/Register buttons */}
           {isAuthenticated && currentUser ? (
             <div className="flex items-center gap-2">
+              {/* IT Admin Panel button — only for it_admin */}
+              {currentUser.role === 'it_admin' && onNavigateAdmin && (
+                <button
+                  type="button"
+                  id="btn-admin-panel"
+                  onClick={onNavigateAdmin}
+                  title="IT Admin Panel"
+                  style={{
+                    padding: '5px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                    border: '1px solid #c4b5fd', background: '#f5f3ff', color: '#6d28d9',
+                    display: 'flex', alignItems: 'center', gap: '5px',
+                    boxShadow: '0 1px 3px rgba(109,40,217,0.08)', transition: 'all 0.15s',
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.background = '#6d28d9'; e.currentTarget.style.color = '#fff'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.background = '#f5f3ff'; e.currentTarget.style.color = '#6d28d9'; }}
+                >
+                  <span>💻</span>
+                  <span>Admin Panel</span>
+                </button>
+              )}
+
+              {/* Export Report button — for authenticated users */}
+              <button
+                type="button"
+                id="btn-export-report"
+                onClick={() => setShowExportModal(true)}
+                title="ออกรายงาน Shift"
+                style={{
+                  padding: '5px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#15803d',
+                  display: 'flex', alignItems: 'center', gap: '5px',
+                  boxShadow: '0 1px 3px rgba(22,163,74,0.08)', transition: 'all 0.15s',
+                }}
+                onMouseOver={(e) => { e.currentTarget.style.background = '#16a34a'; e.currentTarget.style.color = '#fff'; }}
+                onMouseOut={(e) => { e.currentTarget.style.background = '#f0fdf4'; e.currentTarget.style.color = '#15803d'; }}
+              >
+                <span>📊</span>
+                <span>รายงาน Shift</span>
+              </button>
+
               <div style={{
                 padding: '5px 12px', borderRadius: '10px', fontSize: '11px',
                 background: '#ecfeff', border: '1px solid #a5f3fc', color: '#0891b2',
@@ -156,6 +200,12 @@ export default function Header() {
         isOpen={showAuthModal}
         onClose={() => setShowAuthModal(false)}
         defaultMode={authModalMode}
+      />
+
+      {/* Export Report Modal */}
+      <ExportReportModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
       />
     </>
   );

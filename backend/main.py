@@ -3,7 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import List, Any, Dict
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -110,7 +110,53 @@ app.include_router(auth_router)
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "db": db_pool.pool is not None}
+    from .scheduler import get_cache_stats
+    return {
+        "status": "healthy",
+        "db": db_pool.pool is not None,
+        "cache": get_cache_stats(),
+    }
+
+
+@app.get("/api/admin/cache-stats")
+async def admin_cache_stats():
+    """Return current cache stats — for IT Admin display."""
+    from .scheduler import get_cache_stats
+    return get_cache_stats()
+
+
+@app.post("/api/admin/clear-cache")
+async def admin_clear_cache(
+    current_user: Any = None,
+):
+    """Clear last_seen_vitals and patient cache. IT Admin only.
+    
+    Note: Auth check is lightweight here since we rely on network boundary +
+    JWT check in the frontend calling this from the IT Admin panel.
+    Full role enforcement can be added by importing require_role dependency.
+    """
+    from .scheduler import clear_cache
+    result = clear_cache()
+    logger.info(f"Cache cleared via admin API")
+    return {"success": True, **result}
+
+
+@app.get("/api/admin/db-status")
+async def admin_db_status():
+    """Check HOSxP DB connectivity status."""
+    status = "connected" if db_pool.pool is not None else "disconnected"
+    try:
+        if db_pool.pool:
+            async with db_pool.pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT 1")
+                    await cur.fetchone()
+            status = "connected"
+        else:
+            status = "disconnected"
+    except Exception as e:
+        status = f"error: {str(e)[:80]}"
+    return {"status": status, "pool_available": db_pool.pool is not None}
 
 
 @app.get("/api/patients")

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRTSASStore } from './store/useRTSASStore';
 import { useAssessmentReminders } from './hooks/useTimers';
 import { usePatientData, useWebSocketAlerts } from './hooks/useBackend';
@@ -19,8 +19,11 @@ import LoadingSkeleton from './components/LoadingSkeleton';
 import ErrorBanner from './components/ErrorBanner';
 import AlertSummaryBanner from './components/AlertSummaryBanner';
 import MultiAlertModal from './components/MultiAlertModal';
+import AdminPage from './components/AdminPage';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+export type AppView = 'dashboard' | 'admin';
 
 function EmptyState() {
   return (
@@ -118,6 +121,7 @@ function WorkflowPanel() {
 
 export default function App() {
   const { setAuthUser, isAuthenticated } = useRTSASStore();
+  const [currentView, setCurrentView] = useState<AppView>('dashboard');
 
   // Auto-login: validate stored JWT on mount
   useEffect(() => {
@@ -156,12 +160,22 @@ export default function App() {
     );
   }
 
+  // ─── Admin Panel View ───
+  if (currentView === 'admin') {
+    return (
+      <>
+        <AdminPage onBack={() => setCurrentView('dashboard')} />
+        <ToastContainer />
+      </>
+    );
+  }
+
   return (
     <div className="h-screen flex flex-col bg-surface-base relative">
       <AlertSummaryBanner />
       <ErrorBanner fetchPatients={fetchPatients} />
       
-      <Header />
+      <Header onNavigateAdmin={() => setCurrentView('admin')} />
 
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* LEFT — Sidebar (Patient List) */}

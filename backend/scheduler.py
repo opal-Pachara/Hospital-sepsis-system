@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from aiomysql import DictCursor
 from typing import List, Dict, Any
 
@@ -15,6 +15,33 @@ last_seen_vitals: Dict[str, bool] = {}
 
 # Cache of all today's patients (refreshed every poll)
 _patients_cache: List[Dict[str, Any]] = []
+
+# Track last midnight-clear date to avoid clearing multiple times per day
+_last_clear_date: date | None = None
+
+
+# ---------------------------------------------------------------------------
+# Cache management helpers
+# ---------------------------------------------------------------------------
+
+def clear_cache() -> dict:
+    """Clear last_seen_vitals and patient cache. Returns stats."""
+    global last_seen_vitals, _patients_cache
+    cleared_vitals = len(last_seen_vitals)
+    cleared_patients = len(_patients_cache)
+    last_seen_vitals = {}
+    _patients_cache = []
+    logger.info(f"Cache cleared manually: {cleared_vitals} vitals, {cleared_patients} patients")
+    return {"cleared_vitals": cleared_vitals, "cleared_patients": cleared_patients}
+
+
+def get_cache_stats() -> dict:
+    """Return current cache size stats."""
+    return {
+        "last_seen_vitals_count": len(last_seen_vitals),
+        "patients_cache_count": len(_patients_cache),
+        "last_clear_date": str(_last_clear_date) if _last_clear_date else None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -215,9 +242,17 @@ async def process_vitals():
 # ---------------------------------------------------------------------------
 
 async def background_scheduler():
+    global _last_clear_date
     logger.info("Background scheduler started — polling every 30 seconds.")
     while True:
         try:
+            # Midnight auto-clear: clear last_seen_vitals once per day at midnight
+            today = date.today()
+            if _last_clear_date != today:
+                _last_clear_date = today
+                last_seen_vitals.clear()
+                logger.info(f"Midnight auto-clear: flushed last_seen_vitals for new day {today}")
+
             await process_vitals()
         except Exception as e:
             logger.error(f"Scheduler loop error: {e}")
