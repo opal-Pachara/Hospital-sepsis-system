@@ -184,7 +184,7 @@ export default function Header({ onNavigateAdmin }: { onNavigateAdmin?: () => vo
               className={`w-2 h-2 rounded-full ${isConnected ? 'bg-status-success animate-pulse-green' : 'bg-amber-500'}`}
               style={{ boxShadow: isConnected ? '0 0 6px rgba(22,163,74,.5)' : 'none' }}
             />
-            <span>{isConnected ? 'เชื่อมต่อ HIS' : 'โหมดสาธิต'}</span>
+            <span>{isConnected ? 'เชื่อมต่อ HIS' : 'ไม่ได้เชื่อมต่อ HIS'}</span>
           </div>
 
           {/* Time & Date */}

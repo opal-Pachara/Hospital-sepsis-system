@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
 import type { UserRole } from '../store/useRTSASStore';
 import { showToast } from './Toast';
+import { extractErrorMessage } from '../utils/errorUtils';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 interface RoleOption {
   value: UserRole;
@@ -75,6 +76,21 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login' }: Au
   const [regSuccess, setRegSuccess] = useState('');
   const [regLoading, setRegLoading] = useState(false);
 
+  // Sync mode and clear errors when modal opens or defaultMode changes (render-phase adjustment)
+  const [prevOpen, setPrevOpen] = useState(isOpen);
+  const [prevDefaultMode, setPrevDefaultMode] = useState(defaultMode);
+
+  if (isOpen !== prevOpen || defaultMode !== prevDefaultMode) {
+    setPrevOpen(isOpen);
+    setPrevDefaultMode(defaultMode);
+    if (isOpen) {
+      setMode(defaultMode);
+      setLoginError('');
+      setRegError('');
+      setRegSuccess('');
+    }
+  }
+
   if (!isOpen) return null;
 
   // ── Login Handler ────────────────────────────────────────────────────────
@@ -98,30 +114,30 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login' }: Au
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setLoginError(data.detail || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+        setLoginError(extractErrorMessage(data.detail, 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'));
         return;
       }
 
       localStorage.setItem('rtsas_token', data.access_token);
-      setAuthUser(data.user, data.access_token);
-      showToast(`เข้าสู่ระบบสำเร็จ: ยินดีต้อนรับ ${data.user.firstname} ${data.user.lastname}`, 'success', 3000);
+      const u = data.user;
+      setAuthUser(
+        {
+          id: u.id,
+          username: u.username,
+          firstname: u.firstname,
+          lastname: u.lastname,
+          role: u.role,
+          is_active: u.is_active,
+          name: u.full_name ?? `${u.firstname} ${u.lastname}`,
+        },
+        data.access_token
+      );
+      showToast(`เข้าสู่ระบบสำเร็จ: ยินดีต้อนรับ ${u.firstname} ${u.lastname}`, 'success', 3000);
       onClose();
     } catch {
-      // Offline fallback demo login
-      const fallbackUser = {
-        id: 1,
-        username: loginUsername.trim(),
-        firstname: loginUsername.trim(),
-        lastname: '(สาธิต)',
-        role: 'nurse' as UserRole,
-        is_active: true,
-        name: `${loginUsername.trim()} (สาธิต)`,
-      };
-      setAuthUser(fallbackUser, 'mock_offline_token');
-      showToast(`เข้าสู่ระบบ (โหมดสาธิต): ยินดีต้อนรับ ${fallbackUser.name}`, 'info', 3000);
-      onClose();
+      setLoginError('ไม่สามารถเชื่อมต่อกับระบบได้ กรุณาตรวจสอบการเชื่อมต่อเครือข่าย');
     } finally {
       setLoginLoading(false);
     }
@@ -137,12 +153,12 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login' }: Au
       setRegError('กรุณากรอกชื่อและนามสกุลให้ครบถ้วน');
       return;
     }
-    if (!regUsername.trim() || regUsername.trim().length < 3) {
-      setRegError('Username ต้องมีอย่างน้อย 3 ตัวอักษร');
+    if (!regUsername.trim() || regUsername.trim().length < 4) {
+      setRegError('Username ต้องมีอย่างน้อย 4 ตัวอักษร');
       return;
     }
-    if (regPassword.length < 4) {
-      setRegError('Password ต้องมีอย่างน้อย 4 ตัวอักษร');
+    if (regPassword.length < 6) {
+      setRegError('Password ต้องมีอย่างน้อย 6 ตัวอักษร');
       return;
     }
     if (regPassword !== regConfirmPassword) {
@@ -164,29 +180,60 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login' }: Au
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setRegError(data.detail || 'ไม่สามารถลงทะเบียนได้ กรุณาลองใหม่อีกครั้ง');
+        setRegError(extractErrorMessage(data.detail, 'ไม่สามารถลงทะเบียนได้ กรุณาลองใหม่อีกครั้ง'));
         return;
       }
 
-      setRegSuccess(`สร้างบัญชีสำเร็จ! กำลังสลับไปยังหน้าเข้าสู่ระบบ...`);
+      setRegSuccess(`สร้างบัญชีสำเร็จ! กำลังเข้าสู่ระบบ...`);
+
+      // Attempt auto-login seamlessly
+      try {
+        const loginRes = await fetch(`${API_BASE}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: regUsername.trim(),
+            password: regPassword,
+          }),
+        });
+        if (loginRes.ok) {
+          const loginData = await loginRes.json().catch(() => ({}));
+          if (loginData.access_token && loginData.user) {
+            localStorage.setItem('rtsas_token', loginData.access_token);
+            const u = loginData.user;
+            setAuthUser(
+              {
+                id: u.id,
+                username: u.username,
+                firstname: u.firstname,
+                lastname: u.lastname,
+                role: u.role,
+                is_active: u.is_active,
+                name: u.full_name ?? `${u.firstname} ${u.lastname}`,
+              },
+              loginData.access_token
+            );
+            showToast(`สมัครสมาชิกและเข้าสู่ระบบสำเร็จ: ยินดีต้อนรับ ${u.firstname} ${u.lastname}`, 'success', 3500);
+            onClose();
+            return;
+          }
+        }
+      } catch {
+        // Fallback to manual login tab
+      }
+
+      // If auto-login couldn't complete, smoothly transition to login tab
       showToast('สมัครสมาชิกสำเร็จแล้ว! กรุณาเข้าสู่ระบบ', 'success', 3500);
       setTimeout(() => {
         setMode('login');
-        setLoginUsername(regUsername);
+        setLoginUsername(regUsername.trim());
         setLoginPassword('');
         setRegSuccess('');
       }, 1000);
     } catch {
-      // Offline fallback registration
-      setRegSuccess(`สร้างบัญชีสาธิต (${regFirstname} ${regLastname}) เรียบร้อย!`);
-      showToast('สมัครสมาชิก (โหมดสาธิต) สำเร็จ!', 'success', 3000);
-      setTimeout(() => {
-        setMode('login');
-        setLoginUsername(regUsername);
-        setRegSuccess('');
-      }, 1000);
+      setRegError('ไม่สามารถเชื่อมต่อกับระบบได้ กรุณาตรวจสอบการเชื่อมต่อเครือข่าย');
     } finally {
       setRegLoading(false);
     }
@@ -608,7 +655,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login' }: Au
                       id="input-reg-password"
                       value={regPassword}
                       onChange={(e) => setRegPassword(e.target.value)}
-                      placeholder="อย่างน้อย 4 ตัว"
+                      placeholder="อย่างน้อย 6 ตัว"
                       style={{
                         width: '100%', padding: '8px 28px 8px 10px',
                         borderRadius: '10px', border: '1px solid #cbd5e1',

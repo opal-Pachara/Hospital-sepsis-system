@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
 import type { Patient, RiskLevel } from '../types';
 import { maskHN } from '../utils/hnMask';
+import { showToast } from './Toast';
 
 const riskConfig: Record<RiskLevel, { label: string; labelTh: string; badgeBg: string; badgeText: string; badgeBorder: string; barColor: string; chipBg: string; chipText: string; chipBorder: string }> = {
   high: {
@@ -29,6 +30,7 @@ const riskConfig: Record<RiskLevel, { label: string; labelTh: string; badgeBg: s
 function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: boolean }) {
   const selectPatient = useRTSASStore((s) => s.selectPatient);
   const patientData = useRTSASStore((s) => s.patientData);
+  const currentTime = useRTSASStore((s) => s.ui.currentTime);
   const risk = riskConfig[patient.currentRiskLevel];
 
   // Live countdown badge for this specific patient
@@ -58,7 +60,8 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
   const genderLabel = patient.gender === 'male' ? 'ชาย' : patient.gender === 'female' ? 'หญิง' : 'อื่นๆ';
 
   const arrivalMs = new Date(patient.arrivalTime).getTime();
-  const diffMins = Math.floor((Date.now() - arrivalMs) / 60000);
+  const nowMs = new Date(currentTime).getTime();
+  const diffMins = Math.floor((nowMs - arrivalMs) / 60000);
   const isOldData = diffMins > 24 * 60; // older than 24 hours
 
   const arrivalTime = new Date(patient.arrivalTime).toLocaleTimeString('th-TH', {
@@ -241,10 +244,17 @@ function CompletedPatientCard({ patient, isSelected }: { patient: Patient; isSel
   );
 }
 
-export default function Sidebar() {
+export interface SidebarProps {
+  onRefresh?: () => Promise<void>;
+  onNavigateTreatedDashboard?: () => void;
+  onNavigateClinical?: () => void;
+}
+
+export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavigateClinical }: SidebarProps = {}) {
   const { patients, selectedPatient, patientData } = useRTSASStore();
   const [filter, setFilter] = useState<'all' | 'alert' | 'completed'>('all');
   const [lastRefresh, setLastRefresh] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [completedOpen, setCompletedOpen] = useState(true);
   void completedOpen; void setCompletedOpen;
 
@@ -327,7 +337,7 @@ export default function Sidebar() {
       {/* Refresh bar */}
       <div
         className="flex items-center justify-between flex-shrink-0"
-        style={{ padding: '5px 14px', borderBottom: '1px solid #dde3ed', background: '#f8fafc' }}
+        style={{ padding: '6px 14px', borderBottom: '1px solid #dde3ed', background: '#f8fafc' }}
       >
         <span className="flex items-center gap-1" style={{ fontSize: '9px', color: '#64748b' }}>
           <span className="animate-pulse-green inline-block" style={{
@@ -335,7 +345,46 @@ export default function Sidebar() {
           }} />
           รีเฟรชออโต้
         </span>
-        <span style={{ fontSize: '9px', fontWeight: 700, color: '#94a3b8' }}>{lastRefresh}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '9px', fontWeight: 700, color: '#94a3b8' }}>{lastRefresh}</span>
+          {onRefresh && (
+            <button
+              id="btn-pull-patients"
+              type="button"
+              disabled={isRefreshing}
+              onClick={async () => {
+                setIsRefreshing(true);
+                try {
+                  await onRefresh();
+                  showToast('ดึงข้อมูลล่าสุดเรียบร้อย', 'success');
+                } catch {
+                  showToast('ไม่สามารถดึงข้อมูลได้', 'error');
+                } finally {
+                  setIsRefreshing(false);
+                }
+              }}
+              style={{
+                fontSize: '9px',
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: '6px',
+                border: '1px solid #cbd5e1',
+                background: isRefreshing ? '#f1f5f9' : '#fff',
+                color: '#2563eb',
+                cursor: isRefreshing ? 'wait' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '3px',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                transition: 'all 0.15s',
+              }}
+              title="ดึงข้อมูลใหม่จากระบบทันที"
+            >
+              <span className={isRefreshing ? 'animate-spin' : ''}>🔄</span>
+              <span>{isRefreshing ? 'กำลังดึง...' : 'ดึงข้อมูล'}</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filter buttons */}
@@ -345,7 +394,10 @@ export default function Sidebar() {
       >
         <button
           className={`transition-all ${filter === 'all' ? 'text-white' : ''}`}
-          onClick={() => setFilter('all')}
+          onClick={() => {
+            setFilter('all');
+            onNavigateClinical?.();
+          }}
           style={{
             padding: '3px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 600,
             cursor: 'pointer', fontFamily: 'inherit',
@@ -358,7 +410,10 @@ export default function Sidebar() {
         </button>
         <button
           className="transition-all"
-          onClick={() => setFilter('alert')}
+          onClick={() => {
+            setFilter('alert');
+            onNavigateClinical?.();
+          }}
           style={{
             padding: '3px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 600,
             cursor: 'pointer', fontFamily: 'inherit',
@@ -371,7 +426,11 @@ export default function Sidebar() {
         </button>
         <button
           className="transition-all"
-          onClick={() => setFilter('completed')}
+          id="btn-filter-completed"
+          onClick={() => {
+            setFilter('completed');
+            onNavigateTreatedDashboard?.();
+          }}
           style={{
             padding: '3px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 600,
             cursor: 'pointer', fontFamily: 'inherit',
@@ -393,19 +452,67 @@ export default function Sidebar() {
             <div style={{ textAlign: 'center', padding: '32px 16px', fontSize: '11px', color: '#94a3b8' }}>
               <div style={{ fontSize: '24px', marginBottom: '8px' }}>✅</div>
               ยังไม่มีผู้ป่วยที่จบกระบวนการ
+              {onNavigateTreatedDashboard && (
+                <button
+                  type="button"
+                  id="btn-sidebar-empty-open-dashboard"
+                  onClick={onNavigateTreatedDashboard}
+                  style={{
+                    marginTop: '12px',
+                    padding: '5px 12px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: '1px solid #86efac',
+                    background: '#f0fdf4',
+                    color: '#15803d',
+                  }}
+                >
+                  📊 เปิดดู Dashboard สรุปรายวัน
+                </button>
+              )}
             </div>
           ) : (
             <>
               {/* Summary bar */}
               <div style={{
-                padding: '6px 14px',
+                padding: '8px 12px',
                 background: '#f0fdf4',
                 borderBottom: '1px solid #d1fae5',
-                fontSize: '9px',
-                color: '#16a34a',
-                fontWeight: 600,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
               }}>
-                📋 ผู้ป่วยที่รักษาแล้ววันนี้ — {completedPatients.length} ราย (Timeline ยังเก็บอยู่)
+                <div style={{ fontSize: '10px', color: '#16a34a', fontWeight: 700 }}>
+                  📋 ผู้ป่วยที่รักษาแล้ววันนี้ — {completedPatients.length} ราย (Timeline ยังเก็บอยู่)
+                </div>
+                {onNavigateTreatedDashboard && (
+                  <button
+                    type="button"
+                    id="btn-sidebar-open-dashboard"
+                    onClick={onNavigateTreatedDashboard}
+                    style={{
+                      width: '100%',
+                      padding: '5px 8px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: '1px solid #86efac',
+                      background: '#fff',
+                      color: '#15803d',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '5px',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                    }}
+                  >
+                    <span>📊</span>
+                    <span>ดู Dashboard สรุปรายวัน</span>
+                  </button>
+                )}
               </div>
               {completedPatients.map((patient) => (
                 <CompletedPatientCard

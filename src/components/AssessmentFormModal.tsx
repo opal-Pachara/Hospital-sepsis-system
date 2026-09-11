@@ -48,6 +48,7 @@ export default function AssessmentFormModal() {
   const [hr, setHR] = useState('');
   const [bt, setBT] = useState('');
   const [gcsInput, setGCSInput] = useState('');
+  const [isConfirmingComplete, setIsConfirmingComplete] = useState(false);
 
   if (ui.modal.activeModal !== 'assessment_form') return null;
 
@@ -112,15 +113,19 @@ export default function AssessmentFormModal() {
   };
 
   const handleCompleteTreatment = () => {
-    if (confirm('คุณต้องการยืนยันว่าผู้ป่วยได้รับการรักษา Sepsis เสร็จสิ้นครบถ้วนแล้วใช่หรือไม่?')) {
-      completeTreatment('พย.สุกัญญา');
-      showToast('สิ้นสุดการรักษาสำหรับผู้ป่วยรายนี้', 'success');
-      closeModal();
+    if (!isConfirmingComplete) {
+      setIsConfirmingComplete(true);
+      return;
     }
+    completeTreatment('พย.สุกัญญา');
+    showToast('✅ สิ้นสุดการรักษาสำหรับผู้ป่วยรายนี้เรียบร้อยแล้ว', 'success');
+    closeModal();
+    setIsConfirmingComplete(false);
   };
 
   const handleClose = () => {
     closeModal();
+    setIsConfirmingComplete(false);
     setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT(''); setGCSInput('');
   };
 
@@ -432,24 +437,56 @@ export default function AssessmentFormModal() {
             >
               💾 บันทึกการประเมิน
             </button>
-            <button
-              type="button"
-              onClick={handleCompleteTreatment}
-              style={{
-                flex: 2, padding: '14px', borderRadius: '14px',
-                fontSize: '14px', fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
-                color: '#fff', border: 'none',
-                background: 'linear-gradient(135deg, #10b981, #059669)',
-                boxShadow: '0 6px 20px -4px rgba(16, 185, 129, .4)',
-                transition: 'all 0.25s ease',
-                letterSpacing: '-0.2px',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-              }}
-              onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 8px 28px -4px rgba(16, 185, 129, .5)'; }}
-              onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 6px 20px -4px rgba(16, 185, 129, .4)'; }}
-            >
-              ✅ รักษาเสร็จแล้ว
-            </button>
+            {isConfirmingComplete ? (
+              <div style={{ display: 'flex', gap: '6px', flex: 2 }}>
+                <button
+                  type="button"
+                  id="btn-confirm-complete-treatment"
+                  onClick={handleCompleteTreatment}
+                  style={{
+                    flex: 1, padding: '14px 6px', borderRadius: '14px',
+                    fontSize: '12px', fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
+                    color: '#fff', border: 'none',
+                    background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+                    boxShadow: '0 4px 14px rgba(220, 38, 38, .4)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                  }}
+                >
+                  ⚠️ ยืนยันเสร็จสิ้น
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmingComplete(false)}
+                  style={{
+                    padding: '14px 8px', borderRadius: '14px',
+                    fontSize: '11px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                    color: '#64748b', border: '1px solid #cbd5e1', background: '#f8fafc',
+                  }}
+                >
+                  ยกเลิก
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                id="btn-trigger-complete-treatment"
+                onClick={handleCompleteTreatment}
+                style={{
+                  flex: 2, padding: '14px', borderRadius: '14px',
+                  fontSize: '14px', fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
+                  color: '#fff', border: 'none',
+                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  boxShadow: '0 6px 20px -4px rgba(16, 185, 129, .4)',
+                  transition: 'all 0.25s ease',
+                  letterSpacing: '-0.2px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                }}
+                onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 8px 28px -4px rgba(16, 185, 129, .5)'; }}
+                onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 6px 20px -4px rgba(16, 185, 129, .4)'; }}
+              >
+                ✅ รักษาเสร็จแล้ว
+              </button>
+            )}
             <button
               type="button"
               onClick={handleClose}

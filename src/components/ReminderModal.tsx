@@ -82,7 +82,9 @@ export default function ReminderModal() {
             </div>
           </div>
           <button
+            id="btn-reminder-close"
             onClick={closeModal}
+            title="ปิดหน้าต่าง"
             style={{
               width: '34px', height: '34px', borderRadius: '10px',
               border: '1px solid #fdba74', background: '#fff',
@@ -92,7 +94,9 @@ export default function ReminderModal() {
             }}
             onMouseOver={(e) => { e.currentTarget.style.background = '#ea580c'; e.currentTarget.style.color = '#fff'; }}
             onMouseOut={(e) => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.color = '#ea580c'; }}
-          >✕</button>
+          >
+            ✕
+          </button>
         </div>
 
         {/* ─── Body ─── */}
@@ -143,6 +147,7 @@ export default function ReminderModal() {
           {/* Action Buttons */}
           <div style={{ display: 'flex', gap: '10px' }}>
             <button
+              id="btn-reminder-record"
               onClick={handleRecord}
               style={{
                 flex: 2, padding: '13px', borderRadius: '14px',
@@ -159,6 +164,7 @@ export default function ReminderModal() {
               📝 บันทึกสัญญาณชีพ
             </button>
             <button
+              id="btn-reminder-postpone"
               onClick={closeModal}
               style={{
                 flex: 1, padding: '13px', borderRadius: '14px',

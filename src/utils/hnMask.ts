@@ -21,7 +21,7 @@ export function maskHN(hn: string): string {
   if (!hn) return 'HN****';
 
   // Extract only the digit portion (strip any letter/dash prefix)
-  const digitsOnly = hn.replace(/^[a-zA-Z\-]+/, '');
+  const digitsOnly = hn.replace(/^[a-zA-Z-]+/, '');
 
   if (!digitsOnly) return 'HN****';
 

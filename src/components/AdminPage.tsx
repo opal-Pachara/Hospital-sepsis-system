@@ -8,11 +8,13 @@
  *   3. System Tools (clear cache with confirm dialog, export system log)
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import { useRTSASStore } from '../store/useRTSASStore';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useRTSASStore, type PatientMemoryAudit } from '../store/useRTSASStore';
+import { maskHN } from '../utils/hnMask';
 import { showToast } from './Toast';
+import { extractErrorMessage } from '../utils/errorUtils';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,42 +59,83 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   isLoading: boolean;
+  audit: PatientMemoryAudit;
 }
 
-function ConfirmClearDialog({ onConfirm, onCancel, isLoading }: ConfirmDialogProps) {
+function ConfirmClearDialog({ onConfirm, onCancel, isLoading, audit }: ConfirmDialogProps) {
   return (
     <div
       className="fixed inset-0 z-[300] flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
     >
       <div style={{
-        width: '380px', background: '#fff', borderRadius: '20px',
+        width: '440px', background: '#fff', borderRadius: '20px',
         overflow: 'hidden', boxShadow: '0 25px 60px rgba(234,88,12,.25)',
       }}>
-        <div style={{ height: '4px', background: 'linear-gradient(90deg,#ea580c,#f59e0b,#ea580c)' }} />
+        <div style={{ height: '4px', background: 'linear-gradient(90deg,#ea580c,#f59e0b,#16a34a)' }} />
         <div style={{ padding: '22px' }}>
-          {/* Warning icon */}
+          {/* Warning/Shield icon */}
           <div style={{
             width: '56px', height: '56px', borderRadius: '16px',
             background: 'linear-gradient(135deg,#ea580c,#c2410c)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: '28px', margin: '0 auto 16px',
             boxShadow: '0 8px 20px rgba(234,88,12,.35)',
-          }}>🗑️</div>
+          }}>🛡️</div>
           <div style={{ fontSize: '17px', fontWeight: 900, color: '#1e293b', textAlign: 'center', marginBottom: '8px' }}>
-            ยืนยันการล้างแคช?
+            ยืนยันการล้าง Memory ข้อมูลผู้ป่วย?
           </div>
-          <div style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', lineHeight: 1.6, marginBottom: '20px' }}>
-            การดำเนินการนี้จะล้างข้อมูลสัญญาณชีพที่แคชไว้ทั้งหมดในหน่วยความจำ
-            <br />
-            ระบบจะดึงข้อมูลใหม่ในรอบถัดไป (30 วินาที)
-            <br /><br />
-            <strong style={{ color: '#ea580c' }}>⚠️ ไม่สามารถย้อนกลับได้</strong>
+          <div style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', lineHeight: 1.5, marginBottom: '16px' }}>
+            ระบบจะล้างข้อมูลผู้ป่วยที่ไม่ได้รักษาออกจากหน่วยความจำ เพื่อคืนพื้นที่ RAM และป้องกัน Memory Leak
           </div>
+
+          {/* Active Protection Box */}
+          <div style={{
+            background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px',
+            padding: '12px 14px', marginBottom: '14px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#15803d', marginBottom: '6px' }}>
+              <span>🛡️ ปกป้องข้อมูลผู้ป่วยที่กำลังรักษา ({audit.activeTreatedCount} ราย)</span>
+            </div>
+            <div style={{ fontSize: '11px', color: '#166534', lineHeight: 1.5 }}>
+              ผู้ป่วยที่กำลังเดินเวลานับถอยหลัง Sepsis Bundle หรือมีรอบตรวจสัญญาณชีพซ้ำที่ยังไม่เสร็จสิ้น <strong>จะได้รับการคุ้มครองไว้ ไม่ถูกลบเด็ดขาด</strong>
+            </div>
+            {audit.retainedPatients.length > 0 ? (
+              <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '110px', overflowY: 'auto' }}>
+                {audit.retainedPatients.map((p) => (
+                  <div key={p.id} style={{
+                    fontSize: '11px', background: '#ffffff', padding: '5px 8px', borderRadius: '6px',
+                    border: '1px solid #dcfce7', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}>
+                    <span style={{ fontWeight: 700, color: '#1e293b' }}>HN {maskHN(p.hn)}</span>
+                    <span style={{ fontSize: '10px', color: '#15803d' }}>{p.reasons.join(' · ')}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ marginTop: '6px', fontSize: '11px', color: '#64748b', fontStyle: 'italic' }}>
+                ปัจจุบันไม่มีผู้ป่วยที่อยู่ระหว่างกระบวนการจับเวลาหรือรอประเมินผล
+              </div>
+            )}
+          </div>
+
+          {/* Inactive Patients Count Box */}
+          <div style={{
+            background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '12px',
+            padding: '10px 14px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <span style={{ fontSize: '12px', color: '#9a3412', fontWeight: 600 }}>
+              🗑️ ผู้ป่วยที่จะถูกล้างออกจากหน่วยความจำ:
+            </span>
+            <span style={{ fontSize: '13px', fontWeight: 800, color: '#c2410c' }}>
+              {audit.inactiveCount} ราย
+            </span>
+          </div>
+
           <div style={{ display: 'flex', gap: '10px' }}>
             <button
               onClick={onConfirm}
-              disabled={isLoading}
+              disabled={isLoading || (audit.inactiveCount === 0 && (!audit.totalPatientsInMemory))}
               style={{
                 flex: 2, padding: '13px', borderRadius: '12px',
                 fontSize: '13px', fontWeight: 800, cursor: isLoading ? 'not-allowed' : 'pointer',
@@ -102,7 +145,7 @@ function ConfirmClearDialog({ onConfirm, onCancel, isLoading }: ConfirmDialogPro
                 transition: 'all 0.2s',
               }}
             >
-              {isLoading ? '⏳ กำลังล้าง...' : '🗑️ ยืนยัน ล้างแคช'}
+              {isLoading ? '⏳ กำลังล้าง...' : `🗑️ ยืนยัน ล้าง ${audit.inactiveCount} ราย`}
             </button>
             <button
               onClick={onCancel}
@@ -133,21 +176,26 @@ interface AdminPageProps {
 }
 
 export default function AdminPage({ onBack }: AdminPageProps) {
-  const { currentUser, isAuthenticated } = useRTSASStore();
+  const { currentUser, isAuthenticated, getPatientMemoryAudit, clearInactivePatientsMemory } = useRTSASStore();
+  const memoryAudit = getPatientMemoryAudit();
 
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
   const [dbStatus, setDbStatus] = useState<DBStatus | null>(null);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
-  const [isLoadingCache, setIsLoadingCache] = useState(false);
-  const [isLoadingDB, setIsLoadingDB] = useState(false);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [isLoadingCache, setIsLoadingCache] = useState(true);
+  const [isLoadingDB, setIsLoadingDB] = useState(true);
   const [showConfirmClear, setShowConfirmClear] = useState(false);
   const [isClearingCache, setIsClearingCache] = useState(false);
   const [deactivatingId, setDeactivatingId] = useState<number | null>(null);
   const [activeSection, setActiveSection] = useState<'status' | 'users' | 'tools'>('status');
 
   const token = localStorage.getItem('rtsas_token');
-  const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const authHeaders: Record<string, string> = useMemo(() => {
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+  }, [token]);
 
   // Load users
   const loadUsers = useCallback(async () => {
@@ -166,7 +214,7 @@ export default function AdminPage({ onBack }: AdminPageProps) {
     } finally {
       setIsLoadingUsers(false);
     }
-  }, [token]);
+  }, [token, authHeaders]);
 
   // Load cache stats
   const loadCacheStats = useCallback(async () => {
@@ -191,11 +239,44 @@ export default function AdminPage({ onBack }: AdminPageProps) {
   }, []);
 
   useEffect(() => {
-    loadUsers();
-    loadCacheStats();
-    loadDBStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    let active = true;
+
+    if (token) {
+      fetch(`${API_BASE}/auth/users`, { headers: authHeaders })
+        .then((res) => (res.ok ? res.json() : Promise.reject()))
+        .then((data) => {
+          if (active && data) setUsers(data);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (active) setIsLoadingUsers(false);
+        });
+    }
+
+    fetch(`${API_BASE}/api/admin/cache-stats`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data) setCacheStats(data);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setIsLoadingCache(false);
+      });
+
+    fetch(`${API_BASE}/api/admin/db-status`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data) setDbStatus(data);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setIsLoadingDB(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [token, authHeaders]);
 
   // Deactivate user
   const handleDeactivate = async (userId: number, username: string) => {
@@ -210,8 +291,8 @@ export default function AdminPage({ onBack }: AdminPageProps) {
         showToast(`✅ ระงับบัญชี @${username} แล้ว`, 'success');
         loadUsers();
       } else {
-        const err = await res.json();
-        showToast(err.detail || 'ไม่สามารถระงับบัญชีได้', 'error');
+        const err = await res.json().catch(() => ({}));
+        showToast(extractErrorMessage(err.detail, 'ไม่สามารถระงับบัญชีได้'), 'error');
       }
     } catch {
       showToast('ไม่สามารถเชื่อมต่อกับ backend', 'error');
@@ -220,17 +301,32 @@ export default function AdminPage({ onBack }: AdminPageProps) {
     }
   };
 
-  // Clear cache
+  // Clear memory & cache safely
   const handleClearCache = async () => {
     setIsClearingCache(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/clear-cache`, { method: 'POST' });
+      // 1. Clear inactive patients from frontend store (localStorage), strictly keeping active treatment patients
+      const clientResult = clearInactivePatientsMemory();
+      const preserveHns = clientResult.retainedPatients.map((p) => p.hn);
+
+      // 2. Clear backend cache with preserve_hns list
+      const res = await fetch(`${API_BASE}/api/admin/clear-cache`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preserve_hns: preserveHns }),
+      });
+
       if (res.ok) {
-        const result = await res.json();
-        showToast(`🗑️ ล้างแคชเรียบร้อย: ${result.cleared_vitals} vitals, ${result.cleared_patients} patients`, 'success');
+        showToast(
+          `✅ ล้าง Memory สำเร็จ! เคลียร์ ${clientResult.clearedCount} ราย · ปกป้องผู้ป่วยที่กำลังรักษาไว้ ${clientResult.retainedCount} ราย`,
+          'success'
+        );
         loadCacheStats();
       } else {
-        showToast('ไม่สามารถล้างแคชได้', 'error');
+        showToast(
+          `ล้างข้อมูลฝั่ง Client เรียบร้อย (${clientResult.clearedCount} ราย) แต่ Backend ตอบกลับไม่สมบูรณ์`,
+          'warning'
+        );
       }
     } catch {
       showToast('ไม่สามารถเชื่อมต่อกับ backend', 'error');
@@ -243,7 +339,11 @@ export default function AdminPage({ onBack }: AdminPageProps) {
   // Guard: only it_admin
   if (!isAuthenticated || currentUser?.role !== 'it_admin') {
     return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
+      <div style={{
+        height: '100vh', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', gap: '16px',
+        background: '#f8fafc', fontFamily: 'inherit',
+      }}>
         <div style={{ fontSize: '48px' }}>🔒</div>
         <div style={{ fontSize: '18px', fontWeight: 700, color: '#64748b' }}>ต้องเข้าสู่ระบบในฐานะ IT Admin เท่านั้น</div>
         <button onClick={onBack} style={{
@@ -269,6 +369,7 @@ export default function AdminPage({ onBack }: AdminPageProps) {
           onConfirm={handleClearCache}
           onCancel={() => setShowConfirmClear(false)}
           isLoading={isClearingCache}
+          audit={memoryAudit}
         />
       )}
 
@@ -283,6 +384,7 @@ export default function AdminPage({ onBack }: AdminPageProps) {
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, #6d28d9, #2563eb, #0891b2)' }} />
 
         <button
+          id="btn-admin-back"
           onClick={onBack}
           style={{
             padding: '8px 16px', borderRadius: '10px', fontSize: '12px', fontWeight: 700,
@@ -522,27 +624,46 @@ export default function AdminPage({ onBack }: AdminPageProps) {
             <SectionTitle icon="🔧" title="เครื่องมือระบบ" subtitle="จัดการ Cache และดาวน์โหลด Log ของระบบ" />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {/* Clear Cache Tool */}
+              {/* Patient Memory Cleanup Tool with Active Treatment Guard */}
               <ToolCard
-                icon="🗑️"
+                icon="🛡️"
                 iconGradient={['#ea580c', '#c2410c']}
-                title="ล้าง Memory Cache"
+                title="ล้างหน่วยความจำผู้ป่วย (Patient Memory Guard)"
                 description={
                   <>
-                    ล้าง <code>last_seen_vitals</code> และ Patient Cache ทั้งหมดออกจากหน่วยความจำ
-                    ระบบจะดึงข้อมูลใหม่ภายใน 30 วินาที
+                    ล้างหน่วยความจำและ LocalStorage ของผู้ป่วยที่ไม่ได้รักษา เพื่อคืนทรัพยากร RAM
                     <br />
-                    {cacheStats && (
-                      <span style={{ color: '#d97706', fontWeight: 600, marginTop: '4px', display: 'block' }}>
-                        ขนาดแคชปัจจุบัน: {cacheStats.last_seen_vitals_count} vitals · {cacheStats.patients_cache_count} patients
-                      </span>
-                    )}
+                    <div style={{
+                      marginTop: '8px', padding: '10px 12px', background: '#f8fafc',
+                      borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '11px',
+                    }}>
+                      <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                        <span>👥 ผู้ป่วยในหน่วยความจำ: <strong>{memoryAudit.totalPatientsInMemory} ราย</strong></span>
+                        <span style={{ color: '#16a34a' }}>
+                          🛡️ กำลังรักษา / จับเวลา (คงไว้): <strong>{memoryAudit.activeTreatedCount} ราย</strong>
+                        </span>
+                        <span style={{ color: '#ea580c' }}>
+                          🧹 พร้อมเคลียร์: <strong>{memoryAudit.inactiveCount} ราย</strong>
+                        </span>
+                      </div>
+                      {memoryAudit.retainedPatients.length > 0 && (
+                        <div style={{ marginTop: '6px', color: '#15803d', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>🔒 คุ้มครองอัตโนมัติ:</span>
+                          <span style={{ fontWeight: 600 }}>
+                            {memoryAudit.retainedPatients.map((p) => `HN ${maskHN(p.hn)}`).join(', ')}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <span style={{ color: '#64748b', fontSize: '11px', marginTop: '6px', display: 'block' }}>
+                      {cacheStats && `Backend Cache: ${cacheStats.last_seen_vitals_count} vitals · ${cacheStats.patients_cache_count} patients`}
+                    </span>
                   </>
                 }
-                buttonLabel="🗑️ ล้างแคชทันที"
+                buttonLabel="🧹 ล้าง Memory ผู้ป่วยที่ไม่ได้รักษา"
                 buttonColor="#ea580c"
                 onAction={() => setShowConfirmClear(true)}
-                dangerNote="⚠️ ต้องยืนยันก่อนดำเนินการ"
+                dangerNote="🛡️ คุ้มครองผู้ป่วยที่กำลังรักษาอัตโนมัติ"
               />
 
               {/* Midnight Auto-clear Info */}

@@ -97,6 +97,20 @@ function mapBackendToPatient(bp: BackendPatient): Patient {
     calculatedAt: bp.news_result.calculatedAt,
   };
 
+  // Safely construct arrivalTime:
+  // If bp.arrival_time is missing or default midnight (T00:00:00) while vsttime has real time, use vstdate + vsttime
+  let arrivalTime = bp.arrival_time;
+  if ((!arrivalTime || arrivalTime.endsWith('T00:00:00') || arrivalTime.endsWith('T00:00')) && bp.vsttime) {
+    const timeParts = bp.vsttime.split(':');
+    if (timeParts.length >= 2) {
+      const hh = timeParts[0].padStart(2, '0');
+      const mm = timeParts[1].padStart(2, '0');
+      const ss = (timeParts[2] || '00').padStart(2, '0');
+      const datePart = bp.vstdate || new Date().toISOString().split('T')[0];
+      arrivalTime = `${datePart}T${hh}:${mm}:${ss}`;
+    }
+  }
+
   return {
     id: bp.hn,
     hn: bp.hn,
@@ -105,7 +119,7 @@ function mapBackendToPatient(bp: BackendPatient): Patient {
     age: (bp.age != null && bp.age > 0) ? bp.age : null,
     gender: bp.sex ?? 'other',
     triageLevel: riskToTriageLevel(bp.news_result.riskLevel),
-    arrivalTime: bp.arrival_time,
+    arrivalTime: arrivalTime || new Date().toISOString(),
     chiefComplaint: bp.chief_complaint ?? 'ไม่ระบุ',
     allergies: [],
     currentRiskLevel: bp.news_result.riskLevel,
@@ -132,41 +146,55 @@ function riskToTriageLevel(risk: string): Patient['triageLevel'] {
 
 export function usePatientData() {
   const { setPatients, selectPatient, setConnectionStatus, setLoading, queueAlert } = useRTSASStore();
+  const alertedKeysRef = useRef<Set<string>>(new Set());
 
-  const fetchPatients = useCallback(async () => {
+  const fetchPatients = useCallback(async (forceRefresh = false) => {
     try {
-      const res = await fetch('/api/patients');
+      const url = forceRefresh ? '/api/patients?refresh=true' : '/api/patients';
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const data: BackendPatientsResponse = await res.json();
       const patients = data.patients.map(mapBackendToPatient);
 
       setConnectionStatus('connected');
-
       setPatients(patients);
 
-      // ✅ Bug #3 Fix: Only auto-select + alert on FIRST load (no patient selected yet)
-      // On subsequent 60s refreshes, do NOT switch the selected patient
+      // Only auto-select patient on initial load if none is selected
       const currentSelected = useRTSASStore.getState().selectedPatient;
       const isFirstLoad = !currentSelected;
 
       if (isFirstLoad && patients.length > 0) {
-        // Select the highest-risk patient
         selectPatient(patients[0].id);
         console.log(`[RTSAS] Initial load: ${data.count} patients. Top: HN ${patients[0].hn} NEWS ${patients[0].latestNewsScore}`);
+      }
 
-        // Queue alerts for ALL high-risk patients (NEWS >= 5 + riskLevel=high)
-        // We no longer limit to 3, and we let the AlertSummaryBanner handle the UI
-        const highRisk = patients.filter(p => p.hasSepsisAlert);
-        if (highRisk.length > 0) {
-          highRisk.forEach(p => {
-            queueAlert(p.hn, p.latestNewsScore);
-          });
-          console.log(`[RTSAS] Queued ${highRisk.length} high-risk alerts (NEWS >= 5).`);
-        }
+      // 🚨 Detect high-risk sepsis patients (NEWS >= 5 or single parameter alert)
+      // that have not been alerted yet in this session and haven't finished treatment
+      const patientDataStore = useRTSASStore.getState().patientData;
+      const highRisk = patients.filter((p) => {
+        if (!p.hasSepsisAlert) return false;
+
+        const pData = patientDataStore[p.id];
+        // If treatment is already completed or ruled out, do not alert
+        if (pData?.treatmentCompleted || pData?.sepsisRuledOut) return false;
+
+        // Signature to avoid re-alerting the exact same reading
+        const alertKey = `${p.hn}_${p.arrivalTime || ''}_${p.latestNewsScore}`;
+        if (alertedKeysRef.current.has(alertKey)) return false;
+
+        return true;
+      });
+
+      if (highRisk.length > 0) {
+        console.log(`[RTSAS] Detected ${highRisk.length} high-risk patient alert(s) on data fetch.`);
+        highRisk.forEach((p) => {
+          const alertKey = `${p.hn}_${p.arrivalTime || ''}_${p.latestNewsScore}`;
+          alertedKeysRef.current.add(alertKey);
+          queueAlert(p.hn, p.latestNewsScore);
+        });
       } else {
-        // Subsequent refresh — silently update patient list, no disruption
-        console.log(`[RTSAS] Refreshed ${data.count} patients (silent update).`);
+        console.log(`[RTSAS] Refreshed ${data.count} patients.`);
       }
     } catch (err) {
       console.warn('[usePatientData] Backend unavailable — fallback to offline demo patient data:', err);
@@ -185,12 +213,13 @@ export function usePatientData() {
     }
   }, [setPatients, selectPatient, setConnectionStatus, setLoading, queueAlert]);
 
-
   useEffect(() => {
     fetchPatients();
 
     // Refresh patient list every 60s (WebSocket handles real-time; HTTP is fallback sync)
-    const interval = setInterval(fetchPatients, 60_000);
+    const interval = setInterval(() => {
+      fetchPatients(false);
+    }, 60_000);
     return () => clearInterval(interval);
   }, [fetchPatients]);
 
@@ -202,10 +231,11 @@ export function usePatientData() {
 // ---------------------------------------------------------------------------
 
 export function useWebSocketAlerts() {
-  const { setPatients, setConnectionStatus, addTimelineEvent, queueAlert } = useRTSASStore();
+  const { setPatients, setConnectionStatus, queueAlert } = useRTSASStore();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMounted = useRef(true);
+  const connectRef = useRef<() => void>(() => { });
 
   const connect = useCallback(() => {
     if (!isMounted.current) return;
@@ -291,17 +321,10 @@ export function useWebSocketAlerts() {
         // 🚨 Queue alert for high-risk patients (new readings only)
         // Use queueAlert instead of openModal to avoid interrupting the current patient view
         if (payload.is_new_alert &&
-           (payload.news_result.totalScore >= 5 || payload.news_result.hasSingleParameterAlert)) {
+          (payload.news_result.totalScore >= 5 || payload.news_result.hasSingleParameterAlert)) {
 
           // Queue the alert — if modal is already open it will stack, not override
           queueAlert(payload.hn, payload.news_result.totalScore);
-
-          // ✅ Clinical alert in Timeline (no HN for privacy)
-          addTimelineEvent(
-            `⚠️ ระบบตรวจพบ NEWS ${payload.news_result.totalScore} — ต้องประเมินทันที`,
-            payload.news_result.totalScore >= 7 ? 'red' : 'orange',
-            'System'
-          );
         }
       } catch (err) {
         console.error('[WebSocket] Failed to parse message:', err);
@@ -318,13 +341,14 @@ export function useWebSocketAlerts() {
       console.log('[WebSocket] Disconnected. Reconnecting in 5s...');
       setConnectionStatus('reconnecting');
       reconnectTimer.current = setTimeout(() => {
-        if (isMounted.current) connect();
+        if (isMounted.current) connectRef.current();
       }, 5000);
     };
-  }, [setConnectionStatus, setPatients, addTimelineEvent]);
+  }, [setConnectionStatus, setPatients, queueAlert]);
 
   useEffect(() => {
     isMounted.current = true;
+    connectRef.current = connect;
     connect();
 
     return () => {

@@ -44,3 +44,10 @@ backend/auth/__pycache__/
 
 # Docker volume data
 auth_db_data/
+
+# Python Virtual Environment
+.venv/
+
+# Scratch scripts
+scratch/
+

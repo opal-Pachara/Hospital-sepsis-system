@@ -2,29 +2,55 @@ import { useRTSASStore } from '../store/useRTSASStore';
 import { maskHN } from '../utils/hnMask';
 
 export default function AlertModal() {
-  const { ui, closeModal, selectedPatient, completeChecklistItem, addTimelineEvent, pendingAlerts, selectPatient } = useRTSASStore();
+  const { ui, closeModal, selectedPatient, completeChecklistItem, pendingAlerts, selectPatient } = useRTSASStore();
 
   if (ui.modal.activeModal !== 'alert') return null;
 
   const data = ui.modal.modalData as {
     newsScore: number;
-    patientName: string;
+    patientName?: string;
+    hn?: string;
   } | null;
 
   if (!data) return null;
 
   // Use modal data as primary source (patient may not be selected when alert queued)
-  const alertHN = data.patientName;     // HN from the alert payload
+  const alertHN = data.hn || data.patientName || '';
   const alertNewsScore = data.newsScore;
 
   // Try to find the alerted patient in the list
-  const alertedPatient = useRTSASStore.getState().patients.find((p) => p.hn === alertHN);
+  const alertedPatient = useRTSASStore.getState().patients.find(
+    (p) => p.hn === alertHN || p.id === alertHN || (data.patientName && p.fullName === data.patientName)
+  );
   const patient = alertedPatient ?? selectedPatient;
 
   const genderLabel = patient?.gender === 'male' ? 'เพศชาย' : patient?.gender === 'female' ? 'เพศหญิง' : 'ไม่ระบุ';
   const arrivalTimeStr = patient
     ? new Date(patient.arrivalTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : '--:--:--';
+
+  const advanceQueue = () => {
+    const targetHn = alertedPatient?.hn ?? alertHN;
+    const remainingAlerts = useRTSASStore.getState().pendingAlerts.filter((a) => a.hn !== targetHn);
+    useRTSASStore.setState({ pendingAlerts: remainingAlerts });
+
+    closeModal();
+
+    // If more alerts exist in queue, pop up the next alert seamlessly
+    if (remainingAlerts.length > 0) {
+      const nextAlert = remainingAlerts[0];
+      const nextPatient = useRTSASStore.getState().patients.find(
+        (p) => p.hn === nextAlert.hn || p.id === nextAlert.hn
+      );
+      setTimeout(() => {
+        useRTSASStore.getState().openModal('alert', {
+          hn: nextAlert.hn,
+          newsScore: nextAlert.newsScore,
+          patientName: nextPatient?.fullName || nextAlert.hn,
+        });
+      }, 250);
+    }
+  };
 
   const handleAcknowledge = () => {
     // If the alerted patient is not currently selected, select them first
@@ -42,15 +68,13 @@ export default function AlertModal() {
     if (!alreadyRunning) {
       // First acknowledgement — start the full Sepsis Bundle workflow
       completeChecklistItem('doctor_confirm', 'Nurse/System');
-      addTimelineEvent(
-        `✅ รับทราบและเริ่มกระบวนการ Sepsis Bundle — เริ่มนับ 60 นาที`,
-        'orange',
-        'Nurse'
-      );
     }
-    // If timer already running — just close popup, do NOT reset the countdown
 
-    closeModal();
+    advanceQueue();
+  };
+
+  const handleClose = () => {
+    advanceQueue();
   };
 
   // Build breakdown rows from patient's NEWS result
@@ -114,7 +138,7 @@ export default function AlertModal() {
             </div>
           </div>
           <button
-            onClick={closeModal}
+            onClick={handleClose}
             style={{
               width: '36px', height: '36px', borderRadius: '10px',
               border: '1px solid #fca5a5', background: '#fff',

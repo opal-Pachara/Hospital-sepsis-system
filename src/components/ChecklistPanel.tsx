@@ -269,9 +269,8 @@ function ChecklistItemRow({ item, phaseUnlocked }: { item: ChecklistItem; phaseU
 
   return (
     <div
-      className={`flex items-start gap-2 transition-all ${
-        isDone ? '' : canComplete ? 'hover:bg-[#eff6ff] cursor-pointer' : 'opacity-50'
-      }`}
+      className={`flex items-start gap-2 transition-all ${isDone ? '' : canComplete ? 'hover:bg-[#eff6ff] cursor-pointer' : 'opacity-50'
+        }`}
       style={{
         padding: '7px 8px',
         borderRadius: '8px',
@@ -476,12 +475,13 @@ function PhaseSection({ phase }: { phase: ChecklistPhase }) {
 }
 
 export default function ChecklistPanel() {
-  const { checklist, assessmentSchedule, patientData, selectedPatient } = useRTSASStore();
+  const { checklist, assessmentSchedule, patientData, selectedPatient, completeTreatment, currentUser } = useRTSASStore();
+  const [showConfirmTreatmentComplete, setShowConfirmTreatmentComplete] = useState(false);
 
   // Check if patient is globally completed
   const currentData = selectedPatient ? patientData[selectedPatient.id] : null;
   const isGloballyCompleted = (currentData?.sepsisRuledOut ?? false) || (currentData?.treatmentCompleted ?? false);
-  
+
   // Check if Phase 4 is unlocked
   const isPhase4Unlocked = checklist.find(p => p.phase === 'assessment_schedule')?.isUnlocked ?? false;
 
@@ -493,6 +493,67 @@ export default function ChecklistPanel() {
 
   return (
     <div className="h-full overflow-y-auto" style={{ paddingBottom: '40px' }}>
+      {/* Completed Status Banner */}
+      {currentData?.treatmentCompleted && (
+        <div style={{
+          margin: '10px 12px 6px',
+          padding: '12px 14px',
+          background: 'linear-gradient(135deg, #ecfdf5, #d1fae5)',
+          border: '1.5px solid #6ee7b7',
+          borderRadius: '10px',
+          boxShadow: '0 2px 8px rgba(16, 185, 129, 0.12)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+        }}>
+          <div style={{
+            width: '32px', height: '32px', borderRadius: '50%',
+            background: '#10b981', color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '16px', fontWeight: 900, flexShrink: 0,
+          }}>✓</div>
+          <div>
+            <div style={{ fontSize: '13px', fontWeight: 800, color: '#065f46' }}>
+              การรักษา Sepsis เสร็จสิ้นครบถ้วนแล้ว
+            </div>
+            <div style={{ fontSize: '11px', color: '#047857', marginTop: '2px' }}>
+              {currentData.treatmentCompletedAt
+                ? `บันทึกเวลาเสร็จสิ้น: ${new Date(currentData.treatmentCompletedAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.`
+                : 'ผู้ป่วยได้รับการดูแลครบตามมาตรฐาน'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {currentData?.sepsisRuledOut && (
+        <div style={{
+          margin: '10px 12px 6px',
+          padding: '12px 14px',
+          background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)',
+          border: '1.5px solid #86efac',
+          borderRadius: '10px',
+          boxShadow: '0 2px 8px rgba(34, 197, 94, 0.12)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+        }}>
+          <div style={{
+            width: '32px', height: '32px', borderRadius: '50%',
+            background: '#22c55e', color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '16px', fontWeight: 900, flexShrink: 0,
+          }}>✕</div>
+          <div>
+            <div style={{ fontSize: '13px', fontWeight: 800, color: '#166534' }}>
+              แพทย์ยืนยัน Ruled Out Sepsis แล้ว
+            </div>
+            <div style={{ fontSize: '11px', color: '#15803d', marginTop: '2px' }}>
+              ผู้ป่วยไม่ได้มีภาวะติดเชื้อในกระแสเลือด — สิ้นสุดกระบวนการ
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Overall progress */}
       <div style={{
         margin: '10px 12px', padding: '8px 12px',
@@ -567,123 +628,123 @@ export default function ChecklistPanel() {
               {(() => {
                 const firstUncompletedSeq = assessmentSchedule.entries.find(e => !e.isCompleted && !e.isCanceled)?.sequence ?? -1;
                 const firstCanceledSeq = assessmentSchedule.entries.find(e => e.isCanceled)?.sequence ?? -1;
-                
+
                 return assessmentSchedule.entries.map((entry) => {
                   const isDone = entry.isCompleted;
-                const isDue = !isDone && new Date() >= new Date(entry.scheduledTime);
-                const timeStr = new Date(entry.scheduledTime).toLocaleTimeString('th-TH', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                });
+                  const isDue = !isDone && new Date() >= new Date(entry.scheduledTime);
+                  const timeStr = new Date(entry.scheduledTime).toLocaleTimeString('th-TH', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  });
 
-                return (
-                  <div
-                    key={entry.id}
-                    style={{
-                      display: 'grid', gridTemplateColumns: '30px 1fr 46px 80px', gap: '4px',
-                      padding: '5px 8px', borderBottom: '1px solid #f1f5f9',
-                      alignItems: 'center', fontSize: '10px',
-                      ...(isDone ? { background: '#f0fdf430' } : isDue ? { background: '#fef2f230' } : {}),
-                    }}
-                  >
-                    <span style={{ fontSize: '9px', color: '#94a3b8', fontWeight: 700 }}>{entry.sequence}</span>
-                    <span style={{ textAlign: 'center' }}>
-                      <span style={{ fontSize: '10px', fontWeight: 600, color: '#1e293b' }}>{timeStr}</span>
-                      <span style={{ fontSize: '8px', color: '#94a3b8', display: 'block' }}>
-                        {entry.intervalType}
+                  return (
+                    <div
+                      key={entry.id}
+                      style={{
+                        display: 'grid', gridTemplateColumns: '30px 1fr 46px 80px', gap: '4px',
+                        padding: '5px 8px', borderBottom: '1px solid #f1f5f9',
+                        alignItems: 'center', fontSize: '10px',
+                        ...(isDone ? { background: '#f0fdf430' } : isDue ? { background: '#fef2f230' } : {}),
+                      }}
+                    >
+                      <span style={{ fontSize: '9px', color: '#94a3b8', fontWeight: 700 }}>{entry.sequence}</span>
+                      <span style={{ textAlign: 'center' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 600, color: '#1e293b' }}>{timeStr}</span>
+                        <span style={{ fontSize: '8px', color: '#94a3b8', display: 'block' }}>
+                          {entry.intervalType}
+                        </span>
                       </span>
-                    </span>
-                    <span style={{ textAlign: 'center' }}>
-                      {entry.newsResult ? (
-                        <span style={{
-                          fontWeight: 800, fontSize: '10px',
-                          color: entry.newsResult.totalScore >= 7 ? '#dc2626'
-                            : entry.newsResult.totalScore >= 5 ? '#ea580c'
-                            : '#16a34a',
-                        }}>
-                          {entry.newsResult.totalScore}
-                        </span>
-                      ) : (
-                        <span style={{ color: '#94a3b8' }}>—</span>
-                      )}
-                    </span>
-                    <span style={{ textAlign: 'center' }}>
-                      {entry.isCanceled ? (
-                        <span style={{
-                          padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
-                          background: entry.sequence === firstCanceledSeq ? '#dcfce7' : '#f1f5f9',
-                          color: entry.sequence === firstCanceledSeq ? '#16a34a' : '#64748b',
-                          border: `1px solid ${entry.sequence === firstCanceledSeq ? '#16a34a' : '#cbd5e1'}`,
-                        }}>
-                          {entry.sequence === firstCanceledSeq ? '✅ เสร็จตรงนี้' : '— ยกเลิก'}
-                        </span>
-                      ) : isDone ? (
-                        <span style={{
-                          padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
-                          background: '#dcfce7', color: '#16a34a', border: '1px solid #bbf7d0',
-                        }}>
-                          ✓ บันทึกแล้ว
-                        </span>
-                      ) : !isPhase4Unlocked ? (
-                        <span style={{
-                          padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
-                          background: '#f1f5f9', color: '#94a3b8', border: '1px solid #cbd5e1',
-                        }}>
-                          🔒 รอ Phase 3
-                        </span>
-                      ) : entry.sequence !== firstUncompletedSeq ? (
-                        <span style={{
-                          padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
-                          background: '#f1f5f9', color: '#94a3b8', border: '1px solid #cbd5e1',
-                        }}>
-                          🔒 รอครั้งก่อนหน้า
-                        </span>
-                      ) : isDue && !isGloballyCompleted ? (
-                        <button
-                          type="button"
-                          className="animate-pulse-btn"
-                          onClick={() =>
-                            useRTSASStore.getState().openModal('assessment_form', {
-                              entryId: entry.id,
-                              sequence: entry.sequence,
-                            })
-                          }
-                          style={{
+                      <span style={{ textAlign: 'center' }}>
+                        {entry.newsResult ? (
+                          <span style={{
+                            fontWeight: 800, fontSize: '10px',
+                            color: entry.newsResult.totalScore >= 7 ? '#dc2626'
+                              : entry.newsResult.totalScore >= 5 ? '#ea580c'
+                                : '#16a34a',
+                          }}>
+                            {entry.newsResult.totalScore}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#94a3b8' }}>—</span>
+                        )}
+                      </span>
+                      <span style={{ textAlign: 'center' }}>
+                        {entry.isCanceled ? (
+                          <span style={{
                             padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
-                            color: '#fff', background: '#dc2626', border: '1px solid #b91c1c',
-                            cursor: 'pointer', fontFamily: 'inherit', width: '100%',
-                          }}
-                        >
-                          ⚡ บันทึกด่วน
-                        </button>
-                      ) : !isGloballyCompleted ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            useRTSASStore.getState().openModal('assessment_form', {
-                              entryId: entry.id,
-                              sequence: entry.sequence,
-                            })
-                          }
-                          style={{
+                            background: entry.sequence === firstCanceledSeq ? '#dcfce7' : '#f1f5f9',
+                            color: entry.sequence === firstCanceledSeq ? '#16a34a' : '#64748b',
+                            border: `1px solid ${entry.sequence === firstCanceledSeq ? '#16a34a' : '#cbd5e1'}`,
+                          }}>
+                            {entry.sequence === firstCanceledSeq ? '✅ เสร็จตรงนี้' : '— ยกเลิก'}
+                          </span>
+                        ) : isDone ? (
+                          <span style={{
                             padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
-                            color: '#2563eb', background: '#eff6ff', border: '1px solid #bfdbfe',
-                            cursor: 'pointer', fontFamily: 'inherit', width: '100%',
-                          }}
-                        >
-                          บันทึก
-                        </button>
-                      ) : (
-                        <span style={{
-                          padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
-                          background: '#f1f5f9', color: '#94a3b8', border: '1px solid #cbd5e1',
-                        }}>
-                          — ข้าม
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                );
+                            background: '#dcfce7', color: '#16a34a', border: '1px solid #bbf7d0',
+                          }}>
+                            ✓ บันทึกแล้ว
+                          </span>
+                        ) : !isPhase4Unlocked ? (
+                          <span style={{
+                            padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
+                            background: '#f1f5f9', color: '#94a3b8', border: '1px solid #cbd5e1',
+                          }}>
+                            🔒 รอ Phase 3
+                          </span>
+                        ) : entry.sequence !== firstUncompletedSeq ? (
+                          <span style={{
+                            padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
+                            background: '#f1f5f9', color: '#94a3b8', border: '1px solid #cbd5e1',
+                          }}>
+                            🔒 รอครั้งก่อนหน้า
+                          </span>
+                        ) : isDue && !isGloballyCompleted ? (
+                          <button
+                            type="button"
+                            className="animate-pulse-btn"
+                            onClick={() =>
+                              useRTSASStore.getState().openModal('assessment_form', {
+                                entryId: entry.id,
+                                sequence: entry.sequence,
+                              })
+                            }
+                            style={{
+                              padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
+                              color: '#fff', background: '#dc2626', border: '1px solid #b91c1c',
+                              cursor: 'pointer', fontFamily: 'inherit', width: '100%',
+                            }}
+                          >
+                            ⚡ บันทึกด่วน
+                          </button>
+                        ) : !isGloballyCompleted ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              useRTSASStore.getState().openModal('assessment_form', {
+                                entryId: entry.id,
+                                sequence: entry.sequence,
+                              })
+                            }
+                            style={{
+                              padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
+                              color: '#2563eb', background: '#eff6ff', border: '1px solid #bfdbfe',
+                              cursor: 'pointer', fontFamily: 'inherit', width: '100%',
+                            }}
+                          >
+                            บันทึก
+                          </button>
+                        ) : (
+                          <span style={{
+                            padding: '2px 6px', borderRadius: '10px', fontSize: '8px', fontWeight: 700,
+                            background: '#f1f5f9', color: '#94a3b8', border: '1px solid #cbd5e1',
+                          }}>
+                            — ข้าม
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  );
                 });
               })()}
             </div>
@@ -694,6 +755,127 @@ export default function ChecklistPanel() {
               fontSize: '9px', color: '#0891b2', textAlign: 'center', fontWeight: 600,
             }}>
               ทุก 15 นาที (4 ครั้งแรก) → หลังจากนั้นทุก 30 นาที
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Action Button: สิ้นสุดการรักษา (รักษาเสร็จแล้ว) */}
+      {!isGloballyCompleted && (
+        <div style={{ padding: '0 12px', marginTop: '16px', marginBottom: '10px' }}>
+          <button
+            id="btn-complete-treatment-checklist"
+            type="button"
+            onClick={() => setShowConfirmTreatmentComplete(true)}
+            style={{
+              width: '100%',
+              padding: '12px 16px',
+              borderRadius: '12px',
+              fontSize: '13px',
+              fontWeight: 800,
+              fontFamily: 'inherit',
+              cursor: 'pointer',
+              color: '#fff',
+              border: 'none',
+              background: 'linear-gradient(135deg, #10b981, #059669)',
+              boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(16, 185, 129, 0.45)'; }}
+            onMouseOut={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(16, 185, 129, 0.35)'; }}
+          >
+            <span style={{ fontSize: '15px' }}>✅</span>
+            <span>สิ้นสุดการรักษา (รักษาเสร็จแล้ว)</span>
+          </button>
+        </div>
+      )}
+
+      {/* In-app Confirmation Modal for Treatment Complete */}
+      {showConfirmTreatmentComplete && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center animate-fade-in"
+          style={{ background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)' }}
+        >
+          <div
+            className="animate-slideUp"
+            style={{
+              width: '420px',
+              background: '#fff',
+              borderRadius: '20px',
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.3)',
+            }}
+          >
+            <div style={{ height: '4px', background: 'linear-gradient(90deg, #10b981, #059669)' }} />
+            <div style={{ padding: '22px 24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+                <div style={{
+                  width: '42px', height: '42px', borderRadius: '12px',
+                  background: '#d1fae5', color: '#059669',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '20px', fontWeight: 900,
+                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.2)',
+                }}>
+                  ✅
+                </div>
+                <div>
+                  <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a' }}>
+                    ยืนยันสิ้นสุดการรักษา Sepsis
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '1px' }}>
+                    ผู้ป่วยได้รับการรักษา Sepsis Bundle ครบถ้วนแล้ว
+                  </div>
+                </div>
+              </div>
+
+              <p style={{ fontSize: '12px', color: '#475569', lineHeight: 1.6, marginBottom: '20px' }}>
+                คุณต้องการยืนยันว่าผู้ป่วยรายนี้ได้รับการดูแลรักษาภาวะติดเชื้อในกระแสเลือดเสร็จสิ้นครบถ้วนแล้วใช่หรือไม่?
+                ระบบจะหยุดตัวนับเวลานับถอยหลัง 60 นาที และบันทึกประวัติลงใน Timeline
+              </p>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  type="button"
+                  id="btn-confirm-complete-treatment-modal"
+                  onClick={() => {
+                    const actorName = currentUser?.name || 'พยาบาลห้องฉุกเฉิน';
+                    completeTreatment(actorName);
+                    showToast('✅ สิ้นสุดการรักษาสำหรับผู้ป่วยรายนี้เรียบร้อยแล้ว', 'success');
+                    setShowConfirmTreatmentComplete(false);
+                  }}
+                  style={{
+                    flex: 2, padding: '13px', borderRadius: '12px',
+                    fontSize: '13px', fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
+                    color: '#fff', border: 'none',
+                    background: 'linear-gradient(135deg, #10b981, #059669)',
+                    boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.transform = 'none'; }}
+                >
+                  ✅ ยืนยันเสร็จสิ้น
+                </button>
+                <button
+                  type="button"
+                  id="btn-cancel-complete-treatment-modal"
+                  onClick={() => setShowConfirmTreatmentComplete(false)}
+                  style={{
+                    flex: 1, padding: '13px', borderRadius: '12px',
+                    fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                    color: '#64748b', border: '1px solid #cbd5e1', background: '#f8fafc',
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.background = '#f1f5f9'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
+                >
+                  ยกเลิก
+                </button>
+              </div>
             </div>
           </div>
         </div>

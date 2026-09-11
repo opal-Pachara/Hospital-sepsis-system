@@ -102,6 +102,7 @@ export default function ExportReportModal({ isOpen, onClose }: ExportReportModal
             </div>
           </div>
           <button
+            id="btn-export-close"
             onClick={onClose}
             style={{
               width: '34px', height: '34px', borderRadius: '10px',

@@ -2,11 +2,17 @@ import asyncio
 import logging
 from datetime import datetime, date
 from aiomysql import DictCursor
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from .database import db_pool
 from .schemas import SepsisAlertPayload, PatientListItem
-from .services import calculate_news_from_row, row_to_arrival_iso, sex_label
+from .services import (
+    calculate_news_from_row,
+    row_to_arrival_iso,
+    sex_label,
+    format_time_str,
+    format_date_str,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +30,51 @@ _last_clear_date: date | None = None
 # Cache management helpers
 # ---------------------------------------------------------------------------
 
-def clear_cache() -> dict:
-    """Clear last_seen_vitals and patient cache. Returns stats."""
+def clear_cache(preserve_hns: Optional[List[str]] = None) -> dict:
+    """Clear last_seen_vitals and patient cache, preserving any HNs currently in active treatment. Returns stats."""
     global last_seen_vitals, _patients_cache
-    cleared_vitals = len(last_seen_vitals)
-    cleared_patients = len(_patients_cache)
-    last_seen_vitals = {}
-    _patients_cache = []
-    logger.info(f"Cache cleared manually: {cleared_vitals} vitals, {cleared_patients} patients")
-    return {"cleared_vitals": cleared_vitals, "cleared_patients": cleared_patients}
+    preserve_set = set(str(hn).strip() for hn in (preserve_hns or []))
+
+    total_vitals = len(last_seen_vitals)
+    total_patients = len(_patients_cache)
+
+    if not preserve_set:
+        cleared_vitals = total_vitals
+        cleared_patients = total_patients
+        last_seen_vitals = {}
+        _patients_cache = []
+        retained_vitals = 0
+        retained_patients = 0
+    else:
+        # Keep vitals whose reading key starts with any preserved HN: f"{hn}_"
+        new_vitals = {}
+        for k, v in last_seen_vitals.items():
+            hn_part = k.split('_')[0]
+            if hn_part in preserve_set:
+                new_vitals[k] = v
+
+        # Keep patient cache for preserved HNs
+        new_patients = [p for p in _patients_cache if str(p.get('hn', '')).strip() in preserve_set]
+
+        cleared_vitals = total_vitals - len(new_vitals)
+        cleared_patients = total_patients - len(new_patients)
+        retained_vitals = len(new_vitals)
+        retained_patients = len(new_patients)
+
+        last_seen_vitals = new_vitals
+        _patients_cache = new_patients
+
+    logger.info(
+        f"Cache cleared: {cleared_vitals} vitals, {cleared_patients} patients removed. "
+        f"Preserved {retained_patients} active patients ({list(preserve_set)})."
+    )
+    return {
+        "cleared_vitals": cleared_vitals,
+        "cleared_patients": cleared_patients,
+        "retained_vitals": retained_vitals,
+        "retained_patients": retained_patients,
+        "preserved_hns": list(preserve_set),
+    }
 
 
 def get_cache_stats() -> dict:
@@ -153,14 +195,17 @@ def build_patient_list(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             news = calculate_news_from_row(row)
             arrival_iso = row_to_arrival_iso(vstdate, vsttime)
 
+            vstdate_str = format_date_str(vstdate)
+            vsttime_str = format_time_str(vsttime)
+
             item = PatientListItem(
                 id=hn,
                 hn=hn,
                 vn=vn if vn else None,
                 patient_name=row.get('patient_name'),
                 age=_si(row.get('age')),
-                vstdate=str(vstdate) if vstdate else '',
-                vsttime=str(vsttime) if vsttime else '',
+                vstdate=vstdate_str,
+                vsttime=vsttime_str,
                 sex=sex_label(row.get('sex')),
                 chief_complaint=row.get('chief_complaint'),
                 weight=_sf(row.get('weight')),
@@ -200,14 +245,17 @@ async def process_vitals():
     for row in rows:
         try:
             hn = str(row.get('hn', ''))
+            vstdate = row.get('vstdate')
             vsttime = row.get('vsttime')
-            reading_key = f"{hn}_{vsttime}"
+            vstdate_str = format_date_str(vstdate)
+            vsttime_str = format_time_str(vsttime)
+            reading_key = f"{hn}_{vsttime_str}"
 
             if reading_key not in last_seen_vitals:
                 last_seen_vitals[reading_key] = True
 
                 news = calculate_news_from_row(row)
-                vstdate = row.get('vstdate')
+                arrival_iso = row_to_arrival_iso(vstdate, vsttime)
 
                 payload = SepsisAlertPayload(
                     hn=hn,
@@ -225,11 +273,11 @@ async def process_vitals():
                     chief_complaint=row.get('chief_complaint'),
                     weight=_sf(row.get('weight')),
                     height=_sf(row.get('height')),
-                    vstdate=str(vstdate) if vstdate else '',
-                    vsttime=str(vsttime) if vsttime else '',
+                    vstdate=vstdate_str,
+                    vsttime=vsttime_str,
                     news_result=news,
                     is_new_alert=True,
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=arrival_iso,
                 )
                 await broadcast_message(payload.model_dump_json())
 
@@ -243,7 +291,7 @@ async def process_vitals():
 
 async def background_scheduler():
     global _last_clear_date
-    logger.info("Background scheduler started — polling every 30 seconds.")
+    logger.info("Background scheduler started — polling every 10 seconds.")
     while True:
         try:
             # Midnight auto-clear: clear last_seen_vitals once per day at midnight
@@ -256,7 +304,7 @@ async def background_scheduler():
             await process_vitals()
         except Exception as e:
             logger.error(f"Scheduler loop error: {e}")
-        await asyncio.sleep(30)
+        await asyncio.sleep(10)
 
 
 # ---------------------------------------------------------------------------

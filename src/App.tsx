@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useRTSASStore } from './store/useRTSASStore';
+import { useRTSASStore, isTreatmentTimelineEvent } from './store/useRTSASStore';
 import { useAssessmentReminders } from './hooks/useTimers';
 import { usePatientData, useWebSocketAlerts } from './hooks/useBackend';
 import Header from './components/Header';
@@ -20,10 +20,11 @@ import ErrorBanner from './components/ErrorBanner';
 import AlertSummaryBanner from './components/AlertSummaryBanner';
 import MultiAlertModal from './components/MultiAlertModal';
 import AdminPage from './components/AdminPage';
+import TreatedDashboard from './components/TreatedDashboard';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
-export type AppView = 'dashboard' | 'admin';
+export type AppView = 'dashboard' | 'admin' | 'treated_dashboard';
 
 function EmptyState() {
   return (
@@ -70,7 +71,7 @@ function WorkflowPanel() {
 
   if (!selectedPatient) return null;
 
-  const unreadTimelineCount = timeline.length;
+  const treatmentCount = (timeline || []).filter(isTreatmentTimelineEvent).length;
 
   return (
     <div className="workflow-panel-col">
@@ -82,11 +83,10 @@ function WorkflowPanel() {
         <button
           id="tab-checklist"
           onClick={() => setActiveTab('checklist')}
-          className={`flex-1 py-2.5 text-[11px] font-semibold cursor-pointer transition-all relative border-b-2 ${
-            ui.activeTab === 'checklist'
+          className={`flex-1 py-2.5 text-[11px] font-semibold cursor-pointer transition-all relative border-b-2 ${ui.activeTab === 'checklist'
               ? 'text-brand-primary border-brand-primary'
               : 'text-text-muted hover:text-text-secondary border-transparent'
-          }`}
+            }`}
           style={{ background: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', fontFamily: 'inherit' }}
         >
           ☑ Checklist
@@ -94,18 +94,16 @@ function WorkflowPanel() {
         <button
           id="tab-timeline"
           onClick={() => setActiveTab('timeline')}
-          className={`flex-1 py-2.5 text-[11px] font-semibold cursor-pointer transition-all relative border-b-2 ${
-            ui.activeTab === 'timeline'
+          className={`flex-1 py-2.5 text-[11px] font-semibold cursor-pointer transition-all relative border-b-2 ${ui.activeTab === 'timeline'
               ? 'text-brand-primary border-brand-primary'
               : 'text-text-muted hover:text-text-secondary border-transparent'
-          }`}
+            }`}
           style={{ background: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', fontFamily: 'inherit' }}
         >
           📅 Timeline
-          {ui.activeTab !== 'timeline' && unreadTimelineCount > 0 && (
-            <span className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold"
-              style={{ background: '#dbeafe', color: '#2563eb' }}>
-              {unreadTimelineCount > 9 ? '9+' : unreadTimelineCount}
+          {treatmentCount > 0 && (
+            <span className="ml-1.5 inline-flex items-center justify-center px-1.5 h-4 rounded-full text-[9px] font-bold bg-blue-100 text-blue-700">
+              {treatmentCount}
             </span>
           )}
         </button>
@@ -174,24 +172,39 @@ export default function App() {
     <div className="h-screen flex flex-col bg-surface-base relative">
       <AlertSummaryBanner />
       <ErrorBanner fetchPatients={fetchPatients} />
-      
+
       <Header onNavigateAdmin={() => setCurrentView('admin')} />
 
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* LEFT — Sidebar (Patient List) */}
-        <Sidebar />
+        <Sidebar
+          onRefresh={() => fetchPatients(true)}
+          onNavigateTreatedDashboard={() => setCurrentView('treated_dashboard')}
+          onNavigateClinical={() => setCurrentView('dashboard')}
+        />
 
-        {/* MAIN CONTENT — Workflow (center) + Detail (right) */}
-        <main className="flex-1 flex overflow-hidden min-h-0">
-          {/* CENTER — Checklist/Timeline */}
-          <WorkflowPanel />
+        {/* MAIN CONTENT — Workflow (center) + Detail (right) OR Treated Dashboard */}
+        {currentView === 'treated_dashboard' ? (
+          <TreatedDashboard
+            onBackToClinical={() => setCurrentView('dashboard')}
+            onSelectPatientTimeline={(patientId) => {
+              useRTSASStore.getState().selectPatient(patientId);
+              useRTSASStore.getState().setActiveTab('timeline');
+              setCurrentView('dashboard');
+            }}
+          />
+        ) : (
+          <main className="flex-1 flex overflow-hidden min-h-0">
+            {/* CENTER — Checklist/Timeline */}
+            <WorkflowPanel />
 
-          {/* RIGHT — Patient Detail + Vitals + NEWS */}
-          <DetailPanel />
+            {/* RIGHT — Patient Detail + Vitals + NEWS */}
+            <DetailPanel />
 
-          {/* Show empty state if no patient selected */}
-          {!useRTSASStore.getState().selectedPatient && <EmptyState />}
-        </main>
+            {/* Show empty state if no patient selected */}
+            {!useRTSASStore.getState().selectedPatient && <EmptyState />}
+          </main>
+        )}
       </div>
 
       {/* BOTTOM — Status Bar + Demo */}

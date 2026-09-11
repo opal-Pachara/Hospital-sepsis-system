@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
 import type { UserRole } from '../store/useRTSASStore';
 import { showToast } from './Toast';
+import { extractErrorMessage } from '../utils/errorUtils';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const roleOptions: { value: UserRole; label: string; icon: string; desc: string }[] = [
   { value: 'doctor',   label: 'แพทย์',          icon: '🩺', desc: 'ยืนยันการวินิจฉัย' },
@@ -49,9 +50,9 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: loginUsername.trim(), password: loginPassword }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setLoginError(data.detail || 'เข้าสู่ระบบล้มเหลว');
+        setLoginError(extractErrorMessage(data.detail, 'เข้าสู่ระบบล้มเหลว'));
         return;
       }
       // Store JWT in localStorage for persistence across refreshes
@@ -90,9 +91,9 @@ export default function LoginPage() {
           role: regRole,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setRegError(data.detail || 'สมัครล้มเหลว');
+        setRegError(extractErrorMessage(data.detail, 'สมัครล้มเหลว'));
         return;
       }
       setRegSuccess(`สร้างบัญชีสำเร็จ! กรุณาเข้าสู่ระบบด้วย Username: ${regUsername}`);

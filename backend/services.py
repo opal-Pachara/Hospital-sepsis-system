@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Any
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
 from .schemas import NEWSResult, NEWSParameterScore
 
 
@@ -148,29 +148,74 @@ def calculate_news_from_row(row: Dict[str, Any]) -> NEWSResult:
     )
 
 
+def parse_db_date(vstdate) -> date:
+    """Safely parse various DB vstdate representations into a date object."""
+    if isinstance(vstdate, datetime):
+        return vstdate.date()
+    if isinstance(vstdate, date):
+        return vstdate
+    if isinstance(vstdate, str):
+        cleaned = vstdate.strip().replace('/', '-')
+        try:
+            return date.fromisoformat(cleaned)
+        except Exception:
+            pass
+    return date.today()
+
+
+def parse_db_time(vsttime) -> time:
+    """Safely parse various DB vsttime representations (time, timedelta, str) into a time object."""
+    if isinstance(vsttime, time):
+        return vsttime
+
+    # aiomysql/PyMySQL returns timedelta for MySQL TIME columns
+    if isinstance(vsttime, timedelta):
+        total_seconds = int(vsttime.total_seconds())
+        hours = (total_seconds // 3600) % 24
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        return time(hours, minutes, seconds)
+
+    if isinstance(vsttime, str):
+        cleaned = vsttime.strip()
+        if ':' in cleaned:
+            parts = cleaned.split(':')
+            try:
+                h = int(parts[0])
+                m = int(parts[1]) if len(parts) > 1 else 0
+                s = int(parts[2]) if len(parts) > 2 else 0
+                return time(h, m, s)
+            except (ValueError, TypeError):
+                return time(0, 0, 0)
+        # HOSxP format HHMM or HHMMSS
+        if len(cleaned) == 4 and cleaned.isdigit():
+            return time(int(cleaned[:2]), int(cleaned[2:4]), 0)
+        if len(cleaned) == 6 and cleaned.isdigit():
+            return time(int(cleaned[:2]), int(cleaned[2:4]), int(cleaned[4:6]))
+
+    return time(0, 0, 0)
+
+
 def row_to_arrival_iso(vstdate, vsttime) -> str:
-    """Convert DB vstdate + vsttime into an ISO 8601 timestamp string."""
+    """Convert DB vstdate + vsttime into an ISO 8601 timestamp string (YYYY-MM-DDTHH:MM:SS)."""
     try:
-        if isinstance(vstdate, date):
-            d = vstdate
-        else:
-            d = date.fromisoformat(str(vstdate))
-
-        if isinstance(vsttime, time):
-            t = vsttime
-        elif isinstance(vsttime, str):
-            # Could be 'HH:MM:SS' or 'HHMM'
-            parts = vsttime.strip().split(':')
-            if len(parts) >= 2:
-                t = time(int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
-            else:
-                t = time(0, 0, 0)
-        else:
-            t = time(0, 0, 0)
-
+        d = parse_db_date(vstdate)
+        t = parse_db_time(vsttime)
         return datetime.combine(d, t).isoformat()
-    except Exception:
+    except Exception as e:
         return datetime.now().isoformat()
+
+
+def format_time_str(vsttime) -> str:
+    """Format DB vsttime into clean 'HH:MM:SS' string."""
+    t = parse_db_time(vsttime)
+    return f"{t.hour:02d}:{t.minute:02d}:{t.second:02d}"
+
+
+def format_date_str(vstdate) -> str:
+    """Format DB vstdate into clean 'YYYY-MM-DD' string."""
+    d = parse_db_date(vstdate)
+    return d.isoformat()
 
 
 def sex_label(sex_val) -> Optional[str]:

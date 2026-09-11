@@ -1,7 +1,7 @@
 import { useRTSASStore } from '../store/useRTSASStore';
 
 export default function MultiAlertModal() {
-  const { ui, closeModal, patients, completeChecklistItem, addTimelineEvent, pendingAlerts, selectPatient } = useRTSASStore();
+  const { ui, closeModal, patients, completeChecklistItem, pendingAlerts, selectPatient } = useRTSASStore();
 
   if (ui.modal.activeModal !== 'multi_alert') return null;
 
@@ -10,7 +10,7 @@ export default function MultiAlertModal() {
     if (!patient) return;
 
     const currentSelectedId = useRTSASStore.getState().ui.selectedPatientId;
-    
+
     // Switch context to target patient
     selectPatient(patient.id);
 
@@ -19,7 +19,6 @@ export default function MultiAlertModal() {
 
     if (!alreadyRunning) {
       completeChecklistItem('doctor_confirm', 'Nurse/System');
-      addTimelineEvent('✅ รับทราบและเริ่มกระบวนการ Sepsis Bundle — เริ่มนับ 60 นาที', 'orange', 'System');
     }
 
     // Switch back
@@ -42,7 +41,7 @@ export default function MultiAlertModal() {
     // Copy array because we mutate it in handleAcknowledge
     const alertsToAck = [...pendingAlerts];
     alertsToAck.forEach(alert => {
-       handleAcknowledge(alert.hn);
+      handleAcknowledge(alert.hn);
     });
     closeModal();
   };

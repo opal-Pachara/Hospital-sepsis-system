@@ -91,13 +91,13 @@ export interface VitalSigns {
 export interface NEWSParameterScore {
   /** Parameter identifier */
   parameter:
-    | 'respiratoryRate'
-    | 'spO2'
-    | 'oxygenSupplementation'
-    | 'temperature'
-    | 'systolicBP'
-    | 'heartRate'
-    | 'avpu';
+  | 'respiratoryRate'
+  | 'spO2'
+  | 'oxygenSupplementation'
+  | 'temperature'
+  | 'systolicBP'
+  | 'heartRate'
+  | 'avpu';
 
   /** Human-readable label */
   label: string;
@@ -199,6 +199,27 @@ export interface Patient {
 
   /** Bed/location */
   location: string;
+
+  /** Centralized treatment status from MySQL sepsis_db */
+  treatmentStatus?: TreatmentStatus | null;
+}
+
+/** Centralized patient treatment & alert status in MySQL */
+export interface TreatmentStatus {
+  hn: string;
+  vn?: string | null;
+  acknowledged: boolean;
+  acknowledged_at?: string | null;
+  acknowledged_by?: string | null;
+  doctor_confirmed: boolean;
+  countdown_started_at?: string | null;
+  countdown_duration: number;
+  treatment_completed: boolean;
+  treatment_completed_at?: string | null;
+  treatment_completed_by?: string | null;
+  sepsis_ruled_out: boolean;
+  checklist_json?: string | null;
+  updated_at?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -291,7 +312,7 @@ export interface AssessmentScheduleEntry {
 
   /** Whether the assessment has been completed */
   isCompleted: boolean;
-  
+
   /** Whether the assessment was canceled due to treatment termination */
   isCanceled?: boolean;
 

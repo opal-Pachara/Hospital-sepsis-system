@@ -62,7 +62,7 @@ export function buildShiftSummary(
 
     // Find doctor_confirm item to get confirmedAt
     let confirmedAt: string | null = null;
-    let completedAt: string | null = data.treatmentCompletedAt ?? null;
+    const completedAt: string | null = data.treatmentCompletedAt ?? null;
     for (const phase of data.checklist) {
       for (const item of phase.items) {
         if (item.id === 'doctor_confirm' && item.status === 'completed') {

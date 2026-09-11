@@ -11,6 +11,7 @@ let toastListeners: Array<(toast: Toast) => void> = [];
 let toastIdCounter = 0;
 
 /** Fire a toast from anywhere (outside React components too) */
+// eslint-disable-next-line react-refresh/only-export-components
 export function showToast(message: string, type: Toast['type'] = 'info', duration = 3000) {
   const toast: Toast = {
     id: `toast-${++toastIdCounter}`,
