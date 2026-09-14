@@ -4,11 +4,14 @@ from backend.database import db_pool
 from backend.treatment_service import (
     init_treatment_table,
     acknowledge_alert,
+    doctor_confirm_sepsis,
     get_treatment_status,
     complete_treatment,
     rule_out_sepsis,
     get_all_treatment_statuses,
+    clear_treated_statuses,
 )
+
 
 class TestTreatmentService(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -37,6 +40,24 @@ class TestTreatmentService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["acknowledged_by"], "Nurse_Test")
         self.assertTrue(status["acknowledged"])
 
+    async def test_doctor_confirm_with_custom_time(self):
+        custom_time = "2026-09-13T10:15:00"
+        doc_res = await doctor_confirm_sepsis(
+            "TEST_HN_SYNC",
+            confirmed_by="พว.สมหญิง",
+            physician="นพ.สมหมาย",
+            confirmed_at=custom_time
+        )
+        self.assertTrue(doc_res["doctor_confirmed"])
+        self.assertTrue(doc_res["acknowledged"])
+        self.assertIn("10:15:00", str(doc_res["countdown_started_at"]))
+
+        status = await get_treatment_status("TEST_HN_SYNC")
+        self.assertIsNotNone(status)
+        self.assertTrue(status["doctor_confirmed"])
+        self.assertIn("10:15:00", str(status["countdown_started_at"]))
+
+
     async def test_complete_treatment(self):
         await acknowledge_alert("TEST_HN_SYNC", "Nurse_Test")
         comp_res = await complete_treatment("TEST_HN_SYNC", "Doctor_Test")
@@ -45,6 +66,19 @@ class TestTreatmentService(unittest.IsolatedAsyncioTestCase):
         status = await get_treatment_status("TEST_HN_SYNC")
         self.assertTrue(status["treatment_completed"])
         self.assertEqual(status["treatment_completed_by"], "Doctor_Test")
+
+    async def test_clear_treated_statuses(self):
+        # Setup: 1 treated patient, 1 actively treating patient
+        await acknowledge_alert("TEST_HN_SYNC", "Nurse_Test")
+        await complete_treatment("TEST_HN_SYNC", "Doctor_Test")
+
+        # Act: clear treated
+        cleared = await clear_treated_statuses()
+        self.assertIn("TEST_HN_SYNC", cleared)
+
+        # Verify: TEST_HN_SYNC is cleared
+        status = await get_treatment_status("TEST_HN_SYNC")
+        self.assertIsNone(status)
 
     async def test_rule_out_sepsis(self):
         await rule_out_sepsis("TEST_HN_SYNC")

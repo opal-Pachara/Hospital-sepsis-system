@@ -408,7 +408,7 @@ export interface CountdownTimer {
 // Modal State
 // ---------------------------------------------------------------------------
 
-export type ModalType = 'alert' | 'multi_alert' | 'reminder' | 'assessment_form' | null;
+export type ModalType = 'alert' | 'multi_alert' | 'reminder' | 'assessment_form' | 'auth' | 'sepsis_confirm' | null;
 
 export interface ModalState {
   /** Currently open modal type */

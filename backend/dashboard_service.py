@@ -35,9 +35,16 @@ async def get_daily_dashboard_stats() -> Dict[str, Any]:
     """
     async with db_pool.get_connection() as conn:
         cur = await conn.cursor()
-        # 1. Fetch available visit dates (latest 14 distinct dates)
+        # 1. Fetch available visit dates that have actual treated or ruled-out cases
         await cur.execute(
-            "SELECT DISTINCT DATE(vstdate) as d FROM patient_visits ORDER BY d DESC LIMIT 14"
+            """
+            SELECT DISTINCT DATE(v.vstdate) as d
+            FROM patient_visits v
+            JOIN patient_treatment_status t ON v.hn = t.hn
+            WHERE t.treatment_completed = 1 OR t.sepsis_ruled_out = 1
+            ORDER BY d DESC
+            LIMIT 14
+            """
         )
         date_rows = await cur.fetchall()
         dates = [row[0].strftime("%Y-%m-%d") for row in date_rows if row[0]]
@@ -156,16 +163,24 @@ async def get_daily_dashboard_stats() -> Dict[str, Any]:
         }
 
 
-async def get_daily_treated_cases(target_date: Optional[str] = None) -> List[Dict[str, Any]]:
+async def get_daily_treated_cases(target_date: Optional[str] = None, treated_only: bool = False) -> List[Dict[str, Any]]:
     """
     Fetch patient cases for the specified date (or latest date).
+    If treated_only is True, filters to only completed or ruled-out cases.
     Strictly masks HN to 4 digits and excludes patient names, IDs, addresses for PDPA compliance.
     """
     async with db_pool.get_connection() as conn:
         cur = await conn.cursor()
 
         if not target_date:
-            await cur.execute("SELECT MAX(DATE(vstdate)) FROM patient_visits")
+            await cur.execute(
+                """
+                SELECT MAX(DATE(v.vstdate))
+                FROM patient_visits v
+                JOIN patient_treatment_status t ON v.hn = t.hn
+                WHERE t.treatment_completed = 1 OR t.sepsis_ruled_out = 1
+                """
+            )
             max_d = await cur.fetchone()
             if max_d and max_d[0]:
                 target_date = max_d[0].strftime("%Y-%m-%d")
@@ -174,7 +189,7 @@ async def get_daily_treated_cases(target_date: Optional[str] = None) -> List[Dic
 
         # Fetch visits for target_date
         await cur.execute(
-            "SELECT vn, hn, vstdate, vsttime, sex, age, heart_rate, sbp, dbp, resp_rate, temperature, spo2, gcs "
+            "SELECT vn, hn, vstdate, vsttime, sex, age, heart_rate, sbp, dbp, resp_rate, temperature, spo2, gcs, chief_complaint "
             "FROM patient_visits WHERE DATE(vstdate) = %s ORDER BY vsttime DESC",
             (target_date,)
         )
@@ -219,6 +234,7 @@ async def get_daily_treated_cases(target_date: Optional[str] = None) -> List[Dic
                 "temperature": row[10],
                 "spo2": row[11],
                 "gcs": row[12],
+                "chief_complaint": row[13] if len(row) > 13 else None,
             }
 
             news = calculate_news_from_row(row_dict)
@@ -254,6 +270,9 @@ async def get_daily_treated_cases(target_date: Optional[str] = None) -> List[Dic
                 if news.totalScore >= 5 or news.hasSingleParameterAlert:
                     outcome_label = "🔴 เสี่ยงสูง (รอประเมิน)"
 
+            if treated_only and not is_treated:
+                continue
+
             cases.append({
                 "id": hn,
                 "masked_hn": mask_hn_last_4(hn),
@@ -270,6 +289,16 @@ async def get_daily_treated_cases(target_date: Optional[str] = None) -> List[Dic
                 "treatment_completed_at": completed_time,
                 "treated_by": staff or "ทีมแพทย์/พยาบาล ER",
                 "outcome_label": outcome_label,
+                "chief_complaint": row[13] or "ไม่ระบุอาการ",
+                "vitals": {
+                    "sbp": row[7],
+                    "dbp": row[8],
+                    "heart_rate": row[6],
+                    "resp_rate": row[9],
+                    "temperature": row[10],
+                    "spo2": row[11],
+                    "gcs": row[12],
+                }
             })
 
         return cases

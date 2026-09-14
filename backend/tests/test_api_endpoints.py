@@ -84,5 +84,14 @@ class TestApiEndpoints(unittest.TestCase):
         self.assertEqual(ro_res.status_code, 200)
         self.assertTrue(ro_res.json()["data"]["sepsis_ruled_out"])
 
+        # 6. Clear treated records
+        clear_res = self.client.post("/api/treatment-status/clear-treated")
+        self.assertEqual(clear_res.status_code, 200)
+        self.assertIn(test_hn, clear_res.json()["cleared_hns"])
+
+        # 7. Verify test_hn is cleaned up
+        verify_res = self.client.get(f"/api/treatment-status/{test_hn}")
+        self.assertEqual(verify_res.status_code, 404)
+
 if __name__ == '__main__':
     unittest.main()

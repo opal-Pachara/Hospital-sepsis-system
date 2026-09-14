@@ -10,6 +10,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
 import type { Patient, VitalSigns, NEWSResult, NEWSParameterScore } from '../types';
 import { gcsToAVPU } from '../types';
+import { maskHN } from '../utils/hnMask';
 import { MOCK_PATIENTS } from '../data/mockData';
 
 // ---------------------------------------------------------------------------
@@ -55,6 +56,7 @@ interface BackendPatient {
   temperature: number | null;
   news_result: BackendNEWSResult;
   arrival_time: string;
+  treatment_status?: any;
 }
 
 interface BackendPatientsResponse {
@@ -80,10 +82,19 @@ function mapBackendToPatient(bp: BackendPatient): Patient {
     avpu: gcsToAVPU(gcs),
   };
 
+  const nr = bp.news_result || {
+    totalScore: 0,
+    breakdown: [],
+    riskLevel: 'low' as const,
+    hasSingleParameterAlert: false,
+    missingDataCount: 0,
+    calculatedAt: new Date().toISOString(),
+  };
+
   // Map backend NEWSResult to frontend NEWSResult
   const newsResult: NEWSResult = {
-    totalScore: bp.news_result.totalScore,
-    breakdown: bp.news_result.breakdown.map((b): NEWSParameterScore => ({
+    totalScore: nr.totalScore ?? 0,
+    breakdown: (nr.breakdown || []).map((b): NEWSParameterScore => ({
       parameter: b.parameter as NEWSParameterScore['parameter'],
       label: b.label,
       displayValue: b.displayValue,
@@ -91,10 +102,10 @@ function mapBackendToPatient(bp: BackendPatient): Patient {
       isAbnormal: b.isAbnormal,
       isCritical: b.isCritical,
     })),
-    riskLevel: bp.news_result.riskLevel,
-    hasSingleParameterAlert: bp.news_result.hasSingleParameterAlert,
-    missingDataCount: bp.news_result.missingDataCount,
-    calculatedAt: bp.news_result.calculatedAt,
+    riskLevel: nr.riskLevel || 'low',
+    hasSingleParameterAlert: nr.hasSingleParameterAlert ?? false,
+    missingDataCount: nr.missingDataCount ?? 0,
+    calculatedAt: nr.calculatedAt || new Date().toISOString(),
   };
 
   // Safely construct arrivalTime:
@@ -115,7 +126,7 @@ function mapBackendToPatient(bp: BackendPatient): Patient {
     id: bp.hn,
     hn: bp.hn,
     vn: bp.vn ?? '',
-    fullName: bp.patient_name ?? bp.hn,  // Use real name if available
+    fullName: maskHN(bp.hn),
     age: (bp.age != null && bp.age > 0) ? bp.age : null,
     gender: bp.sex ?? 'other',
     triageLevel: riskToTriageLevel(bp.news_result.riskLevel),
@@ -130,6 +141,7 @@ function mapBackendToPatient(bp: BackendPatient): Patient {
     attendingPhysician: null,
     primaryNurse: null,
     location: `VN: ${bp.vn ?? '-'}`,
+    treatmentStatus: (bp as any).treatment_status ?? null,
   };
 }
 
@@ -160,14 +172,13 @@ export function usePatientData() {
       setConnectionStatus('connected');
       setPatients(patients);
 
-      // Only auto-select patient on initial load if none is selected
-      const currentSelected = useRTSASStore.getState().selectedPatient;
-      const isFirstLoad = !currentSelected;
+      // Synchronize centralized treatment status from backend into store
+      patients.forEach((p) => {
+        if (p.treatmentStatus) {
+          useRTSASStore.getState().syncServerTreatmentStatus(p.treatmentStatus);
+        }
+      });
 
-      if (isFirstLoad && patients.length > 0) {
-        selectPatient(patients[0].id);
-        console.log(`[RTSAS] Initial load: ${data.count} patients. Top: HN ${patients[0].hn} NEWS ${patients[0].latestNewsScore}`);
-      }
 
       // 🚨 Detect high-risk sepsis patients (NEWS >= 5 or single parameter alert)
       // that have not been alerted yet in this session and haven't finished treatment
@@ -203,10 +214,6 @@ export function usePatientData() {
       const currentPatients = useRTSASStore.getState().patients;
       if (!currentPatients || currentPatients.length === 0) {
         setPatients(MOCK_PATIENTS);
-        const currentSelected = useRTSASStore.getState().selectedPatient;
-        if (!currentSelected && MOCK_PATIENTS.length > 0) {
-          selectPatient(MOCK_PATIENTS[0].id);
-        }
       }
     } finally {
       setLoading(false);
@@ -256,7 +263,34 @@ export function useWebSocketAlerts() {
     ws.onmessage = (event) => {
       if (!isMounted.current) return;
       try {
-        const payload = JSON.parse(event.data) as {
+        const raw = JSON.parse(event.data);
+
+        // Centralized treatment status updates broadcast from backend
+        if (raw.type === 'TREATMENT_STATUS_UPDATE') {
+          if (raw.action === 'clear_treated') {
+            console.log('[WebSocket] Received clear_treated for HNs:', raw.cleared_hns);
+            useRTSASStore.getState().clearTreatedPatients(raw.cleared_hns);
+          } else if (raw.action === 'archived') {
+            // Patient has been archived — remove from active list immediately
+            const archivedHn = raw.hn || raw.data?.hn;
+            if (archivedHn) {
+              console.log(`[WebSocket] Patient ${archivedHn} archived — removing from active list`);
+              const state = useRTSASStore.getState();
+              const updatedPatients = state.patients.filter((p) => p.id !== archivedHn && p.hn !== archivedHn);
+              setPatients(updatedPatients);
+
+              // If the archived patient was selected, deselect
+              if (state.selectedPatient?.id === archivedHn || state.selectedPatient?.hn === archivedHn) {
+                useRTSASStore.setState({ selectedPatient: updatedPatients[0] || null });
+              }
+            }
+          } else if (raw.data) {
+            useRTSASStore.getState().syncServerTreatmentStatus(raw.data);
+          }
+          return;
+        }
+
+        const payload = raw as {
           hn: string;
           vn: string | null;
           patient_name: string | null;

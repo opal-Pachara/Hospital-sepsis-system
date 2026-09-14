@@ -1,0 +1,18 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+
+# Environment files
+.env
+.env.*
+
+# Tests (excluded from production image)
+tests/
+
+# OS and IDE files
+.DS_Store
+.vscode/
+.idea/

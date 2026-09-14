@@ -59,3 +59,18 @@ export function useFormattedCountdown() {
     ...timer,
   };
 }
+
+/**
+ * Global background countdown timer ticker.
+ * Ensures timers for all patients continue to tick regardless of which patient or tab is selected.
+ */
+export function useGlobalCountdownTicker() {
+  const tickCountdown = useRTSASStore((s) => s.tickCountdown);
+
+  useEffect(() => {
+    const iv = window.setInterval(() => {
+      tickCountdown();
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [tickCountdown]);
+}

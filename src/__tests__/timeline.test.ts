@@ -167,11 +167,55 @@ describe('getTimelineText formatting for HIS', () => {
     expect(hisText).not.toContain('เข้าสู่ระบบ');
     expect(hisText).not.toContain('ระบบตรวจพบ NEWS');
 
-    // Verify treatment steps are numbered sequentially
-    expect(hisText).toContain('ขั้นตอนที่ 1: ✓ Triage Assessment Completed');
-    expect(hisText).toContain('ขั้นตอนที่ 2: ✓ ER Admission Registered');
-    expect(hisText).toContain('ขั้นตอนที่ 3: ✓ เจาะเลือดเพาะเชื้อ ครั้งที่ 1 — แขนซ้าย');
-    expect(hisText).toContain('ขั้นตอนที่ 4: ⏭ ข้าม: ยาปฏิชีวนะทางหลอดเลือดดำ ตัวที่ 2 (ถ้ามี)');
+    // Verify treatment steps are numbered sequentially and have template for practitioner
+    expect(hisText).toContain('ขั้นตอนที่ 1: ✓ Triage Assessment Completed [ผู้ปฏิบัติ: ]');
+    expect(hisText).toContain('ขั้นตอนที่ 2: ✓ ER Admission Registered [ผู้ปฏิบัติ: ]');
+    expect(hisText).toContain('ขั้นตอนที่ 3: ✓ เจาะเลือดเพาะเชื้อ ครั้งที่ 1 — แขนซ้าย [ผู้ปฏิบัติ: ]');
+    expect(hisText).toContain('ขั้นตอนที่ 4: ⏭ ข้าม: ยาปฏิชีวนะทางหลอดเลือดดำ ตัวที่ 2 (ถ้ามี) [ผู้ปฏิบัติ: ]');
+    expect(hisText).not.toContain('พย.สุกัญญา');
     expect(hisText).toContain('รวมดำเนินการทั้งหมด: 4 ขั้นตอน');
   });
+
+  it('calculates remaining countdown time from a custom clinical confirmation time', () => {
+    const store = useRTSASStore.getState();
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+
+    store.startCountdown(fifteenMinutesAgo);
+    const timer = useRTSASStore.getState().countdownTimer;
+
+    expect(timer.isActive).toBe(true);
+    expect(timer.startedAt).toBe(fifteenMinutesAgo);
+    // Remaining seconds should be around 45 mins (2700 seconds), allow 2-second test window
+    expect(timer.remainingSeconds).toBeLessThanOrEqual(2701);
+    expect(timer.remainingSeconds).toBeGreaterThanOrEqual(2698);
+    expect(timer.isExpired).toBe(false);
+  });
+
+  it('marks timer as expired immediately if clinical confirmation was over 60 minutes ago', () => {
+    const store = useRTSASStore.getState();
+    const seventyMinutesAgo = new Date(Date.now() - 70 * 60 * 1000).toISOString();
+
+    store.startCountdown(seventyMinutesAgo);
+    const timer = useRTSASStore.getState().countdownTimer;
+
+    expect(timer.isActive).toBe(true);
+    expect(timer.remainingSeconds).toBe(0);
+    expect(timer.isExpired).toBe(true);
+  });
+
+  it('cleans doctor confirmation timeline event so no doctor or operator name is displayed', () => {
+    const store = useRTSASStore.getState();
+    store.clearTimeline();
+
+    store.addTimelineEvent(
+      '✓ แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด (เวลาที่ยืนยันทางคลินิก: 14:54 น.) Somchaiomchai Jaidee',
+      'blue',
+      'Somchaiomchai Jaidee'
+    );
+
+    const hisText = store.getTimelineText();
+    expect(hisText).toContain('ขั้นตอนที่ 1: ✓ แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด (เวลาที่ยืนยันทางคลินิก: 14:54 น.) [ผู้ปฏิบัติ: ]');
+    expect(hisText).not.toContain('Somchaiomchai Jaidee');
+  });
 });
+

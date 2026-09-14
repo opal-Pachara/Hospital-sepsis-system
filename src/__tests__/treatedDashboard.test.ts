@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { maskHN } from '../utils/hnMask';
-import type { DailySummaryItem, TreatedCaseItem } from '../components/TreatedDashboard';
+import type { DailySummaryItem, TreatedCaseItem } from '../pages/TreatedDashboard';
 
 describe('Treated Patients Daily Dashboard — Logic & PDPA Compliance', () => {
   it('masks HN to last 4 digits for PDPA compliance', () => {

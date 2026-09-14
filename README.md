@@ -39,6 +39,8 @@
 └────────────────────────────────────────────────────────────────────┘
 ```
 
+> 📁 **โครงสร้างไฟล์และโมดูลโดยละเอียด:** ดูรายละเอียดการจัดระเบียบไฟล์ Frontend / Backend / Docs ทั้งหมดได้ที่ [PROJECT_STRUCTURE.md](file:///Users/phatchara/Desktop/Hospital/PROJECT_STRUCTURE.md)
+
 ---
 
 ## 💻 เทคโนโลยีที่ใช้ (Tech Stack)
@@ -222,7 +224,18 @@ ORDER BY o.vstdate DESC, o.vsttime DESC;
 
 ---
 
+## 📑 เอกสารและรายงานผลการทดสอบ (Documentation & QA Reports)
+
+สามารถดูรายละเอียดเอกสารประกอบและผลการทดสอบระบบได้ที่โฟลเดอร์ [`docs/`](file:///Users/phatchara/Desktop/Hospital/docs/README.md):
+- 📖 **[คู่มือการใช้งานระบบ RTSAS (User & Operations Manual)](file:///Users/phatchara/Desktop/Hospital/docs/USER_MANUAL.md)** — คู่มือการใช้งานระบบฉบับสมบูรณ์อย่างละเอียด พร้อมภาพถ่ายหน้าจอประกอบทุกฟังก์ชัน
+- 🧪 **[Comprehensive System Test Report](file:///Users/phatchara/Desktop/Hospital/docs/reports/COMPREHENSIVE_SYSTEM_TEST_REPORT.md)** — รายงานการทดสอบระบบแบบละเอียดทุกโมดูล
+- 🛡️ **[QA System Test Report](file:///Users/phatchara/Desktop/Hospital/docs/reports/QA_SYSTEM_TEST_REPORT.md)** — รายงานการตรวจสอบความเสถียร ระบบ Audit และ Persistence
+- 🎨 **[Real-Time Alert UI Mockup](file:///Users/phatchara/Desktop/Hospital/docs/mockups/real_time_alert_mockup_phanikarn.html)** — ต้นแบบหน้าจอการออกแบบดั้งเดิม
+
+---
+
 ## 📄 License & Maintainer
 
 - **ผู้ดูแลระบบ:** ทีมงานพัฒนาระบบเฝ้าระวังสารสนเทศทางการแพทย์ โรงพยาบาลบางคล้า
 - **ลิขสิทธิ์:** สำหรับใช้งานภายในโรงพยาบาลบางคล้าและหน่วยงานที่ได้รับอนุญาต
+

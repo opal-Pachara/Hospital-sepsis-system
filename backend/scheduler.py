@@ -97,7 +97,7 @@ SELECT
     vsttime,
     hn,
     vn,
-    patient_name,
+    NULL AS patient_name,
     sex,
     age,
     chief_complaint,
@@ -112,11 +112,9 @@ SELECT
     height,
     created_at
 FROM patient_visits
-WHERE vstdate = COALESCE(
-    (SELECT MAX(vstdate) FROM patient_visits WHERE vstdate = CURDATE()),
-    (SELECT MAX(vstdate) FROM patient_visits)
-)
-ORDER BY created_at DESC, vsttime DESC
+WHERE vstdate >= DATE_SUB(COALESCE((SELECT MAX(vstdate) FROM patient_visits), CURDATE()), INTERVAL 1 DAY)
+   OR vstdate >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+ORDER BY created_at DESC, vstdate DESC, vsttime DESC
 LIMIT 200;
 """
 
@@ -175,6 +173,16 @@ async def fetch_vitals_from_db() -> List[Dict[str, Any]]:
 
     except Exception as e:
         logger.error(f"Failed to fetch vitals: {e}")
+        try:
+            from .log_service import record_log
+            record_log(
+                "ERROR",
+                f"Scheduler polling failed: {str(e)[:120]}",
+                component="Scheduler",
+                details={"error": str(e), "action": "retry_in_10s"}
+            )
+        except Exception:
+            pass
         return []
 
 
@@ -185,9 +193,13 @@ async def fetch_vitals_from_db() -> List[Dict[str, Any]]:
 def build_patient_list(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Convert raw DB rows into PatientListItem dicts, computing NEWS for each."""
     result = []
+    seen_hns = set()
     for row in rows:
         try:
-            hn = str(row.get('hn', ''))
+            hn = str(row.get('hn', '')).strip()
+            if not hn or hn in seen_hns:
+                continue
+            seen_hns.add(hn)
             vn = str(row.get('vn', '') or '')
             vstdate = row.get('vstdate')
             vsttime = row.get('vsttime')
@@ -202,7 +214,7 @@ def build_patient_list(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 id=hn,
                 hn=hn,
                 vn=vn if vn else None,
-                patient_name=row.get('patient_name'),
+                patient_name=None,
                 age=_si(row.get('age')),
                 vstdate=vstdate_str,
                 vsttime=vsttime_str,
@@ -260,7 +272,7 @@ async def process_vitals():
                 payload = SepsisAlertPayload(
                     hn=hn,
                     vn=str(row.get('vn') or ''),
-                    patient_name=row.get('patient_name'),
+                    patient_name=None,
                     age=_si(row.get('age')),
                     gcs=_si(row.get('gcs')),
                     spo2=_sf(row.get('spo2') or row.get('o2sat')),
@@ -335,3 +347,171 @@ def _si(val) -> int | None:
 
 def get_patients_cache() -> List[Dict[str, Any]]:
     return _patients_cache
+
+
+async def inject_simulated_patient(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Inject a test patient into cache and MySQL, then broadcast live via WebSocket."""
+    global _patients_cache, last_seen_vitals
+
+    hn = str(data.get("hn", "")).strip()
+    if not hn:
+        raise ValueError("HN is required")
+
+    now = datetime.now()
+    vstdate = data.get("vstdate") or now.strftime("%Y-%m-%d")
+    vsttime = data.get("vsttime") or now.strftime("%H:%M:%S")
+
+    row = {
+        "hn": hn,
+        "vn": data.get("vn") or f"VN{hn}",
+        "patient_name": None,
+        "sex": data.get("sex", "male"),
+        "age": data.get("age", 50),
+        "vstdate": vstdate,
+        "vsttime": vsttime,
+        "chief_complaint": data.get("chief_complaint", "ไข้สูง หนาวสั่น หายใจเร็ว"),
+        "sbp": data.get("sbp", 120),
+        "dbp": data.get("dbp", 80),
+        "heart_rate": data.get("heart_rate", 80),
+        "resp_rate": data.get("resp_rate", 20),
+        "temperature": data.get("temperature", 37.0),
+        "spo2": data.get("spo2", 98),
+        "gcs": data.get("gcs", 15),
+        "weight": data.get("weight", 65),
+        "height": data.get("height", 165),
+    }
+
+    # Persist patient directly into MySQL database tables (patient_visits + HOSxP opdscreen & er_nursing_detail)
+    if db_pool.pool and not db_pool.simulate_disconnected:
+        try:
+            vn = row["vn"]
+            sex_code = 1 if row["sex"] == "male" else 2
+            gcs_val = int(row["gcs"] or 15)
+            # Standard GCS breakdown estimate for HOSxP
+            gcs_e = 4 if gcs_val >= 13 else (3 if gcs_val >= 10 else 2)
+            gcs_v = 5 if gcs_val >= 13 else (4 if gcs_val >= 10 else 2)
+            gcs_m = max(1, gcs_val - gcs_e - gcs_v)
+
+            async with db_pool.get_connection() as conn:
+                async with conn.cursor() as cur:
+                    # 1. Primary table: patient_visits
+                    await cur.execute(
+                        "SELECT id FROM patient_visits WHERE hn = %s AND vstdate = %s ORDER BY id DESC LIMIT 1",
+                        (hn, vstdate)
+                    )
+                    existing = await cur.fetchone()
+                    if existing:
+                        existing_id = existing[0]
+                        update_query = """
+                        UPDATE patient_visits SET
+                            vn = %s, vsttime = %s, patient_name = %s, sex = %s, age = %s,
+                            chief_complaint = %s, gcs = %s, spo2 = %s, heart_rate = %s,
+                            sbp = %s, dbp = %s, resp_rate = %s, temperature = %s,
+                            weight = %s, height = %s
+                        WHERE id = %s
+                        """
+                        await cur.execute(update_query, (
+                            vn, vsttime, row["patient_name"], row["sex"], row["age"],
+                            row["chief_complaint"], row["gcs"], row["spo2"], row["heart_rate"],
+                            row["sbp"], row["dbp"], row["resp_rate"], row["temperature"],
+                            row["weight"], row["height"], existing_id
+                        ))
+                    else:
+                        insert_query = """
+                        INSERT INTO patient_visits (
+                            hn, vn, vstdate, vsttime, patient_name, sex, age, chief_complaint,
+                            gcs, spo2, heart_rate, sbp, dbp, resp_rate, temperature, weight, height
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """
+                        await cur.execute(insert_query, (
+                            hn, vn, vstdate, vsttime, row["patient_name"], row["sex"], row["age"],
+                            row["chief_complaint"], row["gcs"], row["spo2"], row["heart_rate"],
+                            row["sbp"], row["dbp"], row["resp_rate"], row["temperature"],
+                            row["weight"], row["height"]
+                        ))
+
+                    # 2. HOSxP table: opdscreen
+                    await cur.execute("""
+                        INSERT INTO opdscreen (
+                            vn, hn, vstdate, vsttime, patient_name, sex, age,
+                            bps, bpd, pulse, rr, temperature, weight, height
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            hn = VALUES(hn), vstdate = VALUES(vstdate), vsttime = VALUES(vsttime),
+                            patient_name = VALUES(patient_name), sex = VALUES(sex), age = VALUES(age),
+                            bps = VALUES(bps), bpd = VALUES(bpd), pulse = VALUES(pulse),
+                            rr = VALUES(rr), temperature = VALUES(temperature),
+                            weight = VALUES(weight), height = VALUES(height);
+                    """, (
+                        vn, hn, vstdate, vsttime, row["patient_name"], sex_code, row["age"],
+                        row["sbp"], row["dbp"], row["heart_rate"], row["resp_rate"],
+                        row["temperature"], row["weight"], row["height"]
+                    ))
+
+                    # 3. HOSxP table: er_nursing_detail
+                    await cur.execute("""
+                        INSERT INTO er_nursing_detail (
+                            vn, gcs_e, gcs_v, gcs_m, o2sat, chief_complaint
+                        ) VALUES (%s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            gcs_e = VALUES(gcs_e), gcs_v = VALUES(gcs_v), gcs_m = VALUES(gcs_m),
+                            o2sat = VALUES(o2sat), chief_complaint = VALUES(chief_complaint);
+                    """, (
+                        vn, gcs_e, gcs_v, gcs_m, row["spo2"], row["chief_complaint"]
+                    ))
+
+            logger.info(f"Simulated patient {hn} (VN {vn}) successfully persisted into MySQL database (patient_visits, opdscreen, er_nursing_detail)")
+        except Exception as e:
+            logger.warning(f"Could not persist simulated patient {hn} to MySQL: {e}")
+
+    # Calculate NEWS and build patient item
+    built_list = build_patient_list([row])
+    if not built_list:
+        raise RuntimeError("Failed to build simulated patient item")
+    patient_item = built_list[0]
+
+    # Update cache (prepend or replace)
+    _patients_cache = [p for p in _patients_cache if str(p.get("hn")) != hn]
+    _patients_cache.insert(0, patient_item)
+
+    # Mark reading as not seen so alert broadcasts if high risk
+    # Use same key format as process_vitals: f"{hn}_{vsttime_str}"
+    vsttime_str_key = str(vsttime).replace("-", "").replace(" ", "_")
+    reading_key = f"{hn}_{vsttime_str_key}"
+    last_seen_vitals.pop(reading_key, None)
+
+    # Broadcast via WebSocket
+    from .main import broadcast_message
+    news_res = patient_item.get("news_result") or {}
+    total_score = news_res.get("totalScore", 0)
+    risk_level = news_res.get("riskLevel", "low")
+    is_high = total_score >= 5 or risk_level == "high"
+
+    ws_payload = SepsisAlertPayload(
+        hn=hn,
+        vn=row["vn"],
+        patient_name=None,
+        age=row["age"],
+        gcs=row["gcs"],
+        spo2=row["spo2"],
+        heart_rate=row["heart_rate"],
+        sbp=row["sbp"],
+        dbp=row["dbp"],
+        resp_rate=row["resp_rate"],
+        temperature=row["temperature"],
+        sex=sex_label(row["sex"]),
+        chief_complaint=row["chief_complaint"],
+        weight=row["weight"],
+        height=row["height"],
+        vstdate=str(vstdate),
+        vsttime=str(vsttime),
+        news_result=news_res,
+        is_new_alert=is_high,
+        timestamp=patient_item.get("arrival_time") or now.isoformat(),
+    )
+
+    await broadcast_message(ws_payload.model_dump_json())
+    logger.info(f"Simulated patient {hn} broadcasted with NEWS {total_score} (is_new_alert={is_high})")
+
+    return patient_item
+

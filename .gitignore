@@ -30,6 +30,8 @@ node_modules/
 backend/.env
 .env
 .env.*
+!.env.example
+!backend/.env.example
 
 # Python cache
 backend/__pycache__/

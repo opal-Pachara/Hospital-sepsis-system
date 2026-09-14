@@ -40,6 +40,10 @@ import {
   type RetainedPatientSummary,
   type InactivePatientSummary,
 } from '../utils/patientMemory';
+import {
+  mapBackendToPatient,
+  type BackendPatient,
+} from '../utils/patientMapper';
 
 export {
   evaluatePatientTreatmentStatus,
@@ -92,7 +96,12 @@ export function isTreatmentTimelineEvent(event: TimelineEvent): boolean {
     return false;
   }
 
-  // 2. Database & System Alerts (ไม่นับฐานข้อมูลระบบแจ้งเตือน)
+  // 2. Auto treatment events — INCLUDE (visit time, NEWS calc)
+  if (text.startsWith('🏥') || text.startsWith('🧮')) {
+    return true;
+  }
+
+  // 3. Database & System Alerts (ไม่นับฐานข้อมูลระบบแจ้งเตือน)
   if (
     text.includes('ระบบตรวจพบ NEWS') ||
     text.includes('Vital signs updated') ||
@@ -101,7 +110,7 @@ export function isTreatmentTimelineEvent(event: TimelineEvent): boolean {
     return false;
   }
 
-  // 3. System Background Process / Schedule / Timer internals
+  // 4. System Background Process / Schedule / Timer internals
   if (
     text.includes('Assessment schedule generated') ||
     text.includes('countdown started') ||
@@ -110,13 +119,39 @@ export function isTreatmentTimelineEvent(event: TimelineEvent): boolean {
     return false;
   }
 
-  // 4. Clinical treatment events:
+  // 5. Clinical treatment events:
   // - Checklist items completed (✓ ...)
   // - Checklist items skipped (⏭ ข้าม: ...)
   // - Clinical assessments completed (📊 Assessment #...)
   // - Sepsis ruled out (🟢 แพทย์ไม่ยืนยัน...)
   // - Treatment completed (✅ สิ้นสุดการรักษา...)
   return true;
+}
+
+/**
+ * Helper to determine if a patient record is strictly historical/archived (Read-Only).
+ * A patient is historical if:
+ * 1. Treatment was completed or ruled out (centralized DB or store state).
+ * 2. The arrival date is prior to today.
+ *
+ * When historical, all actions (checkboxes, doctor confirm, complete treatment, countdown timers)
+ * are locked to preserve medical record integrity and audit trail timestamps.
+ */
+export function isHistoricalPatient(
+  patient: Patient | null,
+  patientDataMap?: Record<string, PatientData>
+): boolean {
+  if (!patient) return false;
+  const pData = patientDataMap ? patientDataMap[patient.id] : null;
+
+  // 1. Treatment completed or ruled out -> strictly locked to protect timestamp integrity
+  if (pData?.treatmentCompleted || pData?.sepsisRuledOut) return true;
+  if (patient.treatmentStatus?.treatment_completed || patient.treatmentStatus?.sepsis_ruled_out) return true;
+
+  // 2. Opened explicitly from historical dashboard / archive
+  if (pData?.isHistoricalArchive) return true;
+
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,14 +162,14 @@ function createDefaultChecklist(): ChecklistPhase[] {
   return [
     {
       phase: 'initial_response',
-      title: 'Phase 1: Initial Response',
+      title: 'ขั้นตอนที่ 1: การประเมินเบื้องต้น',
       isUnlocked: true,
       isCompleted: false,
       items: [
         {
           id: 'triage',
           phase: 'initial_response',
-          label: 'Triage Assessment Completed',
+          label: 'ลงทะเบียนผู้ป่วย / Triage',
           status: 'pending',
           completedAt: null,
           completedBy: null,
@@ -145,9 +180,10 @@ function createDefaultChecklist(): ChecklistPhase[] {
           isUnlocked: true,
         },
         {
-          id: 'er_admission',
+          id: 'nurse_reassess',
           phase: 'initial_response',
-          label: 'ER Admission Registered',
+          label: 'พยาบาลประเมินซ้ำ',
+          subLabel: 'ตรวจสอบข้อมูลผู้ป่วยก่อนรายงานแพทย์',
           status: 'pending',
           completedAt: null,
           completedBy: null,
@@ -160,7 +196,8 @@ function createDefaultChecklist(): ChecklistPhase[] {
         {
           id: 'initial_report',
           phase: 'initial_response',
-          label: 'Initial Report to Physician',
+          label: 'รายงานแพทย์เวร',
+          subLabel: 'แจ้งผล NEWS Score และอาการแก่แพทย์',
           status: 'pending',
           completedAt: null,
           completedBy: null,
@@ -174,14 +211,15 @@ function createDefaultChecklist(): ChecklistPhase[] {
     },
     {
       phase: 'doctor_confirmation',
-      title: 'Phase 2: Doctor Confirmation',
+      title: 'ขั้นตอนที่ 2: แพทย์ยืนยัน',
       isUnlocked: false,
       isCompleted: false,
       items: [
         {
           id: 'doctor_confirm',
           phase: 'doctor_confirmation',
-          label: 'Doctor Acknowledges Sepsis Alert & Starts Timer',
+          label: 'แพทย์เวรยืนยันติดเชื้อ',
+          subLabel: 'แพทย์ประเมินและยืนยันภาวะ Sepsis — เริ่มนับเวลา',
           status: 'pending',
           completedAt: null,
           completedBy: null,
@@ -195,7 +233,7 @@ function createDefaultChecklist(): ChecklistPhase[] {
     },
     {
       phase: 'sepsis_bundle',
-      title: 'Phase 3: Sepsis Bundle (Hour-1)',
+      title: 'ขั้นตอนที่ 3: Sepsis Bundle (Hour-1)',
       isUnlocked: false,
       isCompleted: false,
       items: [
@@ -288,7 +326,7 @@ function createDefaultChecklist(): ChecklistPhase[] {
     },
     {
       phase: 'assessment_schedule',
-      title: 'Phase 4: Reassessment Schedule',
+      title: 'ขั้นตอนที่ 4: ประเมินสัญญาณชีพซ้ำ',
       isUnlocked: false,
       isCompleted: false,
       items: [], // Dynamically populated from AssessmentSchedule
@@ -314,6 +352,8 @@ export interface PatientData {
   /** Set when treatment is manually marked as completed */
   treatmentCompleted: boolean;
   treatmentCompletedAt: string | null;
+  /** Set when opened as historical archive record from Treated Dashboard */
+  isHistoricalArchive?: boolean;
 }
 
 export interface RTSASState {
@@ -349,6 +389,9 @@ export interface RTSASState {
 
   // ---- Alert Queue (multiple simultaneous high-risk patients) ----
   pendingAlerts: Array<{ hn: string; newsScore: number; timestamp: string }>;
+  dismissedAlertKeys: Record<string, boolean>;
+  markAlertDismissed: (hn: string, key?: string) => void;
+  isAlertDismissed: (hn: string, key?: string) => boolean;
 
   // ---- Auth State (EC Privacy) ----
   isAuthenticated: boolean;
@@ -360,14 +403,16 @@ export interface RTSASState {
 
   // --- Patient Actions ---
   setPatients: (patients: Patient[]) => void;
-  selectPatient: (patientId: string) => void;
+  selectPatient: (patientId: string | null, isHistoricalArchive?: boolean) => void;
+  selectPatientAsync: (patientId: string, isHistoricalArchive?: boolean) => Promise<Patient | null>;
   updatePatientVitals: (patientId: string, vitals: VitalSigns) => void;
 
   // --- Checklist Actions ---
   completeChecklistItem: (
     itemId: string,
     completedBy: string,
-    inputValue?: string
+    inputValue?: string,
+    customConfirmTime?: string
   ) => void;
   updateChecklistInput: (itemId: string, inputValue: string) => void;
   skipChecklistItem: (itemId: string, actor: string) => void;
@@ -412,6 +457,7 @@ export interface RTSASState {
   queueAlert: (hn: string, newsScore: number) => void;
   dismissNextAlert: () => void;
   syncServerTreatmentStatus: (status: TreatmentStatus) => void;
+  clearTreatedPatients: (hns?: string[]) => void;
 
   // --- Auth Actions ---
   /** Called by LoginPage after successful POST /auth/login */
@@ -436,7 +482,7 @@ export const useRTSASStore = create<RTSASState>()(
     subscribeWithSelector((set, get) => ({
       // ---- Initial State ----
       patients: MOCK_PATIENTS,
-      selectedPatient: MOCK_PATIENTS.length > 0 ? MOCK_PATIENTS[0] : null,
+      selectedPatient: null,
       patientData: {},
 
       checklist: createDefaultChecklist(),
@@ -473,6 +519,7 @@ export const useRTSASStore = create<RTSASState>()(
         },
       },
       pendingAlerts: [] as Array<{ hn: string; newsScore: number; timestamp: string }>,
+      dismissedAlertKeys: {} as Record<string, boolean>,
 
       // ---- Auth State (EC Privacy) ----
       isAuthenticated: false,
@@ -485,7 +532,7 @@ export const useRTSASStore = create<RTSASState>()(
 
       setPatients: (patients) => set({ patients }),
 
-      selectPatient: (patientId) => {
+      selectPatient: (patientId, isHistoricalArchive = false) => {
         const state = get();
 
         // 1. Save current active patient's data before switching
@@ -505,12 +552,35 @@ export const useRTSASStore = create<RTSASState>()(
           };
         }
 
+        // If unselecting / clearing active patient
+        if (!patientId) {
+          set({
+            selectedPatient: null,
+            patientData: newPatientDataMap,
+            checklist: createDefaultChecklist(),
+            timeline: [],
+            countdownTimer: {
+              isActive: false, startedAt: null, totalDurationSeconds: 3600,
+              remainingSeconds: 3600, isExpired: false, isWarning: false, isCritical: false,
+            },
+            assessmentSchedule: null,
+            sepsisRuledOut: false,
+            ruledOutAt: null,
+            ruledOutBy: null,
+            treatmentCompleted: false,
+            treatmentCompletedAt: null,
+            ui: { ...state.ui, selectedPatientId: null },
+          });
+          return;
+        }
+
         // 2. Load new patient's data (or initialize if not exists)
         const rawData = newPatientDataMap[patientId];
         const dataToLoad = rawData
           ? {
             ...rawData,
             timeline: (rawData.timeline || []).filter(isTreatmentTimelineEvent),
+            isHistoricalArchive: isHistoricalArchive ? true : false,
           }
           : {
             checklist: createDefaultChecklist(),
@@ -525,12 +595,74 @@ export const useRTSASStore = create<RTSASState>()(
             ruledOutBy: null,
             treatmentCompleted: false,
             treatmentCompletedAt: null,
+            isHistoricalArchive: isHistoricalArchive ? true : false,
           };
 
         // 3. Ensure the newly loaded data is in the map
+        const patient = state.patients.find((p) => p.id === patientId || p.hn === patientId) || null;
+        // Restore treatmentStatus from patient if present
+        if (patient?.treatmentStatus) {
+          const ts = patient.treatmentStatus;
+          if (ts.doctor_confirmed || ts.acknowledged) {
+            dataToLoad.checklist = dataToLoad.checklist.map((phase) => ({
+              ...phase,
+              items: phase.items.map((item) =>
+                item.id === 'doctor_confirm'
+                  ? {
+                      ...item,
+                      status: 'completed' as const,
+                      completedAt: item.completedAt || ts.countdown_started_at || ts.acknowledged_at || new Date().toISOString(),
+                      completedBy: item.completedBy || ts.acknowledged_by || 'Nurse/System',
+                    }
+                  : item
+              ),
+            }));
+          }
+          if (ts.countdown_started_at && !ts.treatment_completed && !ts.sepsis_ruled_out) {
+            const elapsed = Math.floor((Date.now() - new Date(ts.countdown_started_at).getTime()) / 1000);
+            const totalDuration = ts.countdown_duration || 3600;
+            const remaining = Math.max(0, totalDuration - elapsed);
+            dataToLoad.countdownTimer = {
+              isActive: true,
+              startedAt: ts.countdown_started_at,
+              totalDurationSeconds: totalDuration,
+              remainingSeconds: remaining,
+              isExpired: remaining === 0,
+              isWarning: remaining <= 900 && remaining > 300,
+              isCritical: remaining <= 300 && remaining > 0,
+            };
+          }
+          if ((ts.doctor_confirmed || ts.countdown_started_at) && !dataToLoad.assessmentSchedule && !ts.sepsis_ruled_out) {
+            const originTime = ts.countdown_started_at || ts.acknowledged_at || new Date().toISOString();
+            dataToLoad.assessmentSchedule = {
+              patientId,
+              generatedAt: new Date().toISOString(),
+              originTime,
+              entries: generateAssessmentSchedule(originTime),
+            };
+          }
+        }
+
+        const isHistorical = isHistoricalPatient(patient, newPatientDataMap);
+
+        if (isHistorical) {
+          dataToLoad.countdownTimer = {
+            ...dataToLoad.countdownTimer,
+            isActive: false,
+          };
+          if (patient?.treatmentStatus?.treatment_completed) {
+            dataToLoad.treatmentCompleted = true;
+            dataToLoad.treatmentCompletedAt = patient.treatmentStatus.treatment_completed_at || dataToLoad.treatmentCompletedAt;
+          }
+          if (patient?.treatmentStatus?.sepsis_ruled_out) {
+            dataToLoad.sepsisRuledOut = true;
+            dataToLoad.ruledOutAt = patient.treatmentStatus.updated_at || dataToLoad.ruledOutAt;
+          }
+        }
+
         newPatientDataMap[patientId] = dataToLoad;
 
-        const patient = state.patients.find((p) => p.id === patientId) || null;
+
         set({
           selectedPatient: patient,
           patientData: newPatientDataMap,
@@ -543,8 +675,114 @@ export const useRTSASStore = create<RTSASState>()(
           ruledOutBy: dataToLoad.ruledOutBy,
           treatmentCompleted: dataToLoad.treatmentCompleted,
           treatmentCompletedAt: dataToLoad.treatmentCompletedAt,
-          ui: { ...state.ui, selectedPatientId: patientId },
+          ui: { ...state.ui, selectedPatientId: patient ? patient.id : patientId },
         });
+      },
+
+      selectPatientAsync: async (patientId: string, isHistoricalArchive: boolean = false): Promise<Patient | null> => {
+        const cleanId = patientId.trim();
+        const state = get();
+
+        // 1. Check if patient is already in state.patients
+        let patient = state.patients.find((p) => p.id === cleanId || p.hn === cleanId);
+
+        // 2. If not found in memory, fetch from backend API (historical record support)
+        if (!patient) {
+          try {
+            const res = await fetch(`/api/patients/${cleanId}`);
+            if (!res.ok) {
+              throw new Error(`Patient ${cleanId} not found (HTTP ${res.status})`);
+            }
+            const bp: BackendPatient = await res.json();
+            patient = mapBackendToPatient(bp);
+
+            // Add to patients array
+            set((s) => ({
+              patients: [...s.patients.filter((p) => p.id !== patient!.id && p.hn !== patient!.hn), patient!],
+            }));
+          } catch (err) {
+            console.error(`Failed to load patient ${cleanId}:`, err);
+            return null;
+          }
+        }
+
+        // 3. Fetch or reconstruct timeline & treatment data from server
+        try {
+          const timelineRes = await fetch(`/api/patients/${patient.hn}/timeline`);
+          if (timelineRes.ok) {
+            const tlData = await timelineRes.json();
+            if (tlData.events && Array.isArray(tlData.events)) {
+              const existingData = get().patientData[patient.id] || {
+                checklist: createDefaultChecklist(),
+                timeline: [],
+                countdownTimer: {
+                  isActive: false, startedAt: null, totalDurationSeconds: 3600,
+                  remainingSeconds: 3600, isExpired: false, isWarning: false, isCritical: false,
+                },
+                assessmentSchedule: null,
+                sepsisRuledOut: false,
+                ruledOutAt: null,
+                ruledOutBy: null,
+                treatmentCompleted: false,
+                treatmentCompletedAt: null,
+                isHistoricalArchive: isHistoricalArchive ? true : false,
+              };
+
+              const tStatus = tlData.treatment_status;
+              const isCompleted = tStatus?.treatment_completed ?? false;
+              const isRuledOut = tStatus?.sepsis_ruled_out ?? false;
+
+              let checklist = existingData.checklist || createDefaultChecklist();
+              if (tStatus?.checklist_json) {
+                try {
+                  checklist = JSON.parse(tStatus.checklist_json);
+                } catch {
+                  // keep default
+                }
+              } else if (isCompleted) {
+                // If completed without saved checklist_json, mark bundle phases as completed
+                checklist = checklist.map((phase) => ({
+                  ...phase,
+                  isCompleted: true,
+                  items: phase.items.map((it) => ({
+                    ...it,
+                    status: 'completed' as const,
+                    completedAt: tStatus?.treatment_completed_at || patient!.arrivalTime,
+                    completedBy: tStatus?.treatment_completed_by || 'ทีมแพทย์/พยาบาล ER',
+                  })),
+                }));
+              }
+
+              const updatedData = {
+                ...existingData,
+                checklist,
+                timeline: tlData.events,
+                treatmentCompleted: isCompleted,
+                treatmentCompletedAt: tStatus?.treatment_completed_at,
+                sepsisRuledOut: isRuledOut,
+                ruledOutAt: isRuledOut ? (tStatus?.updated_at || patient.arrivalTime) : null,
+                isHistoricalArchive: isHistoricalArchive ? true : false,
+                countdownTimer: {
+                  ...existingData.countdownTimer,
+                  isActive: false,
+                },
+              };
+
+              set((s) => ({
+                patientData: {
+                  ...s.patientData,
+                  [patient!.id]: updatedData,
+                },
+              }));
+            }
+          }
+        } catch (tlErr) {
+          console.warn(`Could not load server timeline for ${patient.hn}:`, tlErr);
+        }
+
+        // 4. Select the patient in the store
+        get().selectPatient(patient.id, isHistoricalArchive);
+        return patient;
       },
 
       updatePatientVitals: (patientId, vitals) => {
@@ -596,7 +834,13 @@ export const useRTSASStore = create<RTSASState>()(
       // CHECKLIST ACTIONS
       // ===========================================================================
 
-      completeChecklistItem: (itemId, completedBy, inputValue) => {
+      completeChecklistItem: (itemId, completedBy, inputValue, customConfirmTime) => {
+        const curState = get();
+        if (curState.selectedPatient && isHistoricalPatient(curState.selectedPatient, curState.patientData)) {
+          console.warn('[RTSAS] Blocked checklist modification on historical patient');
+          return;
+        }
+
         const now = new Date().toISOString();
 
         set((state) => {
@@ -607,9 +851,10 @@ export const useRTSASStore = create<RTSASState>()(
                 ? {
                   ...item,
                   status: 'completed' as ChecklistItemStatus,
-                  completedAt: now,
+                  completedAt: customConfirmTime || now,
                   completedBy,
                   inputValue: inputValue ?? item.inputValue,
+
                 }
                 : item
             ),
@@ -636,21 +881,34 @@ export const useRTSASStore = create<RTSASState>()(
 
         if (completedItem) {
           let eventText = `✓ ${completedItem.label}`;
-          if (inputValue) {
+          if (itemId === 'doctor_confirm') {
+            if (customConfirmTime) {
+              const timeStr = new Date(customConfirmTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+              eventText = `✓ แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด (เวลาที่ยืนยันทางคลินิก: ${timeStr} น.)`;
+            } else {
+              eventText = `✓ แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด`;
+            }
+          } else if (inputValue) {
             eventText += ` — ${inputValue}`;
           }
 
-          get().addTimelineEvent(eventText, 'blue', completedBy);
+          get().addTimelineEvent(eventText, 'blue', itemId === 'doctor_confirm' ? 'แพทย์เวร ER' : completedBy);
         }
 
         // Special handling: Doctor Confirmation starts the countdown
         if (itemId === 'doctor_confirm') {
-          get().startCountdown(now);
-          get().generateSchedule(now);
+          const confirmTime = customConfirmTime || now;
+          get().startCountdown(confirmTime);
+          get().generateSchedule(confirmTime);
         }
       },
 
       skipChecklistItem: (itemId, actor) => {
+        const curState = get();
+        if (curState.selectedPatient && isHistoricalPatient(curState.selectedPatient, curState.patientData)) {
+          return;
+        }
+
         const now = new Date().toISOString();
 
         set((state) => {
@@ -696,6 +954,11 @@ export const useRTSASStore = create<RTSASState>()(
       },
 
       updateChecklistInput: (itemId, inputValue) => {
+        const curState = get();
+        if (curState.selectedPatient && isHistoricalPatient(curState.selectedPatient, curState.patientData)) {
+          return;
+        }
+
         set((state) => {
           const newChecklist = state.checklist.map((phase) => ({
             ...phase,
@@ -735,6 +998,12 @@ export const useRTSASStore = create<RTSASState>()(
 
       // Doctor rules out sepsis — ends protocol loop for this patient
       ruleOutSepsis: (actor: string) => {
+        const curState = get();
+        if (curState.selectedPatient && isHistoricalPatient(curState.selectedPatient, curState.patientData)) {
+          console.warn('[RTSAS] Blocked rule out on historical patient');
+          return;
+        }
+
         set((state) => {
           if (!state.selectedPatient) return {};
           const patientId = state.selectedPatient.id;
@@ -791,10 +1060,25 @@ export const useRTSASStore = create<RTSASState>()(
             timeline: updatedTimeline,
           };
         });
+
+        // Sync rule-out to backend MySQL
+        if (typeof window !== 'undefined' && curState.selectedPatient) {
+          fetch('/api/treatment-status/rule-out', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hn: curState.selectedPatient.hn }),
+          }).catch((err) => console.warn('Failed to sync rule-out to backend:', err));
+        }
       },
 
       // Manually mark patient treatment as completed
       completeTreatment: (actor: string) => {
+        const curState = get();
+        if (curState.selectedPatient && isHistoricalPatient(curState.selectedPatient, curState.patientData)) {
+          console.warn('[RTSAS] Blocked complete treatment on historical patient');
+          return;
+        }
+
         set((state) => {
           if (!state.selectedPatient) return {};
           const patientId = state.selectedPatient.id;
@@ -849,6 +1133,21 @@ export const useRTSASStore = create<RTSASState>()(
             timeline: updatedTimeline,
           };
         });
+
+        // Sync completion to backend MySQL
+        if (typeof window !== 'undefined' && curState.selectedPatient) {
+          const hn = curState.selectedPatient.hn;
+          fetch('/api/treatment-status/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hn, completed_by: actor }),
+          }).catch((err) => console.warn('Failed to sync complete to backend:', err));
+          fetch('/api/treatment-status/checklist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hn, checklist_json: JSON.stringify(get().checklist) }),
+          }).catch((err) => console.warn('Failed to sync checklist to backend:', err));
+        }
       },
 
       // ===========================================================================
@@ -917,8 +1216,20 @@ export const useRTSASStore = create<RTSASState>()(
             minute: '2-digit',
             second: '2-digit',
           });
-          const actor = event.actor ? ` [ผู้ปฏิบัติ: ${event.actor}]` : '';
-          return `[${time}] ขั้นตอนที่ ${index + 1}: ${event.actionText}${actor}`;
+          let cleanAction = (event.actionText || '')
+            .replace(/\s*—\s*โดย\s+.*$/gi, '')
+            .replace(/\s*\(โดย\s+[^)]+\)/gi, '')
+            .replace(/\s*\[ผู้ปฏิบัติ:\s*[^\]]*\]/gi, '')
+            .trim();
+          if (cleanAction.includes('แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด')) {
+            const match = cleanAction.match(/^(.*?\([^)]*น\.\))/);
+            if (match) {
+              cleanAction = match[1];
+            } else {
+              cleanAction = '✓ แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด';
+            }
+          }
+          return `[${time}] ขั้นตอนที่ ${index + 1}: ${cleanAction} [ผู้ปฏิบัติ: ]`;
         });
 
         const footer = '\n' + separator + `รวมดำเนินการทั้งหมด: ${treatmentEvents.length} ขั้นตอน`;
@@ -930,15 +1241,36 @@ export const useRTSASStore = create<RTSASState>()(
       // ===========================================================================
 
       startCountdown: (doctorConfirmTime) => {
+        const curState = get();
+        if (curState.selectedPatient && isHistoricalPatient(curState.selectedPatient, curState.patientData)) {
+          return;
+        }
+
+        const nowMs = Date.now();
+        let remaining = 3600;
+        let isExpired = false;
+        let isWarning = false;
+        let isCritical = false;
+
+        const effectiveStartTime = doctorConfirmTime || new Date().toISOString();
+        const startTimeMs = new Date(effectiveStartTime).getTime();
+        if (!isNaN(startTimeMs)) {
+          const elapsed = Math.floor((nowMs - startTimeMs) / 1000);
+          remaining = Math.max(0, 3600 - elapsed);
+          isExpired = remaining === 0;
+          isCritical = remaining <= 300 && remaining > 0;
+          isWarning = remaining <= 900 && remaining > 300;
+        }
+
         set((state) => {
           const newTimer = {
             isActive: true,
-            startedAt: doctorConfirmTime,
+            startedAt: effectiveStartTime,
             totalDurationSeconds: 3600,
-            remainingSeconds: 3600,
-            isExpired: false,
-            isWarning: false,
-            isCritical: false,
+            remainingSeconds: remaining,
+            isExpired: isExpired,
+            isWarning: isWarning,
+            isCritical: isCritical,
           };
           return {
             countdownTimer: newTimer,
@@ -958,20 +1290,37 @@ export const useRTSASStore = create<RTSASState>()(
           const updatedPatientData = { ...state.patientData };
           let newActiveTimer = state.countdownTimer;
           let activeTimerUpdated = false;
+          const nowMs = Date.now();
 
           // Tick ALL background timers in patientData
           Object.keys(updatedPatientData).forEach(patientId => {
             const timer = updatedPatientData[patientId].countdownTimer;
+            const patientObj = state.patients.find((p) => p.id === patientId || p.hn === patientId) || null;
+            if (isHistoricalPatient(patientObj, updatedPatientData)) {
+              if (timer?.isActive) {
+                updatedPatientData[patientId] = {
+                  ...updatedPatientData[patientId],
+                  countdownTimer: { ...timer, isActive: false },
+                };
+              }
+              return;
+            }
+
             if (timer && timer.isActive && !timer.isExpired) {
-              const remaining = Math.max(0, timer.remainingSeconds - 1);
+              let remaining = Math.max(0, timer.remainingSeconds - 1);
+              if (timer.startedAt) {
+                const elapsed = Math.floor((nowMs - new Date(timer.startedAt).getTime()) / 1000);
+                remaining = Math.max(0, timer.totalDurationSeconds - elapsed);
+              }
+              const isExpired = remaining === 0;
               updatedPatientData[patientId] = {
                 ...updatedPatientData[patientId],
                 countdownTimer: {
                   ...timer,
                   remainingSeconds: remaining,
-                  isExpired: remaining === 0,
+                  isExpired,
                   isWarning: remaining <= 900 && remaining > 300,
-                  isCritical: remaining <= 300,
+                  isCritical: remaining <= 300 && remaining > 0,
                 }
               };
               // Sync with active screen timer if this is the selected patient
@@ -982,15 +1331,26 @@ export const useRTSASStore = create<RTSASState>()(
             }
           });
 
+          // Check if currently selected patient is historical
+          if (state.selectedPatient && isHistoricalPatient(state.selectedPatient, updatedPatientData)) {
+            newActiveTimer = { ...newActiveTimer, isActive: false };
+            activeTimerUpdated = true;
+          }
+
           // Also tick the active timer if it wasn't caught by the dictionary loop
           if (!activeTimerUpdated && state.countdownTimer.isActive && !state.countdownTimer.isExpired) {
-            const remaining = Math.max(0, state.countdownTimer.remainingSeconds - 1);
+            let remaining = Math.max(0, state.countdownTimer.remainingSeconds - 1);
+            if (state.countdownTimer.startedAt) {
+              const elapsed = Math.floor((nowMs - new Date(state.countdownTimer.startedAt).getTime()) / 1000);
+              remaining = Math.max(0, state.countdownTimer.totalDurationSeconds - elapsed);
+            }
+            const isExpired = remaining === 0;
             newActiveTimer = {
               ...state.countdownTimer,
               remainingSeconds: remaining,
-              isExpired: remaining === 0,
+              isExpired,
               isWarning: remaining <= 900 && remaining > 300,
-              isCritical: remaining <= 300,
+              isCritical: remaining <= 300 && remaining > 0,
             };
             if (state.selectedPatient) {
               updatedPatientData[state.selectedPatient.id] = {
@@ -1060,6 +1420,11 @@ export const useRTSASStore = create<RTSASState>()(
       },
 
       completeAssessment: (entryId, vitals, completedBy) => {
+        const curState = get();
+        if (curState.selectedPatient && isHistoricalPatient(curState.selectedPatient, curState.patientData)) {
+          return;
+        }
+
         const newsResult = calculateNEWS(vitals);
         const now = new Date().toISOString();
 
@@ -1113,6 +1478,11 @@ export const useRTSASStore = create<RTSASState>()(
       },
 
       triggerReminder: (entryId) => {
+        const curState = get();
+        if (curState.selectedPatient && isHistoricalPatient(curState.selectedPatient, curState.patientData)) {
+          return;
+        }
+
         set((state) => {
           if (!state.assessmentSchedule) return state;
 
@@ -1216,8 +1586,19 @@ export const useRTSASStore = create<RTSASState>()(
           phase.items?.some((item) => item.id === 'doctor_confirm' && item.status === 'completed')
         );
 
-        // If already acknowledged, completed, or ruled out: DO NOT ALERT!
-        if (ptData?.treatmentCompleted || ptData?.sepsisRuledOut || isDoctorConfirmed) {
+        const isTimerActive = Boolean(ptData?.countdownTimer?.isActive && !ptData?.countdownTimer?.isExpired);
+        const isDismissed = Boolean(state.dismissedAlertKeys?.[hn] || state.dismissedAlertKeys?.[patientId]);
+        const isCentrallyAcknowledged = Boolean(pt?.treatmentStatus?.acknowledged);
+
+        // If already acknowledged, dismissed, timer running, completed, or ruled out: DO NOT ALERT!
+        if (
+          isDismissed ||
+          isCentrallyAcknowledged ||
+          isTimerActive ||
+          ptData?.treatmentCompleted ||
+          ptData?.sepsisRuledOut ||
+          isDoctorConfirmed
+        ) {
           return;
         }
 
@@ -1261,6 +1642,21 @@ export const useRTSASStore = create<RTSASState>()(
 
       dismissNextAlert: () => {
         set((s) => ({ pendingAlerts: s.pendingAlerts.slice(1) }));
+      },
+
+      markAlertDismissed: (hn, key) =>
+        set((state) => {
+          const updated = {
+            ...state.dismissedAlertKeys,
+            [hn]: true,
+          };
+          if (key) updated[key] = true;
+          return { dismissedAlertKeys: updated };
+        }),
+
+      isAlertDismissed: (hn, key) => {
+        const state = get();
+        return Boolean(state.dismissedAlertKeys?.[hn] || (key && state.dismissedAlertKeys?.[key]));
       },
 
       // Synchronize centralized treatment & alert status from backend MySQL
@@ -1318,7 +1714,7 @@ export const useRTSASStore = create<RTSASState>()(
             const isExpired = elapsed >= totalDuration;
 
             updatedTimer = {
-              isActive: !isExpired,
+              isActive: true,
               startedAt,
               totalDurationSeconds: totalDuration,
               remainingSeconds: remaining,
@@ -1330,6 +1726,18 @@ export const useRTSASStore = create<RTSASState>()(
             updatedTimer = {
               ...existingData.countdownTimer,
               isActive: false,
+            };
+          }
+
+          // Auto-generate or restore assessment schedule when confirmed
+          let updatedSchedule = existingData.assessmentSchedule;
+          const confirmTime = status.countdown_started_at || (status.doctor_confirmed ? (status.acknowledged_at || new Date().toISOString()) : null);
+          if (confirmTime && !updatedSchedule && !status.sepsis_ruled_out) {
+            updatedSchedule = {
+              patientId,
+              generatedAt: new Date().toISOString(),
+              originTime: confirmTime,
+              entries: generateAssessmentSchedule(confirmTime),
             };
           }
 
@@ -1354,6 +1762,7 @@ export const useRTSASStore = create<RTSASState>()(
             ...existingData,
             checklist: updatedChecklist,
             countdownTimer: updatedTimer,
+            assessmentSchedule: updatedSchedule,
             treatmentCompleted: status.treatment_completed ?? existingData.treatmentCompleted,
             treatmentCompletedAt: status.treatment_completed_at ?? existingData.treatmentCompletedAt,
             sepsisRuledOut: status.sepsis_ruled_out ?? existingData.sepsisRuledOut,
@@ -1371,13 +1780,67 @@ export const useRTSASStore = create<RTSASState>()(
               ...state.ui,
               modal: updatedModal,
             },
+            dismissedAlertKeys: isFinishedOrAcknowledged
+              ? { ...state.dismissedAlertKeys, [hn]: true }
+              : state.dismissedAlertKeys,
             ...(isCurrentlySelected
               ? {
                   checklist: updatedChecklist,
                   countdownTimer: updatedTimer,
+                  assessmentSchedule: updatedSchedule,
                   treatmentCompleted: updatedPatientData.treatmentCompleted,
                   sepsisRuledOut: updatedPatientData.sepsisRuledOut,
                 }
+              : {}),
+          };
+
+        });
+      },
+
+      clearTreatedPatients: (hns?: string[]) => {
+        set((state) => {
+          const hnSet = hns && hns.length > 0 ? new Set(hns) : null;
+          const updatedPatientData = { ...state.patientData };
+
+          Object.keys(updatedPatientData).forEach((pid) => {
+            const p = updatedPatientData[pid];
+            const ptObj = state.patients.find((pt) => pt.id === pid || pt.hn === pid);
+            const hn = ptObj?.hn || pid;
+            const matches = !hnSet || hnSet.has(pid) || hnSet.has(hn);
+
+            if (matches && p?.treatmentCompleted) {
+              updatedPatientData[pid] = {
+                ...p,
+                treatmentCompleted: false,
+                treatmentCompletedAt: null,
+              };
+            }
+          });
+
+          const updatedPatients = state.patients.map((p) => {
+            const matches = !hnSet || hnSet.has(p.hn) || hnSet.has(p.id);
+            if (matches && p.treatmentStatus?.treatment_completed) {
+              return {
+                ...p,
+                treatmentStatus: {
+                  ...p.treatmentStatus,
+                  treatment_completed: false,
+                  treatment_completed_at: null,
+                  treatment_completed_by: null,
+                },
+              };
+            }
+            return p;
+          });
+
+          const isSelectedTarget = state.selectedPatient &&
+            (!hnSet || hnSet.has(state.selectedPatient.hn) || hnSet.has(state.selectedPatient.id));
+
+          return {
+            patientData: updatedPatientData,
+            patients: updatedPatients,
+            ...(isSelectedTarget && state.treatmentCompleted
+              ? { treatmentCompleted: false, treatmentCompletedAt: null }
               : {}),
           };
         });
@@ -1520,7 +1983,6 @@ export const useRTSASStore = create<RTSASState>()(
         // Only persist essential state, avoid UI state that might cause issues on reload
         patients: state.patients,
         patientData: state.patientData,
-        selectedPatient: state.selectedPatient,
         checklist: state.checklist,
         timeline: state.timeline,
         countdownTimer: state.countdownTimer,
@@ -1533,9 +1995,17 @@ export const useRTSASStore = create<RTSASState>()(
         isAuthenticated: state.isAuthenticated,
         currentUser: state.currentUser,
         isHNRevealed: state.isHNRevealed,
+        dismissedAlertKeys: state.dismissedAlertKeys,
         ui: {
-          ...state.ui,
-          currentTime: new Date().toISOString(), // Reset current time so it doesn't freeze
+          selectedPatientId: state.ui.selectedPatientId,
+          activeTab: state.ui.activeTab,
+          isSidebarCollapsed: state.ui.isSidebarCollapsed,
+          connectionStatus: state.ui.connectionStatus,
+          currentTime: new Date().toISOString(),
+          modal: {
+            activeModal: null,
+            modalData: null,
+          },
         }
       })
     }
