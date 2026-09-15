@@ -31,6 +31,7 @@ import {
 import { maskHN } from '../utils/hnMask';
 import { playAlertChime } from '../utils/alertSound';
 import { MOCK_PATIENTS } from '../data/mockData';
+import { logEvent } from '../utils/timestampLogger';
 import {
   evaluatePatientTreatmentStatus,
   auditPatientMemory,
@@ -530,7 +531,15 @@ export const useRTSASStore = create<RTSASState>()(
       // PATIENT ACTIONS
       // ===========================================================================
 
-      setPatients: (patients) => set({ patients }),
+      setPatients: (patients) => set((state) => {
+        const updatedSelected = state.selectedPatient
+          ? patients.find((p) => p.id === state.selectedPatient?.id || p.hn === state.selectedPatient?.hn) || state.selectedPatient
+          : null;
+        return {
+          patients,
+          selectedPatient: updatedSelected,
+        };
+      }),
 
       selectPatient: (patientId, isHistoricalArchive = false) => {
         const state = get();
@@ -603,20 +612,46 @@ export const useRTSASStore = create<RTSASState>()(
         // Restore treatmentStatus from patient if present
         if (patient?.treatmentStatus) {
           const ts = patient.treatmentStatus;
+          if (ts.checklist_json) {
+            try {
+              const parsed = JSON.parse(ts.checklist_json);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                dataToLoad.checklist = parsed;
+              }
+            } catch (e) {
+              console.warn('[RTSAS] Failed to parse checklist_json in selectPatient:', e);
+            }
+          }
           if (ts.doctor_confirmed || ts.acknowledged) {
             dataToLoad.checklist = dataToLoad.checklist.map((phase) => ({
               ...phase,
               items: phase.items.map((item) =>
                 item.id === 'doctor_confirm'
                   ? {
-                      ...item,
-                      status: 'completed' as const,
-                      completedAt: item.completedAt || ts.countdown_started_at || ts.acknowledged_at || new Date().toISOString(),
-                      completedBy: item.completedBy || ts.acknowledged_by || 'Nurse/System',
-                    }
+                    ...item,
+                    status: 'completed' as const,
+                    completedAt: item.completedAt || ts.countdown_started_at || ts.acknowledged_at || new Date().toISOString(),
+                    completedBy: item.completedBy || ts.acknowledged_by || 'Nurse/System',
+                  }
                   : item
               ),
             }));
+            // If doctor confirmed, ensure Phase 1 items are completed so they do not block subsequent phases
+            dataToLoad.checklist = dataToLoad.checklist.map((phase) => {
+              if (phase.phase === 'initial_response') {
+                return {
+                  ...phase,
+                  isCompleted: true,
+                  items: phase.items.map((item) => ({
+                    ...item,
+                    status: (item.status === 'completed' || item.status === 'skipped') ? item.status : 'completed',
+                    completedAt: item.completedAt || ts.countdown_started_at || ts.acknowledged_at || new Date().toISOString(),
+                    completedBy: item.completedBy || ts.acknowledged_by || 'Nurse/System',
+                  })),
+                };
+              }
+              return phase;
+            });
           }
           if (ts.countdown_started_at && !ts.treatment_completed && !ts.sepsis_ruled_out) {
             const elapsed = Math.floor((Date.now() - new Date(ts.countdown_started_at).getTime()) / 1000);
@@ -642,6 +677,9 @@ export const useRTSASStore = create<RTSASState>()(
             };
           }
         }
+
+        // Accurately recalculate phase unlocking for loaded checklist
+        dataToLoad.checklist = updatePhaseUnlocking(dataToLoad.checklist);
 
         const isHistorical = isHistoricalPatient(patient, newPatientDataMap);
 
@@ -702,6 +740,8 @@ export const useRTSASStore = create<RTSASState>()(
             }));
           } catch (err) {
             console.error(`Failed to load patient ${cleanId}:`, err);
+            // Log backend error for patient load failure
+            await logEvent('ERROR', 'BackendError', `Failed to load patient ${cleanId}`, { error: err });
             return null;
           }
         }
@@ -778,15 +818,21 @@ export const useRTSASStore = create<RTSASState>()(
           }
         } catch (tlErr) {
           console.warn(`Could not load server timeline for ${patient.hn}:`, tlErr);
+            // Log backend error for timeline fetch failure
+            await logEvent('ERROR', 'BackendError', `Failed to load timeline for ${patient.hn}`, { error: tlErr });
         }
 
         // 4. Select the patient in the store
         get().selectPatient(patient.id, isHistoricalArchive);
+        // Log patient selection event
+        await logEvent('Note', 'PatientSelection', `Selected patient ${patient.id}`, { patientId: patient.id, isHistoricalArchive });
         return patient;
       },
 
-      updatePatientVitals: (patientId, vitals) => {
+      updatePatientVitals: async (patientId, vitals) => {
         const newsResult = calculateNEWS(vitals);
+        // Log NEWS calculation event
+        await logEvent('Note', 'NEWSCalculation', `Calculated NEWS for patient ${patientId}`, { newsScore: newsResult.totalScore, riskLevel: newsResult.riskLevel });
 
         set((state) => ({
           patients: state.patients.map((p) =>
@@ -901,6 +947,18 @@ export const useRTSASStore = create<RTSASState>()(
           get().startCountdown(confirmTime);
           get().generateSchedule(confirmTime);
         }
+
+        // Sync checklist state centrally to MySQL backend
+        if (typeof window !== 'undefined') {
+          const activePt = get().selectedPatient;
+          if (activePt && activePt.hn) {
+            fetch('/api/treatment-status/checklist', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ hn: activePt.hn, checklist_json: JSON.stringify(get().checklist) }),
+            }).catch((err) => console.warn('[RTSAS] Failed to sync checklist to backend:', err));
+          }
+        }
       },
 
       skipChecklistItem: (itemId, actor) => {
@@ -950,6 +1008,18 @@ export const useRTSASStore = create<RTSASState>()(
             'blue',
             actor
           );
+        }
+
+        // Sync checklist state centrally to MySQL backend
+        if (typeof window !== 'undefined') {
+          const activePt = get().selectedPatient;
+          if (activePt && activePt.hn) {
+            fetch('/api/treatment-status/checklist', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ hn: activePt.hn, checklist_json: JSON.stringify(get().checklist) }),
+            }).catch((err) => console.warn('[RTSAS] Failed to sync checklist to backend:', err));
+          }
         }
       },
 
@@ -1582,11 +1652,14 @@ export const useRTSASStore = create<RTSASState>()(
         const patientId = pt ? pt.id : hn;
         const ptData = state.patientData[patientId];
 
-        const isDoctorConfirmed = ptData?.checklist?.some((phase) =>
-          phase.items?.some((item) => item.id === 'doctor_confirm' && item.status === 'completed')
+        const isDoctorConfirmed = Boolean(
+          pt?.treatmentStatus?.doctor_confirmed ||
+          ptData?.checklist?.some((phase) =>
+            phase.items?.some((item) => item.id === 'doctor_confirm' && item.status === 'completed')
+          )
         );
 
-        const isTimerActive = Boolean(ptData?.countdownTimer?.isActive && !ptData?.countdownTimer?.isExpired);
+        const isTimerActive = Boolean(ptData?.countdownTimer?.isActive || pt?.treatmentStatus?.countdown_started_at);
         const isDismissed = Boolean(state.dismissedAlertKeys?.[hn] || state.dismissedAlertKeys?.[patientId]);
         const isCentrallyAcknowledged = Boolean(pt?.treatmentStatus?.acknowledged);
 
@@ -1688,21 +1761,50 @@ export const useRTSASStore = create<RTSASState>()(
 
           // Update checklist doctor_confirm if acknowledged or doctor_confirmed
           let updatedChecklist = existingData.checklist || createDefaultChecklist();
+          if ((status as any).checklist_json) {
+            try {
+              const parsed = JSON.parse((status as any).checklist_json);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                updatedChecklist = parsed;
+              }
+            } catch (e) {
+              console.warn('[RTSAS] Failed to parse checklist_json in syncServerTreatmentStatus:', e);
+            }
+          }
           if (status.acknowledged || status.doctor_confirmed) {
             updatedChecklist = updatedChecklist.map((phase) => ({
               ...phase,
               items: phase.items.map((item) =>
                 item.id === 'doctor_confirm'
                   ? {
-                      ...item,
-                      status: 'completed' as const,
-                      completedAt: item.completedAt || status.acknowledged_at || new Date().toISOString(),
-                      completedBy: item.completedBy || status.acknowledged_by || 'Nurse/System',
-                    }
+                    ...item,
+                    status: 'completed' as const,
+                    completedAt: item.completedAt || status.acknowledged_at || new Date().toISOString(),
+                    completedBy: item.completedBy || status.acknowledged_by || 'Nurse/System',
+                  }
                   : item
               ),
             }));
+            // If doctor confirmed centrally, ensure Phase 1 items are completed so they do not block subsequent phases
+            updatedChecklist = updatedChecklist.map((phase) => {
+              if (phase.phase === 'initial_response') {
+                return {
+                  ...phase,
+                  isCompleted: true,
+                  items: phase.items.map((item) => ({
+                    ...item,
+                    status: (item.status === 'completed' || item.status === 'skipped') ? item.status : 'completed',
+                    completedAt: item.completedAt || status.acknowledged_at || new Date().toISOString(),
+                    completedBy: item.completedBy || status.acknowledged_by || 'Nurse/System',
+                  })),
+                };
+              }
+              return phase;
+            });
           }
+
+          // ALWAYS ensure phase unlock states are accurately calculated
+          updatedChecklist = updatePhaseUnlocking(updatedChecklist);
 
           // Calculate countdown timer from server startedAt
           let updatedTimer = existingData.countdownTimer;
@@ -1785,12 +1887,12 @@ export const useRTSASStore = create<RTSASState>()(
               : state.dismissedAlertKeys,
             ...(isCurrentlySelected
               ? {
-                  checklist: updatedChecklist,
-                  countdownTimer: updatedTimer,
-                  assessmentSchedule: updatedSchedule,
-                  treatmentCompleted: updatedPatientData.treatmentCompleted,
-                  sepsisRuledOut: updatedPatientData.sepsisRuledOut,
-                }
+                checklist: updatedChecklist,
+                countdownTimer: updatedTimer,
+                assessmentSchedule: updatedSchedule,
+                treatmentCompleted: updatedPatientData.treatmentCompleted,
+                sepsisRuledOut: updatedPatientData.sepsisRuledOut,
+              }
               : {}),
           };
 
@@ -2025,6 +2127,11 @@ export const useRTSASStore = create<RTSASState>()(
  *   - Phase 4 unlocks when Phase 3 is completed.
  */
 function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
+  // If doctor confirmation is already completed or skipped,
+  // Phase 2 is considered completed & unlocked, which in turn unlocks Phase 3
+  const isDoctorConfirmed = phases.some((p) =>
+    p.items?.some((i) => i.id === 'doctor_confirm' && (i.status === 'completed' || i.status === 'skipped'))
+  );
 
   return phases.map((phase, index) => {
     // Check if all items in this phase are completed
@@ -2036,6 +2143,15 @@ function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
     let isUnlocked = phase.isUnlocked;
     if (index === 0) {
       isUnlocked = true; // Phase 1 always unlocked
+    } else if (index === 1) {
+      // Phase 2 (doctor_confirm): unlocked if Phase 1 completed OR if doctor_confirm is already completed
+      const prevPhase = phases[0];
+      const prevCompleted =
+        prevPhase.items.length > 0 &&
+        prevPhase.items.every((item) => item.status === 'completed' || item.status === 'skipped');
+      if (prevCompleted || isDoctorConfirmed) {
+        isUnlocked = true;
+      }
     } else {
       // Unlock if the previous phase is completed
       const prevPhase = phases[index - 1];

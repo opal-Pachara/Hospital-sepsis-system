@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { calculateNEWS } from '../../utils/newsCalculator';
 import { gcsToAVPU } from '../../types';
 import { showToast } from '../../components/common/Toast';
+import { logEvent } from '../../utils/timestampLogger';
 import { useRTSASStore } from '../../store/useRTSASStore';
 import { mapBackendToPatient } from '../../utils/patientMapper';
 
@@ -48,7 +49,7 @@ export function PatientSimulator({ onNavigateClinical }: PatientSimulatorProps) 
   };
 
   // Quick Fill Presets
-  const applyPreset = (preset: 'severe' | 'medium' | 'normal') => {
+  const applyPreset = (preset: 'severe' | 'medium' | 'normal' | 'incomplete') => {
     handleRandomizeHN();
     if (preset === 'severe') {
       setGender('male');
@@ -130,7 +131,19 @@ export function PatientSimulator({ onNavigateClinical }: PatientSimulatorProps) 
           const exists = current.some((p) => p.id === mapped.id || p.hn === mapped.hn);
           if (!exists) {
             useRTSASStore.getState().setPatients([mapped, ...current]);
-          } else {
+          } else if (preset === 'incomplete') {
+        // Set some vitals missing (null) to simulate incomplete NEWS
+        setGender('male');
+        setAge(45);
+        setChiefComplaint('อาการทั่วไป ไม่มีข้อมูลสำคัญ');
+        setSbp(null as any);
+        setDbp(null as any);
+        setHeartRate(null as any);
+        setRespRate(null as any);
+        setTemperature(null as any);
+        setSpo2(null as any);
+        setGcs(null as any);
+      } else {
             useRTSASStore.getState().setPatients(
               current.map((p) => (p.id === mapped.id || p.hn === mapped.hn ? { ...p, ...mapped } : p))
             );
@@ -140,7 +153,13 @@ export function PatientSimulator({ onNavigateClinical }: PatientSimulatorProps) 
         }
       }
 
-      showToast(`✅ บันทึกข้อมูลผู้ป่วย ${hn} ลงฐานข้อมูล MySQL เรียบร้อยแล้ว (NEWS ${liveNews.totalScore})`, 'success', 5000);
+      showToast(`✅ บันทึกข้อมูลผู้ป่วย ${hn} ลงฐานข้อมูล MySQL เรียบร้อยแล้ว (NEWS ${liveNews.totalScore ?? 'N/A'})`, 'success', 5000);
+      // Log warning if NEWS score is incomplete
+      if (liveNews.totalScore === undefined || liveNews.totalScore === null) {
+        await logEvent('Warning', 'PatientSimulator', 'Inserted patient with incomplete NEWS score', { hn, vitals: { sbp, dbp, heartRate, respRate, temperature, spo2, gcs } });
+      } else {
+        await logEvent('Note', 'PatientSimulator', 'Inserted patient with NEWS score', { hn, newsScore: liveNews.totalScore });
+      }
       // Generate next random HN for convenience
       handleRandomizeHN();
     } catch (err: any) {
@@ -183,6 +202,14 @@ export function PatientSimulator({ onNavigateClinical }: PatientSimulatorProps) 
             >
               <span>⚠️</span>
               <span>เสี่ยงปานกลาง/มีไข้ (NEWS 4)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => applyPreset('incomplete')}
+              className="px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-all bg-purple-50 text-purple-800 border border-purple-200 hover:bg-purple-100 flex items-center gap-1.5 shadow-xs"
+            >
+              <span>❓</span>
+              <span>ข้อมูลไม่ครบ (Incomplete)</span>
             </button>
             <button
               type="button"

@@ -77,8 +77,11 @@ export default function AlertModal() {
 
     // Check if countdown is already running for this patient
     const patientId = alertedPatient?.id ?? selectedPatient?.id ?? '';
-    const existingTimer = useRTSASStore.getState().patientData[patientId]?.countdownTimer;
-    const alreadyRunning = existingTimer?.isActive && !existingTimer?.isExpired;
+    const alreadyRunning = Boolean(
+      existingTimer?.isActive ||
+      alertedPatient?.treatmentStatus?.countdown_started_at ||
+      selectedPatient?.treatmentStatus?.countdown_started_at
+    );
 
     if (!alreadyRunning) {
       // Auto-record visit time + NEWS calculation in timeline

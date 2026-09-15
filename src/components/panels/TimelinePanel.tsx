@@ -72,11 +72,6 @@ function TimelineEntry({
             return text;
           })()}
         </div>
-        {event.actor && (
-          <div className="text-[11px] text-text-muted mt-1 flex items-center gap-1.5">
-            <span className="opacity-75">ผู้ปฏิบัติ:</span>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -291,7 +286,7 @@ export default function TimelinePanel() {
           cleanAction = '✓ แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด';
         }
       }
-      const actorStr = event.actor ? ` [ผู้ปฏิบัติ: ${event.actor}]` : '';
+      const actorStr = ' [ผู้ปฏิบัติ: ]';
       return `[${time}] ขั้นตอนที่ ${index + 1}: ${cleanAction}${actorStr}`;
     });
 

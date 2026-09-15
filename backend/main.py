@@ -16,6 +16,8 @@ from .config import settings
 from .database import db_pool, dashboard_pool
 from .database_auth import engine as auth_engine, Base as AuthBase
 from .auth.router import router as auth_router
+from .auth.service import get_current_user
+from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -166,6 +168,12 @@ async def admin_cache_stats():
 class ClearCacheRequest(BaseModel):
     preserve_hns: Optional[List[str]] = None
 
+class LogEventRequest(BaseModel):
+    level: str
+    component: Optional[str] = None
+    message: str
+    details: Optional[Dict[str, Any]] = None
+
 
 @app.post("/api/admin/clear-cache")
 async def admin_clear_cache(
@@ -182,7 +190,18 @@ async def admin_clear_cache(
     result = clear_cache(preserve_hns=preserve_hns)
     logger.info(f"Cache cleared via admin API (preserved HNs: {preserve_hns})")
     return {"success": True, **result}
-
+@app.post("/api/admin/log-event")
+@app.post("/api/system/log-event")
+async def admin_log_event(payload: LogEventRequest):
+    """Endpoint to record a diagnostic log event from backend or frontend client."""
+    from .log_service import record_log
+    record_log(
+        level=payload.level,
+        message=payload.message,
+        component=payload.component,
+        details=payload.details,
+    )
+    return {"status": "logged", "level": payload.level, "component": payload.component}
 
 @app.get("/api/admin/db-status")
 async def admin_db_status():
@@ -386,13 +405,13 @@ async def get_patients(refresh: bool = False):
     from .scheduler import get_patients_cache, fetch_vitals_from_db, build_patient_list, process_vitals
 
     if refresh:
-        await process_vitals()
+        await process_vitals(force_log=True, trigger="manual_refresh")
 
     # If cache is empty (e.g., first request before scheduler ran), fetch immediately
     cache = get_patients_cache()
     if not cache:
-        rows = await fetch_vitals_from_db()
-        cache = build_patient_list(rows)
+        await process_vitals(force_log=True, trigger="initial_startup")
+        cache = get_patients_cache()
 
     # Sort by NEWS score descending
     sorted_patients = sorted(cache, key=lambda p: p.get("news_result", {}).get("totalScore", 0), reverse=True)

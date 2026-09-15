@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
 import { maskHN } from '../utils/hnMask';
 import { showToast } from '../components/common/Toast';
+import { logEvent } from '../utils/timestampLogger';
 
 export interface DailySummaryItem {
   date: string;
@@ -104,8 +105,11 @@ export default memo(function TreatedDashboard({
 
       const initialDate = datesList[0] || '';
       setSelectedDate((prev) => (prev && datesList.includes(prev) ? prev : initialDate));
+    // Log successful fetch of daily stats
+    await logEvent('Note', 'TreatedDashboard', 'Fetched daily stats', { datesCount: datesList.length, historyCount: historyList.length });
     } catch (err) {
       console.warn('[TreatedDashboard] Backend stats API error, using store fallback:', err);
+    await logEvent('ERROR', 'TreatedDashboard', 'Failed fetching daily stats', { error: err instanceof Error ? err.message : String(err) });
       // Fallback: build from Zustand state ONLY if there are actually treated patients
       const { patients, patientData } = useRTSASStore.getState();
       let treatedDone = 0;
@@ -157,8 +161,11 @@ export default memo(function TreatedDashboard({
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setCases(data.cases || []);
+    // Log successful fetch of treated cases for a date
+    await logEvent('Note', 'TreatedDashboard', 'Fetched treated cases', { date: dateStr, count: (data.cases || []).length });
       } catch (err) {
         console.warn('[TreatedDashboard] Backend cases API error, using store fallback:', err);
+    await logEvent('ERROR', 'TreatedDashboard', 'Failed fetching treated cases', { date: dateStr, error: err instanceof Error ? err.message : String(err) });
         // Fallback: only include patients who were actually treated
         const { patients, patientData } = useRTSASStore.getState();
         const matched = patients.filter(
@@ -250,6 +257,8 @@ export default memo(function TreatedDashboard({
   // Handle click on clinical timeline (opens in-dashboard modal with option to go to bedside)
   const handleOpenTimeline = async (c: TreatedCaseItem) => {
     setSelectedTimelineCase(c);
+    // Log opening timeline for patient
+    await logEvent('Note', 'TreatedDashboard', 'Opening timeline', { patientId: c.id });
     setLoadingTimeline(true);
     setTimelineEvents([]);
 
@@ -364,7 +373,7 @@ export default memo(function TreatedDashboard({
   };
 
   // CSV Export handler
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     const summaryRows = [
       ['=== สรุปสถิติผู้ป่วยที่รักษาแล้ว (RTSAS Treated Patients Dashboard) ==='],
       ['โรงพยาบาลบางคล้า จังหวัดฉะเชิงเทรา'],
@@ -424,6 +433,7 @@ export default memo(function TreatedDashboard({
     link.download = `RTSAS_Treated_Dashboard_${selectedDate}.csv`;
     link.click();
     showToast('ดาวน์โหลดไฟล์ CSV สรุปสถิติเรียบร้อย', 'success');
+    await logEvent('Note', 'TreatedDashboard', 'Exported CSV', { date: selectedDate, rows: summaryRows.length });
   };
 
   return (
@@ -794,9 +804,6 @@ export default memo(function TreatedDashboard({
             <div className="flex justify-between items-center">
               <span style={{ fontSize: '10px', fontWeight: 700, color: '#6d28d9', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 BUNDLE COMPLIANCE
-              </span>
-              <span style={{ fontSize: '9px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: '#f5f3ff', color: '#6d28d9', border: '1px solid #c4b5fd' }}>
-                เป้า ≥ 80%
               </span>
             </div>
             <div style={{ fontSize: '28px', fontWeight: 900, color: '#6d28d9', fontVariantNumeric: 'tabular-nums', marginTop: '2px' }}>

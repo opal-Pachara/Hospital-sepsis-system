@@ -577,21 +577,44 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
 
                   {/* Optional JSON details */}
                   {log.details && Object.keys(log.details).length > 0 && (
-                    <div
+                    <details
                       style={{
                         marginTop: '4px',
                         marginLeft: '24px',
-                        padding: '4px 8px',
                         background: '#090d16',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        color: '#94a3b8',
+                        borderRadius: '6px',
                         border: '1px solid #1e293b',
-                        whiteSpace: 'pre-wrap',
+                        padding: '4px 8px',
                       }}
                     >
-                      {JSON.stringify(log.details, null, 2)}
-                    </div>
+                      <summary
+                        style={{
+                          fontSize: '11px',
+                          color: '#38bdf8',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          outline: 'none',
+                        }}
+                      >
+                        🔍 รายละเอียดข้อมูล ({log.details.patients ? `${log.details.patients.length} เคส` : `${Object.keys(log.details).length} ฟิลด์`})
+                      </summary>
+                      <div
+                        style={{
+                          marginTop: '6px',
+                          padding: '6px 8px',
+                          background: '#040711',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          color: '#94a3b8',
+                          border: '1px solid #1e293b',
+                          whiteSpace: 'pre-wrap',
+                          maxHeight: '220px',
+                          overflowY: 'auto',
+                        }}
+                      >
+                        {JSON.stringify(log.details, null, 2)}
+                      </div>
+                    </details>
                   )}
                 </div>
               );

@@ -12,6 +12,7 @@ import type { Patient, VitalSigns, NEWSResult, NEWSParameterScore } from '../typ
 import { gcsToAVPU } from '../types';
 import { maskHN } from '../utils/hnMask';
 import { MOCK_PATIENTS } from '../data/mockData';
+import { logEvent } from '../utils/timestampLogger';
 
 // ---------------------------------------------------------------------------
 // Types matching the backend JSON response (PatientListItem schema)
@@ -159,6 +160,8 @@ function riskToTriageLevel(risk: string): Patient['triageLevel'] {
 export function usePatientData() {
   const { setPatients, selectPatient, setConnectionStatus, setLoading, queueAlert } = useRTSASStore();
   const alertedKeysRef = useRef<Set<string>>(new Set());
+  const isInitialLoadRef = useRef<boolean>(true);
+  const prevPatientCountRef = useRef<number>(-1);
 
   const fetchPatients = useCallback(async (forceRefresh = false) => {
     try {
@@ -179,6 +182,31 @@ export function usePatientData() {
         }
       });
 
+      // 📝 Log frontend data fetch when initial load, force refresh, or new/changed count
+      const isInitial = isInitialLoadRef.current;
+      const countChanged = prevPatientCountRef.current !== -1 && prevPatientCountRef.current !== patients.length;
+
+      if (forceRefresh || isInitial || countChanged) {
+        const trigger = forceRefresh
+          ? 'manual_refresh'
+          : isInitial
+          ? 'initial_load'
+          : 'patient_count_changed';
+
+        logEvent(
+          'Note',
+          'Web_Client',
+          `หน้าเว็บดึงข้อมูลผู้ป่วยสำเร็จ (${patients.length} ราย${forceRefresh ? ' - รีเฟรช' : ''})`,
+          {
+            fetch_trigger: trigger,
+            total_patients: patients.length,
+            high_risk_count: patients.filter((p) => p.hasSepsisAlert).length,
+            patient_hns: patients.slice(0, 20).map((p) => p.hn),
+          }
+        );
+        isInitialLoadRef.current = false;
+      }
+      prevPatientCountRef.current = patients.length;
 
       // 🚨 Detect high-risk sepsis patients (NEWS >= 5 or single parameter alert)
       // that have not been alerted yet in this session and haven't finished treatment
@@ -210,6 +238,10 @@ export function usePatientData() {
     } catch (err) {
       console.warn('[usePatientData] Backend unavailable — fallback to offline demo patient data:', err);
       setConnectionStatus('disconnected');
+
+      logEvent('ERROR', 'Web_Client', 'หน้าเว็บดึงข้อมูลผู้ป่วยไม่สำเร็จ (Backend Unavailable)', {
+        error: err instanceof Error ? err.message : String(err),
+      });
 
       const currentPatients = useRTSASStore.getState().patients;
       if (!currentPatients || currentPatients.length === 0) {

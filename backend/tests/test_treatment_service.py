@@ -1,6 +1,6 @@
 import unittest
 import asyncio
-from backend.database import db_pool
+from backend.database import dashboard_pool
 from backend.treatment_service import (
     init_treatment_table,
     acknowledge_alert,
@@ -15,18 +15,18 @@ from backend.treatment_service import (
 
 class TestTreatmentService(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        await db_pool.connect()
+        await dashboard_pool.connect()
         await init_treatment_table()
         # Clean test HN
-        async with db_pool.get_connection() as conn:
+        async with dashboard_pool.get_connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute("DELETE FROM patient_treatment_status WHERE hn = 'TEST_HN_SYNC';")
 
     async def asyncTearDown(self):
-        async with db_pool.get_connection() as conn:
+        async with dashboard_pool.get_connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute("DELETE FROM patient_treatment_status WHERE hn = 'TEST_HN_SYNC';")
-        await db_pool.disconnect()
+        await dashboard_pool.disconnect()
 
     async def test_acknowledge_and_get_status(self):
         ack_res = await acknowledge_alert("TEST_HN_SYNC", "Nurse_Test")

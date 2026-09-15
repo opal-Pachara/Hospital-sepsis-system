@@ -27,8 +27,10 @@ export default function MultiAlertModal() {
     // Switch context to target patient
     selectPatient(patient.id);
 
-    const existingTimer = useRTSASStore.getState().patientData[patient.id]?.countdownTimer;
-    const alreadyRunning = existingTimer?.isActive && !existingTimer?.isExpired;
+    const alreadyRunning = Boolean(
+      existingTimer?.isActive ||
+      patient?.treatmentStatus?.countdown_started_at
+    );
 
     if (!alreadyRunning) {
       const newsScore = patient?.latestNewsScore ?? 0;

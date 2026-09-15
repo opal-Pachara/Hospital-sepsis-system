@@ -669,8 +669,8 @@ function AssessmentScheduleSection({
                         ...(isDone
                           ? { background: '#f0fdf440' }
                           : isDue
-                          ? { background: '#fef2f250' }
-                          : {}),
+                            ? { background: '#fef2f250' }
+                            : {}),
                       }}
                     >
                       <span
@@ -701,8 +701,8 @@ function AssessmentScheduleSection({
                                 entry.newsResult.totalScore >= 7
                                   ? '#dc2626'
                                   : entry.newsResult.totalScore >= 5
-                                  ? '#ea580c'
-                                  : '#16a34a',
+                                    ? '#ea580c'
+                                    : '#16a34a',
                             }}
                           >
                             {entry.newsResult.totalScore}
@@ -723,9 +723,8 @@ function AssessmentScheduleSection({
                                 entry.sequence === firstCanceledSeq ? '#dcfce7' : '#f1f5f9',
                               color:
                                 entry.sequence === firstCanceledSeq ? '#16a34a' : '#64748b',
-                              border: `1px solid ${
-                                entry.sequence === firstCanceledSeq ? '#16a34a' : '#cbd5e1'
-                              }`,
+                              border: `1px solid ${entry.sequence === firstCanceledSeq ? '#16a34a' : '#cbd5e1'
+                                }`,
                             }}
                           >
                             {entry.sequence === firstCanceledSeq ? '✅ เสร็จตรงนี้' : '— ยกเลิก'}
@@ -799,8 +798,8 @@ function AssessmentScheduleSection({
                                 });
                               }}
                               style={{
-                              padding: '2px 6px',
-                              borderRadius: '10px',
+                                padding: '2px 6px',
+                                borderRadius: '10px',
                                 fontSize: '8px',
                                 fontWeight: 700,
                                 color: '#fff',
@@ -808,12 +807,12 @@ function AssessmentScheduleSection({
                                 border: '1px solid #b91c1c',
                                 cursor: 'pointer',
                                 fontFamily: 'inherit',
-                              width: '100%',
+                                width: '100%',
                               }}
                             >
-                            ⚡ บันทึกด่วน
+                              ⚡ บันทึกด่วน
                             </button>
-                            
+
                           </div>
                         ) : !isGloballyCompleted ? (
                           <div style={{ display: 'flex', gap: '3px', width: '100%' }}>
@@ -827,8 +826,8 @@ function AssessmentScheduleSection({
                                 });
                               }}
                               style={{
-                              padding: '2px 6px',
-                              borderRadius: '10px',
+                                padding: '2px 6px',
+                                borderRadius: '10px',
                                 fontSize: '8px',
                                 fontWeight: 700,
                                 color: '#2563eb',
@@ -836,12 +835,12 @@ function AssessmentScheduleSection({
                                 border: '1px solid #bfdbfe',
                                 cursor: 'pointer',
                                 fontFamily: 'inherit',
-                              width: '100%',
+                                width: '100%',
                               }}
                             >
                               บันทึก
                             </button>
-                            
+
                           </div>
                         ) : (
                           <span

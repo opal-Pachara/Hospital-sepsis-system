@@ -516,9 +516,14 @@ export function DatabaseFailoverTester() {
                       <td className="py-2.5 px-3 text-slate-800 font-medium">
                         <div>{log.message}</div>
                         {log.details && Object.keys(log.details).length > 0 && (
-                          <div className="text-[10px] font-mono text-slate-500 mt-0.5">
-                            {JSON.stringify(log.details)}
-                          </div>
+                          <details className="mt-1 group">
+                            <summary className="text-[10px] font-mono text-blue-600 hover:text-blue-800 cursor-pointer select-none">
+                              🔍 รายละเอียด ({log.details.patients ? `${log.details.patients.length} เคส` : Object.keys(log.details).length + ' ข้อมูล'})
+                            </summary>
+                            <pre className="text-[10px] font-mono text-slate-600 bg-slate-50 border border-slate-200 rounded p-2 mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap">
+                              {JSON.stringify(log.details, null, 2)}
+                            </pre>
+                          </details>
                         )}
                       </td>
                     </tr>

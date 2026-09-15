@@ -162,14 +162,24 @@ async def fetch_vitals_from_db() -> List[Dict[str, Any]]:
 
                 if rows:
                     logger.info(f"Fetched {len(rows)} rows from patient_visits.")
-                    return [dict(r) for r in rows]
+                    result = []
+                    for r in rows:
+                        d = dict(r)
+                        d['_source_table'] = 'patient_visits'
+                        result.append(d)
+                    return result
 
                 # Fallback to HOSxP legacy tables
                 logger.info("patient_visits is empty — falling back to opdscreen JOIN er_nursing_detail.")
                 await cursor.execute(QUERY_OPDSCREEN_FALLBACK)
                 rows = await cursor.fetchall()
                 logger.info(f"Fetched {len(rows)} rows from opdscreen (fallback).")
-                return [dict(r) for r in rows]
+                result = []
+                for r in rows:
+                    d = dict(r)
+                    d['_source_table'] = 'opdscreen'
+                    result.append(d)
+                return result
 
     except Exception as e:
         logger.error(f"Failed to fetch vitals: {e}")
@@ -242,7 +252,7 @@ def build_patient_list(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # Process vitals — compute NEWS and broadcast alerts via WebSocket
 # ---------------------------------------------------------------------------
 
-async def process_vitals():
+async def process_vitals(force_log: bool = False, trigger: str = "background_polling"):
     global _patients_cache
 
     logger.info("Polling sepsis_db for new vital signs...")
@@ -253,6 +263,12 @@ async def process_vitals():
 
     # Broadcast new alerts via WebSocket
     from .main import broadcast_message  # imported here to avoid circular imports
+    from .log_service import record_log
+
+    new_rows = []
+    source_table = "patient_visits"
+    if rows and '_source_table' in rows[0]:
+        source_table = rows[0]['_source_table']
 
     for row in rows:
         try:
@@ -265,6 +281,7 @@ async def process_vitals():
 
             if reading_key not in last_seen_vitals:
                 last_seen_vitals[reading_key] = True
+                new_rows.append(row)
 
                 news = calculate_news_from_row(row)
                 arrival_iso = row_to_arrival_iso(vstdate, vsttime)
@@ -295,6 +312,67 @@ async def process_vitals():
 
         except Exception as e:
             logger.error(f"Error processing row for HN {row.get('hn')}: {e}")
+
+    # Record log if new data detected or explicit force_log requested
+    if new_rows or force_log:
+        try:
+            target_rows = new_rows if new_rows else rows
+            patients_details = []
+            has_high_risk = False
+
+            for r in target_rows:
+                r_news = calculate_news_from_row(r)
+                total_score = getattr(r_news, "totalScore", 0) if hasattr(r_news, "totalScore") else (r_news.get("totalScore", 0) if isinstance(r_news, dict) else 0)
+                risk_lvl = getattr(r_news, "riskLevel", "low") if hasattr(r_news, "riskLevel") else (r_news.get("riskLevel", "low") if isinstance(r_news, dict) else "low")
+
+                if total_score >= 5 or risk_lvl == "high":
+                    has_high_risk = True
+
+                patients_details.append({
+                    "hn": str(r.get("hn") or ""),
+                    "vn": str(r.get("vn") or ""),
+                    "vstdate": format_date_str(r.get("vstdate")),
+                    "vsttime": format_time_str(r.get("vsttime")),
+                    "news_score": total_score,
+                    "risk_level": risk_lvl,
+                    "vitals": {
+                        "sbp": _sf(r.get("sbp") or r.get("bps")),
+                        "dbp": _sf(r.get("dbp") or r.get("bpd")),
+                        "heart_rate": _sf(r.get("heart_rate") or r.get("pulse")),
+                        "resp_rate": _sf(r.get("resp_rate") or r.get("rr")),
+                        "temperature": _sf(r.get("temperature")),
+                        "spo2": _sf(r.get("spo2") or r.get("o2sat")),
+                        "gcs": _si(r.get("gcs")),
+                    }
+                })
+
+            level = "Warning" if has_high_risk else "Note"
+            if new_rows:
+                msg = (
+                    f"ดึงข้อมูลจาก HOSxP สำเร็จ: พบข้อมูลใหม่ {len(new_rows)} รายการ "
+                    f"(รวมผู้ป่วยทั้งหมด {len(rows)} ราย จากตาราง {source_table})"
+                )
+            else:
+                msg = (
+                    f"ดึงข้อมูลจาก HOSxP (รีเฟรช): ตรวจสอบพบผู้ป่วย {len(rows)} ราย "
+                    f"จากตาราง {source_table}"
+                )
+
+            record_log(
+                level=level,
+                message=msg,
+                component="HOSxP_Sync",
+                details={
+                    "source_table": source_table,
+                    "total_records": len(rows),
+                    "new_records_count": len(new_rows),
+                    "fetch_trigger": trigger,
+                    "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "patients": patients_details,
+                }
+            )
+        except Exception as log_err:
+            logger.error(f"Failed to record data fetch log: {log_err}")
 
 
 # ---------------------------------------------------------------------------
