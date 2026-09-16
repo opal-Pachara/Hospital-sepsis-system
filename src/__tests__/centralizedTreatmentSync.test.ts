@@ -214,9 +214,9 @@ describe('Centralized Treatment & Alert Synchronization', () => {
     expect(data).toBeDefined();
     expect(data.checklist).toBeDefined();
 
-    // Phase 1 should be completed
+    // Phase 1 remains for nurse to assess, but unlocked
     const phase1 = data.checklist.find((p) => p.phase === 'initial_response');
-    expect(phase1?.isCompleted).toBe(true);
+    expect(phase1?.isUnlocked).toBe(true);
 
     // Phase 2 should be completed and unlocked
     const phase2 = data.checklist.find((p) => p.phase === 'doctor_confirmation');

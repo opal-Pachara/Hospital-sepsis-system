@@ -64,7 +64,7 @@ def calculate_news_from_row(row: Dict[str, Any]) -> NEWSResult:
     Works with both patient_visits and opdscreen column names.
     """
     gcs = _safe_int(row.get('gcs'))
-    spo2 = _safe_float(row.get('spo2'))
+    spo2 = _safe_float(row.get('spo2') or row.get('o2sat'))
     heart_rate = _safe_float(row.get('heart_rate') or row.get('pulse'))
     sbp = _safe_float(row.get('sbp') or row.get('bps'))
     resp_rate = _safe_float(row.get('resp_rate') or row.get('rr'))
@@ -128,7 +128,31 @@ def calculate_news_from_row(row: Dict[str, Any]) -> NEWSResult:
             score=avpu_score, isAbnormal=avpu_score >= 1, isCritical=avpu_score == 3
         ))
 
-    # Risk classification
+    # Check clinical completeness of vital signs
+    missing_params = []
+    if resp_rate is None: missing_params.append("อัตราการหายใจ (RR)")
+    if spo2 is None: missing_params.append("ความอิ่มตัวออกซิเจน (SpO2)")
+    if temperature is None: missing_params.append("อุณหภูมิร่างกาย (BT)")
+    if sbp is None: missing_params.append("ความดันโลหิต (SBP)")
+    if heart_rate is None: missing_params.append("ชีพจร (HR)")
+    if gcs is None: missing_params.append("ระดับความรู้สึกตัว (GCS)")
+
+    is_complete = (len(missing_params) == 0)
+
+    if not is_complete:
+        # User requirement: หากการดึงข้อมูลยังไม่ครบให้ทำการยังไม่คำนวณ
+        return NEWSResult(
+            totalScore=0,
+            breakdown=breakdown,
+            riskLevel="incomplete",
+            hasSingleParameterAlert=False,
+            missingDataCount=len(missing_params),
+            calculatedAt="",
+            isComplete=False,
+            missingParameters=missing_params
+        )
+
+    # Risk classification for complete vitals
     if total_score >= 7:
         risk_level = "high"
     elif total_score >= 5:
@@ -138,13 +162,17 @@ def calculate_news_from_row(row: Dict[str, Any]) -> NEWSResult:
     else:
         risk_level = "low"
 
+    calc_now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
     return NEWSResult(
         totalScore=total_score,
         breakdown=breakdown,
         riskLevel=risk_level,
         hasSingleParameterAlert=has_single_alert,
-        missingDataCount=missing_data_count,
-        calculatedAt=datetime.now().isoformat()
+        missingDataCount=0,
+        calculatedAt=calc_now_str,
+        isComplete=True,
+        missingParameters=[]
     )
 
 

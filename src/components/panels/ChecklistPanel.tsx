@@ -49,13 +49,13 @@ function DoctorConfirmButton({ item, phaseUnlocked }: { item: ChecklistItem; pha
 
   const isCompleted = item.status === 'completed';
   const currentData = selectedPatient ? patientData[selectedPatient.id] : null;
-  const isRuledOut = currentData?.sepsisRuledOut ?? false;
+  const isRuledOut = (currentData?.sepsisRuledOut ?? false) || (selectedPatient?.treatmentStatus?.sepsis_ruled_out ?? false);
   const isHistorical = isHistoricalPatient(selectedPatient, patientData);
   const isReadOnly = isHistorical || (currentData?.treatmentCompleted ?? false) || isRuledOut;
   const canComplete = phaseUnlocked && !isCompleted && !isReadOnly;
 
   // ─── Already ruled out ───────────────────────────────────────
-  if (isRuledOut && currentData) {
+  if (isRuledOut) {
     return (
       <div style={{
         margin: '8px 12px', padding: '12px', borderRadius: '10px',
@@ -71,7 +71,7 @@ function DoctorConfirmButton({ item, phaseUnlocked }: { item: ChecklistItem; pha
               แพทย์ Rule Out Sepsis — จบกระบวนการสำหรับผู้ป่วยรายนี้
             </div>
             <div style={{ fontSize: '9px', color: '#86efac', marginTop: '2px' }}>
-              โดย {currentData.ruledOutBy} · {currentData.ruledOutAt
+              โดย {currentData?.ruledOutBy || 'แพทย์เวร ER'} · {currentData?.ruledOutAt
                 ? new Date(currentData.ruledOutAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
                 : '--'} น.
             </div>
@@ -82,7 +82,7 @@ function DoctorConfirmButton({ item, phaseUnlocked }: { item: ChecklistItem; pha
   }
 
   // ─── Already confirmed ────────────────────────────────────────
-  if (isCompleted) {
+  if (isCompleted && !isRuledOut) {
     return (
       <div
         className="flex items-start gap-2"
@@ -100,8 +100,28 @@ function DoctorConfirmButton({ item, phaseUnlocked }: { item: ChecklistItem; pha
           <div style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', textDecoration: 'line-through' }}>
             {thaiLabels[item.id] || item.label}
           </div>
-          <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginTop: '2px' }}>
-            ✅ แพทย์ยืนยัน {item.completedBy} เมื่อ {new Date(item.completedAt!).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.
+          <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
+            <span>✅ แพทย์ยืนยัน {item.completedBy} เมื่อ {new Date(item.completedAt!).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.</span>
+            {!isReadOnly && !isRuledOut && (
+              <button
+                type="button"
+                id="btn-rule-out-from-confirmed"
+                onClick={() => {
+                  if (!checkClinicalAuthOrPrompt()) return;
+                  const curUser = useRTSASStore.getState().currentUser;
+                  const actorName = curUser?.name || 'แพทย์เวร';
+                  ruleOutSepsis(actorName);
+                  showToast('จบกระบวนการ — แพทย์ Rule Out Sepsis', 'success', 5000);
+                }}
+                style={{
+                  fontSize: '9px', fontWeight: 700, padding: '2px 8px', borderRadius: '5px',
+                  background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                🟢 ไม่ยืนยัน (Rule Out)
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -266,7 +286,10 @@ function DoctorConfirmButton({ item, phaseUnlocked }: { item: ChecklistItem; pha
             id="doctor-confirm-no-btn"
             onClick={() => {
               if (!checkClinicalAuthOrPrompt()) return;
-              setStep('confirmNo');
+              const curUser = useRTSASStore.getState().currentUser;
+              const actorName = curUser?.name || 'แพทย์เวร';
+              ruleOutSepsis(actorName);
+              showToast('จบกระบวนการ — แพทย์ Rule Out Sepsis', 'success', 5000);
             }}
             className="transition-all hover:-translate-y-0.5 active:translate-y-0"
             style={{

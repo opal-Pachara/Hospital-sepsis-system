@@ -74,6 +74,8 @@ class NEWSResult(BaseModel):
     hasSingleParameterAlert: bool
     missingDataCount: int
     calculatedAt: str
+    isComplete: bool = True
+    missingParameters: List[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

@@ -20,7 +20,9 @@ export interface BackendNEWSParameter {
 export interface BackendNEWSResult {
   totalScore: number;
   breakdown: BackendNEWSParameter[];
-  riskLevel: 'low' | 'low_medium' | 'medium' | 'high';
+  riskLevel: 'low' | 'low_medium' | 'medium' | 'high' | 'incomplete';
+  isComplete?: boolean;
+  missingParameters?: string[];
   hasSingleParameterAlert: boolean;
   missingDataCount: number;
   calculatedAt: string;
@@ -51,6 +53,7 @@ export interface BackendPatient {
 }
 
 export function riskToTriageLevel(risk: string): Patient['triageLevel'] {
+  if (risk === 'incomplete') return 'non_urgent';
   if (risk === 'high') return 'resuscitation';
   if (risk === 'medium') return 'emergency';
   if (risk === 'low_medium') return 'urgent';
@@ -71,9 +74,10 @@ export function mapBackendToPatient(bp: BackendPatient): Patient {
     avpu: gcsToAVPU(gcs),
   };
 
+  const isComplete = bp.news_result.isComplete !== false && bp.news_result.riskLevel !== 'incomplete';
   const newsResult: NEWSResult = {
     totalScore: bp.news_result.totalScore,
-    breakdown: bp.news_result.breakdown.map((b): NEWSParameterScore => ({
+    breakdown: (bp.news_result.breakdown || []).map((b): NEWSParameterScore => ({
       parameter: b.parameter as NEWSParameterScore['parameter'],
       label: b.label,
       displayValue: b.displayValue,
@@ -84,7 +88,9 @@ export function mapBackendToPatient(bp: BackendPatient): Patient {
     riskLevel: bp.news_result.riskLevel,
     hasSingleParameterAlert: bp.news_result.hasSingleParameterAlert,
     missingDataCount: bp.news_result.missingDataCount,
-    calculatedAt: bp.news_result.calculatedAt,
+    calculatedAt: isComplete ? bp.news_result.calculatedAt : '',
+    isComplete,
+    missingParameters: bp.news_result.missingParameters || [],
   };
 
   let arrivalTime = bp.arrival_time;

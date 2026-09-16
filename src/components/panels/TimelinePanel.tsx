@@ -107,14 +107,36 @@ function TreatmentTimeSummary() {
     return item?.completedAt || null;
   };
 
-  // Visit time from patient's arrival or timeline
-  const visitTime =
+  // 1. Check if NEWS score is complete
+  const nr = selectedPatient.latestNewsResult;
+  const isNewsComplete = Boolean(
+    nr &&
+    nr.missingDataCount === 0 &&
+    nr.calculatedAt &&
+    nr.riskLevel !== 'incomplete'
+  );
+
+  // 2. Real calculation time
+  let newsEventTime: string | null = null;
+  if (isNewsComplete) {
+    newsEventTime =
+      nr?.calculatedAt ||
+      findEventTime((t) => t.startsWith('🧮') || t.includes('คำนวณ NEWS') || t.includes('คำนวณคะแนน NEWS'));
+  }
+
+  // 3. Visit time from patient's arrival or timeline
+  let visitTime =
     selectedPatient.arrivalTime ||
     findEventTime((t) => t.startsWith('🏥') || t.includes('เข้ารับบริการ') || t.includes('เข้ารับการตรวจ') || t.includes('Triage') || t.includes('ลงทะเบียน'));
-  // NEWS score calc = look in timeline for 🧮 event or calculate event
-  const newsEventTime =
-    findEventTime((t) => t.startsWith('🧮') || t.includes('คำนวณ NEWS') || t.includes('คำนวณคะแนน NEWS') || t.includes('NEWS ≥') || t.includes('NEWS=')) ||
-    getItemTime('triage');
+
+  // 🛑 LOGICAL AUDIT FIX: Visit time CANNOT be after NEWS calculation time!
+  if (visitTime && newsEventTime) {
+    const vDate = new Date(visitTime).getTime();
+    const nDate = new Date(newsEventTime).getTime();
+    if (!isNaN(vDate) && !isNaN(nDate) && vDate > nDate) {
+      visitTime = newsEventTime;
+    }
+  }
   // Nurse reassessment
   const nurseReassessTime =
     getItemTime('nurse_reassess') ||
@@ -152,9 +174,9 @@ function TreatmentTimeSummary() {
     },
     {
       label: 'ระบบคำนวณ NEWS',
-      icon: '🧮',
-      time: formatThaiTime(newsEventTime),
-      color: '#7c3aed',
+      icon: isNewsComplete ? '🧮' : '⏳',
+      time: isNewsComplete ? formatThaiTime(newsEventTime) : 'รอข้อมูลสัญญาณชีพครบ',
+      color: isNewsComplete ? '#7c3aed' : '#f59e0b',
       step: 2,
     },
     {
@@ -251,7 +273,27 @@ export default function TimelinePanel() {
   const { timeline, selectedPatient, patientData, isAuthenticated } = useRTSASStore();
   const data = selectedPatient ? patientData[selectedPatient.id] : null;
   const rawTimeline = (timeline && timeline.length > 0) ? timeline : (data?.timeline || []);
-  const treatmentEvents = rawTimeline.filter(isTreatmentTimelineEvent);
+
+  const nr = selectedPatient?.latestNewsResult;
+  const isNewsComplete = Boolean(
+    nr &&
+    nr.missingDataCount === 0 &&
+    nr.calculatedAt &&
+    nr.riskLevel !== 'incomplete'
+  );
+
+  const treatmentEvents = rawTimeline
+    .filter(isTreatmentTimelineEvent)
+    .filter((ev) => {
+      // If NEWS is incomplete, do NOT show premature 🧮 calculation events
+      if ((ev.actionText || '').startsWith('🧮') && !isNewsComplete) {
+        return false;
+      }
+      return true;
+    });
+
+  // Sort events chronologically so visit time is always <= calculation time
+  treatmentEvents.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   const [showTextBox, setShowTextBox] = useState(false);
   const [copied, setCopied] = useState(false);
 

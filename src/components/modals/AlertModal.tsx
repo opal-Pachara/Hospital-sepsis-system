@@ -76,7 +76,8 @@ export default function AlertModal() {
     }
 
     // Check if countdown is already running for this patient
-    const patientId = alertedPatient?.id ?? selectedPatient?.id ?? '';
+    const targetPatientId = alertedPatient?.id ?? selectedPatient?.id ?? '';
+    const existingTimer = targetPatientId ? useRTSASStore.getState().patientData[targetPatientId]?.countdownTimer : undefined;
     const alreadyRunning = Boolean(
       existingTimer?.isActive ||
       alertedPatient?.treatmentStatus?.countdown_started_at ||
@@ -84,6 +85,10 @@ export default function AlertModal() {
     );
 
     if (!alreadyRunning) {
+      // Start 60-minute bundle countdown immediately
+      const nowIso = new Date().toISOString();
+      useRTSASStore.getState().startCountdown(nowIso, targetPatientId);
+
       // Auto-record visit time + NEWS calculation in timeline
       const patient = alertedPatient ?? selectedPatient;
       const newsScore = patient?.latestNewsScore ?? 0;
@@ -97,14 +102,14 @@ export default function AlertModal() {
         'blue',
         'ระบบ'
       );
-      useRTSASStore.getState().addTimelineEvent(
-        `🧮 ระบบคำนวณ NEWS Score = ${newsScore} (${riskLevel === 'high' ? 'เสี่ยงสูง' : riskLevel === 'medium' ? 'เสี่ยงปานกลาง' : 'เสี่ยงต่ำ'})`,
-        newsScore >= 5 ? 'red' : 'orange',
-        'ระบบ RTSAS'
-      );
-
-      // Auto-complete triage step; nurse must manually complete remaining steps
-      completeChecklistItem('triage', 'ระบบ/พยาบาล');
+      const isComplete = Boolean(patient?.latestNewsResult && patient.latestNewsResult.missingDataCount === 0);
+      if (isComplete) {
+        useRTSASStore.getState().addTimelineEvent(
+          `🧮 ระบบคำนวณ NEWS Score = ${newsScore} (${riskLevel === 'high' ? 'เสี่ยงสูง' : riskLevel === 'medium' ? 'เสี่ยงปานกลาง' : 'เสี่ยงต่ำ'})`,
+          newsScore >= 5 ? 'red' : 'orange',
+          'ระบบ RTSAS'
+        );
+      }
     }
 
     advanceQueue();

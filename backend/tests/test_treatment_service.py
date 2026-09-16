@@ -31,8 +31,8 @@ class TestTreatmentService(unittest.IsolatedAsyncioTestCase):
     async def test_acknowledge_and_get_status(self):
         ack_res = await acknowledge_alert("TEST_HN_SYNC", "Nurse_Test")
         self.assertTrue(ack_res["acknowledged"])
-        self.assertTrue(ack_res["doctor_confirmed"])
-        self.assertIsNotNone(ack_res["countdown_started_at"])
+        self.assertTrue(ack_res.get("doctor_confirmed", False))
+        self.assertIsNotNone(ack_res.get("countdown_started_at"))
 
         status = await get_treatment_status("TEST_HN_SYNC")
         self.assertIsNotNone(status)

@@ -1,7 +1,7 @@
 import { useRTSASStore } from '../../store/useRTSASStore';
 
 export default function MultiAlertModal() {
-  const { ui, closeModal, patients, completeChecklistItem, pendingAlerts, selectPatient } = useRTSASStore();
+  const { ui, closeModal, patients, pendingAlerts, selectPatient } = useRTSASStore();
 
   if (ui.modal.activeModal !== 'multi_alert') return null;
 
@@ -27,12 +27,16 @@ export default function MultiAlertModal() {
     // Switch context to target patient
     selectPatient(patient.id);
 
+    const existingTimer = patient?.id ? useRTSASStore.getState().patientData[patient.id]?.countdownTimer : undefined;
     const alreadyRunning = Boolean(
       existingTimer?.isActive ||
       patient?.treatmentStatus?.countdown_started_at
     );
 
     if (!alreadyRunning) {
+      const nowIso = new Date().toISOString();
+      useRTSASStore.getState().startCountdown(nowIso, patient.id);
+
       const newsScore = patient?.latestNewsScore ?? 0;
       const riskLevel = patient?.currentRiskLevel ?? 'low';
       const arrivalTime = patient?.arrivalTime
@@ -44,12 +48,14 @@ export default function MultiAlertModal() {
         'blue',
         'ระบบ'
       );
-      useRTSASStore.getState().addTimelineEvent(
-        `🧮 ระบบคำนวณ NEWS Score = ${newsScore} (${riskLevel === 'high' ? 'เสี่ยงสูง' : riskLevel === 'medium' ? 'เสี่ยงปานกลาง' : 'เสี่ยงต่ำ'})`,
-        newsScore >= 5 ? 'red' : 'orange',
-        'ระบบ RTSAS'
-      );
-      completeChecklistItem('triage', 'ระบบ/พยาบาล');
+      const isComplete = Boolean(patient?.latestNewsResult && patient.latestNewsResult.missingDataCount === 0);
+      if (isComplete) {
+        useRTSASStore.getState().addTimelineEvent(
+          `🧮 ระบบคำนวณ NEWS Score = ${newsScore} (${riskLevel === 'high' ? 'เสี่ยงสูง' : riskLevel === 'medium' ? 'เสี่ยงปานกลาง' : 'เสี่ยงต่ำ'})`,
+          newsScore >= 5 ? 'red' : 'orange',
+          'ระบบ RTSAS'
+        );
+      }
     }
 
     // Switch back

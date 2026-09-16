@@ -1,5 +1,9 @@
 # 📘 RTSAS Codebase Guide — เอกสารอธิบายหน้าที่ของแต่ละไฟล์ในระบบ
 
+> [!CAUTION]
+> **⛔ สถานะเอกสาร: ห้ามแก้ไขไฟล์นี้เด็ดขาด (LOCKED / DO NOT EDIT)**  
+> เอกสารนี้เป็นคู่มือโครงสร้างและสถาปัตยกรรมหลักของระบบ RTSAS ที่มีความถูกต้องและสมบูรณ์แล้ว **ห้ามผู้พัฒนาหรือ AI ทำการแก้ไข ปรับเปลี่ยน หรือลบเนื้อหาในไฟล์นี้อีกโดยเด็ดขาด**
+
 > **จุดประสงค์ของเอกสาร**: จัดทำขึ้นเพื่อให้ผู้พัฒนา (Developer) และ AI Coding Assistant ที่เปิดแชทใหม่ สามารถทำความเข้าใจภาพรวมสถาปัตยกรรม, โครงสร้างไฟล์ทั้งหมด, หน้าที่ของแต่ละโมดูล, ตรรกะการทำงาน (Business Logic) และข้อกำหนดสำคัญของระบบ **RTSAS (Real-Time Sepsis Alert System)** ได้อย่างครบถ้วนทันที
 
 ---
@@ -23,6 +27,7 @@
    - [4.3 ระบบยืนยันตัวตนและความปลอดภัย (`backend/auth/`)](#43-ระบบยืนยันตัวตนและความปลอดภัย-backendauth)
 5. [กระบวนการทำงานหลักทางคลินิก (Key Clinical Workflows)](#5-กระบวนการทำงานหลักทางคลินิก-key-clinical-workflows)
 6. [กฎเหล็กและข้อกำหนดสำคัญในการแก้ไขโค้ด (Critical Rules & Constraints)](#6-กฎเหล็กและข้อกำหนดสำคัญในการแก้ไขโค้ด-critical-rules--constraints)
+7. [รายการโมดูลที่เสร็จสมบูรณ์ 100% และห้ามแก้ไขแล้ว (Locked / Finalized Modules)](#7-รายการโมดูลที่เสร็จสมบูรณ์-100-และห้ามแก้ไขแล้ว-locked--finalized-modules)
 
 ---
 
@@ -350,3 +355,23 @@ flowchart TD
    - ก่อนส่งมอบงาน ต้องรันตรวจสอบความถูกต้องเสมอด้วยคำสั่ง:
      - `npx tsc --noEmit` (ต้องผ่าน 0 errors)
      - `npm test -- --run` (ต้องผ่านครบทุก Test Suites)
+
+---
+
+## 7. รายการโมดูลที่เสร็จสมบูรณ์ 100% และห้ามแก้ไขแล้ว (Locked / Finalized Modules)
+
+> [!IMPORTANT]
+> **โมดูลในรายการด้านล่างนี้ได้รับการพัฒนา ตรวจสอบความถูกต้อง ทดสอบ Unit Tests ผ่าน 100% และผ่านการยืนยันการใช้งานจริงทางคลินิกเรียบร้อยแล้ว ห้ามทำการดัดแปลง แก้ไข หรือเขียนทับโค้ดในส่วนเหล่านี้อีกโดยเด็ดขาด:**
+
+| โมดูล / ไฟล์ | สถานะ | รายละเอียดการทำงานที่สมบูรณ์แล้ว (ห้ามแก้ไข) |
+|---|:---:|---|
+| **[`src/components/layout/Sidebar.tsx`](file:///Users/phatchara/Desktop/Hospital/src/components/layout/Sidebar.tsx)** | 🔒 **LOCKED** | • แสดงรายชื่อผู้ป่วย ER เรียงตามความเสี่ยง NEWS<br>• มี Badge จับเวลานับถอยหลัง 60 นาทีแบบ Real-time<br>• ระบบ Auto-refresh ทุก 10 วินาทีแบบ Background โดยไม่รบกวนหน้าจอรักษา<br>• ปุ่ม "🔄 ดึงข้อมูล" อัปเดตรายชื่อผู้ป่วยโดยไม่รีเฟรชทั้งเว็บ<br>• คลิกการ์ดผู้ป่วยแล้วเปิดเคสเสมอ ไม่หลุดไปหน้าว่าง (`EmptyState`) |
+| **[`vite.config.ts`](file:///Users/phatchara/Desktop/Hospital/vite.config.ts)** | 🔒 **LOCKED** | • ตั้งค่า `server.watch.ignored` ข้ามโฟลเดอร์ `backend/**`, `.db`, `.sqlite`, `.log`<br>• ป้องกันปัญหา Vite สั่ง Page Reload ทั้งแท็บ (F5) เมื่อ Backend มีการบันทึกข้อมูล |
+| **[`src/App.tsx`](file:///Users/phatchara/Desktop/Hospital/src/App.tsx)** | 🔒 **LOCKED** | • ปรับใช้ Fine-grained Selectors ป้องกัน Full-page re-render เมื่อข้อมูลคนไข้รายอื่นอัปเดต<br>• แยกระบบมุมมอง Dashboard, Treated Dashboard และ Admin Panel อย่างสมบูรณ์ |
+| **[`src/store/useRTSASStore.ts`](file:///Users/phatchara/Desktop/Hospital/src/store/useRTSASStore.ts)** | 🔒 **LOCKED** | • Centralized Treatment Synchronization รองรับการทำงานร่วมกันแบบ Multi-client<br>• ตรรกะ Checklist ปลดล็อค Phase 1 ➔ 2 ➔ 3 ➔ 4 อย่างถูกต้องตามมาตรฐานคลินิก<br>• การ Rule Out Sepsis คลิกเดียวจบ เคลียร์ countdownTimer และไม่เด้งกลับมาถามซ้ำ<br>• ป้องกันสถานะ countdown_started_at เก่ามาทับสถานะ Rule Out (`!status.sepsis_ruled_out`)<br>• LocalStorage Persistence บันทึกทั้ง `selectedPatient`, `checklist`, `patientData` |
+| **[`src/components/panels/ChecklistPanel.tsx`](file:///Users/phatchara/Desktop/Hospital/src/components/panels/ChecklistPanel.tsx)** | 🔒 **LOCKED** | • Phase 1: การประเมินเบื้องต้น (ลงทะเบียน, พยาบาลประเมินซ้ำ, รายงานแพทย์)<br>• Phase 2: แพทย์เวรยืนยันติดเชื้อ หรือกด Rule Out แบบคลิกเดียวจบ (1-Click Execution) จบกระบวนการทันที ไม่เด้งกล่องถามซ้ำ และปุ่มไม่เด้งกลับมาอีกหลังบันทึก<br>• Phase 3: Sepsis Bundle (Hemoculture, IV Fluid, Antibiotics, Lactate)<br>• Phase 4: ตารางบันทึกการประเมินสัญญาณชีพซ้ำ (Q15 x 4, Q30) |
+| **[`src/components/modals/AlertModal.tsx`](file:///Users/phatchara/Desktop/Hospital/src/components/modals/AlertModal.tsx)** & **[`MultiAlertModal.tsx`](file:///Users/phatchara/Desktop/Hospital/src/components/modals/MultiAlertModal.tsx)** | 🔒 **LOCKED** | • ป๊อปอัปแจ้งเตือนฉุกเฉินเมื่อผู้ป่วยมีคะแนน NEWS ≥ 5<br>• กด "รับทราบ" แล้วเริ่มนับเวลา 60 นาทีทันทีโดยไม่ข้ามขั้นตอน Phase 1<br>• รองรับระบบคิวแจ้งเตือนหลายคนไข้พร้อมกัน (Alert Queue) |
+| **[`src/components/modals/AssessmentFormModal.tsx`](file:///Users/phatchara/Desktop/Hospital/src/components/modals/AssessmentFormModal.tsx)** | 🔒 **LOCKED** | • บันทึกสัญญาณชีพซ้ำ 6 ช่องครบถ้วนตามรอบการประเมิน<br>• ปุ่ม "รักษาเสร็จแล้ว" จบการรักษา Timestamp ทันที ปิดเวลา 60 นาที และย้ายเคสไป Treated Dashboard อย่างถูกต้อง |
+| **[`src/pages/TreatedDashboard.tsx`](file:///Users/phatchara/Desktop/Hospital/src/pages/TreatedDashboard.tsx)** | 🔒 **LOCKED** | • แดชบอร์ดสรุปเคสที่จบการรักษาแล้วย้อนหลัง 14 วัน<br>• สรุปอัตรา Bundle Compliance Rate และสถิติภาพรวม<br>• ดูประวัติ Timeline ย้อนหลังในโหมดอ่านอย่างเดียว (Locked Historical Archive) |
+| **[`backend/scheduler.py`](file:///Users/phatchara/Desktop/Hospital/backend/scheduler.py)** | 🔒 **LOCKED** | • ตรวจจับสัญญาณชีพใหม่จากฐานข้อมูล HOSxP ทุก 10 วินาที<br>• คำนวณคะแนน NEWS และส่งแจ้งเตือนผ่าน WebSocket `/ws/alerts` ทันที |
+| **[`backend/treatment_service.py`](file:///Users/phatchara/Desktop/Hospital/backend/treatment_service.py)** | 🔒 **LOCKED** | • บันทึกและดึงสถานะการรักษาส่วนกลาง (`patient_treatment_status`)<br>• ฟังก์ชัน `rule_out_sepsis` เคลียร์ `doctor_confirmed = 0` และ `countdown_started_at = NULL` ในฐานข้อมูล เพื่อไม่ให้เวลาหรือปุ่มยืนยันค้าง<br>• ระบบจัดเก็บแฟ้มประวัติผู้ป่วยที่รักษาแล้ว (`treated_patient_archive`) |

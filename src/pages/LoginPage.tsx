@@ -7,9 +7,9 @@ import { extractErrorMessage } from '../utils/errorUtils';
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const roleOptions: { value: UserRole; label: string; icon: string; desc: string }[] = [
-  { value: 'doctor',   label: 'แพทย์',          icon: '🩺', desc: 'ยืนยันการวินิจฉัย' },
-  { value: 'nurse',    label: 'พยาบาล',          icon: '💉', desc: 'Sepsis Bundle & Vitals' },
-  { value: 'it_admin', label: 'เจ้าหน้าที่ IT',  icon: '💻', desc: 'จัดการระบบและ Users' },
+  { value: 'doctor', label: 'แพทย์', icon: '🩺', desc: 'ยืนยันการวินิจฉัย' },
+  { value: 'nurse', label: 'พยาบาล', icon: '💉', desc: 'Sepsis Bundle & Vitals' },
+  { value: 'it_admin', label: 'เจ้าหน้าที่ IT', icon: '💻', desc: 'จัดการระบบและ Users' },
 ];
 
 type PageMode = 'login' | 'register';
@@ -129,12 +129,12 @@ export default function LoginPage() {
       {[...Array(6)].map((_, i) => (
         <div key={i} style={{
           position: 'absolute',
-          width: `${[8,12,6,10,8,14][i]}px`,
-          height: `${[8,12,6,10,8,14][i]}px`,
+          width: `${[8, 12, 6, 10, 8, 14][i]}px`,
+          height: `${[8, 12, 6, 10, 8, 14][i]}px`,
           borderRadius: '50%',
-          background: `rgba(${['37,99,235','8,145,178','16,185,129','37,99,235','8,145,178','16,185,129'][i]}, 0.15)`,
-          top: `${[15,65,35,80,20,55][i]}%`,
-          left: `${[10,85,25,70,55,40][i]}%`,
+          background: `rgba(${['37,99,235', '8,145,178', '16,185,129', '37,99,235', '8,145,178', '16,185,129'][i]}, 0.15)`,
+          top: `${[15, 65, 35, 80, 20, 55][i]}%`,
+          left: `${[10, 85, 25, 70, 55, 40][i]}%`,
           animation: 'none',
         }} />
       ))}

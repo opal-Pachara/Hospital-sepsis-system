@@ -104,7 +104,7 @@ def _row_to_status_dict(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 async def get_all_treatment_statuses() -> Dict[str, Dict[str, Any]]:
-    """Return all treatment statuses indexed by HN."""
+    """Return all treatment statuses indexed by HN, including archived/ruled-out patients."""
     try:
         async with dashboard_pool.get_connection() as conn:
             async with conn.cursor(DictCursor) as cur:
@@ -114,13 +114,40 @@ async def get_all_treatment_statuses() -> Dict[str, Dict[str, Any]]:
                 for row in rows:
                     st = _row_to_status_dict(row)
                     result[st["hn"]] = st
+
+                # Also include archived patients from treated_patient_archive (ruled out or completed)
+                try:
+                    await cur.execute("SELECT * FROM treated_patient_archive;")
+                    archive_rows = await cur.fetchall()
+                    for a_row in archive_rows:
+                        a_hn = str(a_row.get("hn", "")).strip()
+                        if a_hn and a_hn not in result:
+                            result[a_hn] = {
+                                "hn": a_hn,
+                                "vn": a_row.get("vn"),
+                                "acknowledged": bool(a_row.get("acknowledged_at")),
+                                "acknowledged_at": a_row.get("acknowledged_at").isoformat() if a_row.get("acknowledged_at") else None,
+                                "acknowledged_by": a_row.get("acknowledged_by"),
+                                "doctor_confirmed": bool(a_row.get("doctor_confirmed")),
+                                "countdown_started_at": a_row.get("countdown_started_at").isoformat() if a_row.get("countdown_started_at") else None,
+                                "countdown_duration": a_row.get("countdown_duration", 3600),
+                                "treatment_completed": bool(a_row.get("treatment_completed")),
+                                "treatment_completed_at": a_row.get("treatment_completed_at").isoformat() if a_row.get("treatment_completed_at") else None,
+                                "treatment_completed_by": a_row.get("treatment_completed_by"),
+                                "sepsis_ruled_out": bool(a_row.get("sepsis_ruled_out")),
+                                "checklist_json": a_row.get("checklist_json"),
+                                "is_archived": True,
+                            }
+                except Exception as arch_err:
+                    logger.warning(f"Error querying treated_patient_archive in get_all_treatment_statuses: {arch_err}")
+
                 return result
     except Exception as e:
         logger.error(f"Error fetching treatment statuses: {e}")
         return {}
 
 async def get_treatment_status(hn: str) -> Optional[Dict[str, Any]]:
-    """Return treatment status for a specific HN."""
+    """Return treatment status for a specific HN, checking active and archived."""
     try:
         async with dashboard_pool.get_connection() as conn:
             async with conn.cursor(DictCursor) as cur:
@@ -128,6 +155,29 @@ async def get_treatment_status(hn: str) -> Optional[Dict[str, Any]]:
                 row = await cur.fetchone()
                 if row:
                     return _row_to_status_dict(row)
+                # Fallback to treated_patient_archive if archived
+                try:
+                    await cur.execute("SELECT * FROM treated_patient_archive WHERE hn = %s ORDER BY id DESC LIMIT 1;", (hn,))
+                    a_row = await cur.fetchone()
+                    if a_row:
+                        return {
+                            "hn": hn,
+                            "vn": a_row.get("vn"),
+                            "acknowledged": bool(a_row.get("acknowledged_at")),
+                            "acknowledged_at": a_row.get("acknowledged_at").isoformat() if a_row.get("acknowledged_at") else None,
+                            "acknowledged_by": a_row.get("acknowledged_by"),
+                            "doctor_confirmed": bool(a_row.get("doctor_confirmed")),
+                            "countdown_started_at": a_row.get("countdown_started_at").isoformat() if a_row.get("countdown_started_at") else None,
+                            "countdown_duration": a_row.get("countdown_duration", 3600),
+                            "treatment_completed": bool(a_row.get("treatment_completed")),
+                            "treatment_completed_at": a_row.get("treatment_completed_at").isoformat() if a_row.get("treatment_completed_at") else None,
+                            "treatment_completed_by": a_row.get("treatment_completed_by"),
+                            "sepsis_ruled_out": bool(a_row.get("sepsis_ruled_out")),
+                            "checklist_json": a_row.get("checklist_json"),
+                            "is_archived": True,
+                        }
+                except Exception:
+                    pass
                 return None
     except Exception as e:
         logger.error(f"Error fetching treatment status for HN {hn}: {e}")
@@ -272,10 +322,12 @@ async def complete_treatment(hn: str, completed_by: str = "Nurse/System", timeli
 async def rule_out_sepsis(hn: str) -> Dict[str, Any]:
     """Mark sepsis as ruled out for a patient, then archive to separate table."""
     query = """
-    INSERT INTO patient_treatment_status (hn, sepsis_ruled_out)
-    VALUES (%s, 1)
+    INSERT INTO patient_treatment_status (hn, sepsis_ruled_out, doctor_confirmed, countdown_started_at)
+    VALUES (%s, 1, 0, NULL)
     ON DUPLICATE KEY UPDATE
         sepsis_ruled_out = 1,
+        doctor_confirmed = 0,
+        countdown_started_at = NULL,
         updated_at = NOW();
     """
     try:

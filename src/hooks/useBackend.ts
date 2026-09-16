@@ -12,7 +12,6 @@ import type { Patient, VitalSigns, NEWSResult, NEWSParameterScore } from '../typ
 import { gcsToAVPU } from '../types';
 import { maskHN } from '../utils/hnMask';
 import { MOCK_PATIENTS } from '../data/mockData';
-import { logEvent } from '../utils/timestampLogger';
 
 // ---------------------------------------------------------------------------
 // Types matching the backend JSON response (PatientListItem schema)
@@ -160,8 +159,6 @@ function riskToTriageLevel(risk: string): Patient['triageLevel'] {
 export function usePatientData() {
   const { setPatients, selectPatient, setConnectionStatus, setLoading, queueAlert } = useRTSASStore();
   const alertedKeysRef = useRef<Set<string>>(new Set());
-  const isInitialLoadRef = useRef<boolean>(true);
-  const prevPatientCountRef = useRef<number>(-1);
 
   const fetchPatients = useCallback(async (forceRefresh = false) => {
     try {
@@ -173,7 +170,13 @@ export function usePatientData() {
       const patients = data.patients.map(mapBackendToPatient);
 
       setConnectionStatus('connected');
+      const curSelectedId = useRTSASStore.getState().selectedPatient?.id;
       setPatients(patients);
+
+      // Preserve active selected patient if one was currently being treated
+      if (curSelectedId && !useRTSASStore.getState().selectedPatient) {
+        useRTSASStore.getState().selectPatient(curSelectedId);
+      }
 
       // Synchronize centralized treatment status from backend into store
       patients.forEach((p) => {
@@ -182,31 +185,6 @@ export function usePatientData() {
         }
       });
 
-      // 📝 Log frontend data fetch when initial load, force refresh, or new/changed count
-      const isInitial = isInitialLoadRef.current;
-      const countChanged = prevPatientCountRef.current !== -1 && prevPatientCountRef.current !== patients.length;
-
-      if (forceRefresh || isInitial || countChanged) {
-        const trigger = forceRefresh
-          ? 'manual_refresh'
-          : isInitial
-          ? 'initial_load'
-          : 'patient_count_changed';
-
-        logEvent(
-          'Note',
-          'Web_Client',
-          `หน้าเว็บดึงข้อมูลผู้ป่วยสำเร็จ (${patients.length} ราย${forceRefresh ? ' - รีเฟรช' : ''})`,
-          {
-            fetch_trigger: trigger,
-            total_patients: patients.length,
-            high_risk_count: patients.filter((p) => p.hasSepsisAlert).length,
-            patient_hns: patients.slice(0, 20).map((p) => p.hn),
-          }
-        );
-        isInitialLoadRef.current = false;
-      }
-      prevPatientCountRef.current = patients.length;
 
       // 🚨 Detect high-risk sepsis patients (NEWS >= 5 or single parameter alert)
       // that have not been alerted yet in this session and haven't finished treatment
@@ -214,9 +192,9 @@ export function usePatientData() {
       const highRisk = patients.filter((p) => {
         if (!p.hasSepsisAlert) return false;
 
-        const pData = patientDataStore[p.id];
+        const pData = patientDataStore[p.id] || (p.hn ? patientDataStore[p.hn] : undefined);
         // If treatment is already completed or ruled out, do not alert
-        if (pData?.treatmentCompleted || pData?.sepsisRuledOut) return false;
+        if (pData?.treatmentCompleted || pData?.sepsisRuledOut || p.treatmentStatus?.treatment_completed || p.treatmentStatus?.sepsis_ruled_out) return false;
 
         // Signature to avoid re-alerting the exact same reading
         const alertKey = `${p.hn}_${p.arrivalTime || ''}_${p.latestNewsScore}`;
@@ -239,10 +217,6 @@ export function usePatientData() {
       console.warn('[usePatientData] Backend unavailable — fallback to offline demo patient data:', err);
       setConnectionStatus('disconnected');
 
-      logEvent('ERROR', 'Web_Client', 'หน้าเว็บดึงข้อมูลผู้ป่วยไม่สำเร็จ (Backend Unavailable)', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-
       const currentPatients = useRTSASStore.getState().patients;
       if (!currentPatients || currentPatients.length === 0) {
         setPatients(MOCK_PATIENTS);
@@ -255,10 +229,10 @@ export function usePatientData() {
   useEffect(() => {
     fetchPatients();
 
-    // Refresh patient list every 60s (WebSocket handles real-time; HTTP is fallback sync)
+    // Refresh patient list every 10s (matches backend scheduler polling)
     const interval = setInterval(() => {
       fetchPatients(false);
-    }, 60_000);
+    }, 10_000);
     return () => clearInterval(interval);
   }, [fetchPatients]);
 
@@ -424,3 +398,5 @@ export function useWebSocketAlerts() {
     };
   }, [connect]);
 }
+
+

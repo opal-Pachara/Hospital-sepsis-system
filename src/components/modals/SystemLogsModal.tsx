@@ -41,7 +41,7 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
   const fetchLogsData = async () => {
     try {
       setIsLoading(true);
-      const url = new URL('/api/logs', window.location.origin);
+      const url = new URL('/api/system/logs', window.location.origin);
       url.searchParams.set('limit', '100');
       if (filterLevel !== 'ALL') {
         url.searchParams.set('level', filterLevel);
@@ -86,8 +86,9 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
     }
     return () => {
       if (autoRefreshInterval.current) clearInterval(autoRefreshInterval.current);
+      autoRefreshInterval.current = null;
     };
-  }, [isOpen, autoRefresh, filterLevel, searchQuery]);
+  }, [isOpen, autoRefresh]);
 
   if (!isOpen) return null;
 
@@ -577,44 +578,21 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
 
                   {/* Optional JSON details */}
                   {log.details && Object.keys(log.details).length > 0 && (
-                    <details
+                    <div
                       style={{
                         marginTop: '4px',
                         marginLeft: '24px',
-                        background: '#090d16',
-                        borderRadius: '6px',
-                        border: '1px solid #1e293b',
                         padding: '4px 8px',
+                        background: '#090d16',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        color: '#94a3b8',
+                        border: '1px solid #1e293b',
+                        whiteSpace: 'pre-wrap',
                       }}
                     >
-                      <summary
-                        style={{
-                          fontSize: '11px',
-                          color: '#38bdf8',
-                          cursor: 'pointer',
-                          userSelect: 'none',
-                          outline: 'none',
-                        }}
-                      >
-                        🔍 รายละเอียดข้อมูล ({log.details.patients ? `${log.details.patients.length} เคส` : `${Object.keys(log.details).length} ฟิลด์`})
-                      </summary>
-                      <div
-                        style={{
-                          marginTop: '6px',
-                          padding: '6px 8px',
-                          background: '#040711',
-                          borderRadius: '4px',
-                          fontSize: '11px',
-                          color: '#94a3b8',
-                          border: '1px solid #1e293b',
-                          whiteSpace: 'pre-wrap',
-                          maxHeight: '220px',
-                          overflowY: 'auto',
-                        }}
-                      >
-                        {JSON.stringify(log.details, null, 2)}
-                      </div>
-                    </details>
+                      {JSON.stringify(log.details, null, 2)}
+                    </div>
                   )}
                 </div>
               );

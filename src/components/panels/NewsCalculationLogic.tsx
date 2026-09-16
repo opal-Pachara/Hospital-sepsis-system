@@ -15,6 +15,7 @@ const riskLabels: Record<RiskLevel, { label: string; color: string }> = {
   low_medium: { label: 'ปกติ', color: '#16a34a' },
   medium: { label: 'เฝ้าระวัง', color: '#ea580c' },
   high: { label: '⚠ เสี่ยงติดเชื้อ', color: '#ef4444' },
+  incomplete: { label: 'รอประเมิน (ข้อมูลไม่ครบ)', color: '#64748b' },
 };
 
 const ptsClasses: Record<number, string> = {
@@ -25,7 +26,41 @@ const ptsClasses: Record<number, string> = {
 };
 
 export default function NewsCalculationLogic({ newsResult }: { newsResult: NEWSResult }) {
-  const risk = riskLabels[newsResult.riskLevel];
+  if (newsResult.riskLevel === 'incomplete' || newsResult.isComplete === false) {
+    return (
+      <div className="section-card">
+        <div className="section-card-header">
+          <div className="section-card-title"><span>🔍</span> การคำนวณ NEWS Score</div>
+          <div style={{ fontSize: '9px', color: '#64748b', background: '#f1f5f9', padding: '3px 8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+            ⏳ รอข้อมูลครบถ้วน
+          </div>
+        </div>
+        <div className="section-card-body">
+          <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '10px', padding: '16px', textAlign: 'center' }}>
+            <div style={{ fontSize: '28px', marginBottom: '8px' }}>⏳</div>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+              ข้อมูลสัญญาณชีพยังไม่ครบถ้วน
+            </div>
+            <div style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.6, maxWidth: '320px', margin: '0 auto' }}>
+              ระบบ RTSAS ระงับการคำนวณคะแนน NEWS ชั่วคราว เพื่อความถูกต้องตามมาตรฐานความปลอดภัย
+              {newsResult.missingParameters && newsResult.missingParameters.length > 0 && (
+                <div style={{ marginTop: '10px', textAlign: 'left', background: '#fff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', marginBottom: '4px' }}>รายการที่ยังไม่ได้บันทึก:</div>
+                  <ul style={{ listStyleType: 'disc', paddingLeft: '16px', margin: 0 }}>
+                    {newsResult.missingParameters.map((p, idx) => (
+                      <li key={idx} style={{ fontSize: '10px', color: '#b91c1c' }}>{p}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const risk = riskLabels[newsResult.riskLevel] ?? { label: 'ปกติ', color: '#16a34a' };
 
   // Filter out oxygenSupplementation for display (mockup doesn't show it)
   const displayParams = newsResult.breakdown.filter(

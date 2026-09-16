@@ -3,6 +3,7 @@ import { useRTSASStore } from '../../store/useRTSASStore';
 import AuthModal from '../modals/AuthModal';
 import ExportReportModal from '../modals/ExportReportModal';
 import SystemLogsModal from '../modals/SystemLogsModal';
+import { showToast } from '../common/Toast';
 
 export default function Header({ onNavigateAdmin }: { onNavigateAdmin?: () => void }) {
   const { ui, updateCurrentTime, isAuthenticated, currentUser, logoutUser } = useRTSASStore();
@@ -89,25 +90,7 @@ export default function Header({ onNavigateAdmin }: { onNavigateAdmin?: () => vo
                 </button>
               )}
 
-              {/* Export Report button — for authenticated users */}
-              {/* <button
-                type="button"
-                id="btn-export-report"
-                onClick={() => setShowExportModal(true)}
-                title="ออกรายงาน Shift"
-                style={{
-                  padding: '5px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
-                  cursor: 'pointer', fontFamily: 'inherit',
-                  border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#15803d',
-                  display: 'flex', alignItems: 'center', gap: '5px',
-                  boxShadow: '0 1px 3px rgba(22,163,74,0.08)', transition: 'all 0.15s',
-                }}
-                onMouseOver={(e) => { e.currentTarget.style.background = '#16a34a'; e.currentTarget.style.color = '#fff'; }}
-                onMouseOut={(e) => { e.currentTarget.style.background = '#f0fdf4'; e.currentTarget.style.color = '#15803d'; }}
-              >
-                <span>📊</span>
-                <span>รายงาน Shift</span>
-              </button> */}
+            
 
               <div style={{
                 padding: '5px 12px', borderRadius: '10px', fontSize: '11px',

@@ -25,13 +25,18 @@ const riskConfig: Record<RiskLevel, { label: string; labelTh: string; badgeBg: s
     badgeBg: '#f0fdf4', badgeText: '#16a34a', badgeBorder: '#86efac', barColor: '#22c55e',
     chipBg: '#f0fdf4', chipText: '#16a34a', chipBorder: '#86efac',
   },
+  incomplete: {
+    label: 'INCOMPLETE', labelTh: 'รอข้อมูล',
+    badgeBg: '#f1f5f9', badgeText: '#64748b', badgeBorder: '#cbd5e1', barColor: '#94a3b8',
+    chipBg: '#f1f5f9', chipText: '#64748b', chipBorder: '#cbd5e1',
+  },
 };
 
 function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: boolean }) {
   const selectPatient = useRTSASStore((s) => s.selectPatient);
   const patientData = useRTSASStore((s) => s.patientData);
   const currentTime = useRTSASStore((s) => s.ui.currentTime);
-  const risk = riskConfig[patient.currentRiskLevel];
+  const risk = riskConfig[patient.currentRiskLevel] ?? riskConfig.incomplete ?? riskConfig.low;
 
   // Live countdown badge for this specific patient
   const [countdownLabel, setCountdownLabel] = useState<string | null>(null);
@@ -48,13 +53,15 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
         data?.sepsisRuledOut ||
         patient.treatmentStatus?.sepsis_ruled_out
       );
-      const isTimerActive = Boolean(timer?.isActive);
+      const startedAt = timer?.startedAt || patient.treatmentStatus?.countdown_started_at;
+      const totalDuration = timer?.totalDurationSeconds || patient.treatmentStatus?.countdown_duration || 3600;
+      const isTimerActive = Boolean(timer?.isActive || patient.treatmentStatus?.countdown_started_at);
 
-      if (timer?.startedAt && isTimerActive && !isCompleted && !isRuledOut) {
-        const elapsed = Math.floor((Date.now() - new Date(timer.startedAt).getTime()) / 1000);
-        const remaining = Math.max(0, timer.totalDurationSeconds - elapsed);
-        if (remaining === 0 || timer.isExpired) {
-          const overdueSecs = Math.max(0, elapsed - timer.totalDurationSeconds);
+      if (startedAt && isTimerActive && !isCompleted && !isRuledOut) {
+        const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+        const remaining = Math.max(0, totalDuration - elapsed);
+        if (remaining === 0 || (timer?.isExpired ?? elapsed >= totalDuration)) {
+          const overdueSecs = Math.max(0, elapsed - totalDuration);
           const overdueMins = Math.floor(overdueSecs / 60);
           setCountdownLabel(overdueMins > 0 ? `🚨 เกิน ${overdueMins} น.` : '🔴 ครบ 60 น.');
         } else {
@@ -92,12 +99,14 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
   });
 
   const isHighRisk = patient.currentRiskLevel === 'high';
-  const isMissingData = !!(patient.latestNewsResult?.missingDataCount && patient.latestNewsResult.missingDataCount > 0);
+  const isMissingData = patient.currentRiskLevel === 'incomplete' ||
+    patient.latestNewsResult?.isComplete === false ||
+    !!(patient.latestNewsResult?.missingDataCount && patient.latestNewsResult.missingDataCount > 0);
 
   return (
     <button
       id={`patient-card-${patient.id}`}
-      onClick={() => isSelected ? selectPatient('') : selectPatient(patient.id)}
+      onClick={() => selectPatient(patient.id)}
       className="w-full text-left border-b border-[#dde3ed] relative bg-white transition-all hover:bg-slate-50"
       style={{
         padding: '10px 14px',
@@ -220,12 +229,8 @@ function CompletedPatientCard({ patient, isSelected }: { patient: Patient; isSel
     <button
       id={`completed-card-${patient.id}`}
       onClick={() => {
-        if (isSelected) {
-          selectPatient('');
-        } else {
-          selectPatient(patient.id);
-          useRTSASStore.getState().setActiveTab('timeline');
-        }
+        selectPatient(patient.id);
+        useRTSASStore.getState().setActiveTab('timeline');
       }}
       className="w-full text-left border-b border-[#e2e8f0] relative transition-all hover:bg-slate-50"
       style={{
@@ -290,15 +295,15 @@ export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavig
   };
 
   // Sort patients by risk: high → medium → low_medium → low
-  const riskOrder: Record<RiskLevel, number> = { high: 0, medium: 1, low_medium: 2, low: 3 };
+  const riskOrder: Record<RiskLevel, number> = { high: 0, medium: 1, low_medium: 2, low: 3, incomplete: 4 };
 
   const activePatients = [...patients]
     .filter((p) => !isPatientCompleted(p))
-    .sort((a, b) => riskOrder[a.currentRiskLevel] - riskOrder[b.currentRiskLevel]);
+    .sort((a, b) => (riskOrder[a.currentRiskLevel] ?? 4) - (riskOrder[b.currentRiskLevel] ?? 4));
 
   const completedPatients = [...patients]
     .filter((p) => isPatientCompleted(p))
-    .sort((a, b) => riskOrder[a.currentRiskLevel] - riskOrder[b.currentRiskLevel]);
+    .sort((a, b) => (riskOrder[a.currentRiskLevel] ?? 4) - (riskOrder[b.currentRiskLevel] ?? 4));
 
   const alertCount = activePatients.filter((p) => p.hasSepsisAlert).length;
 
@@ -316,7 +321,7 @@ export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavig
     update();
     const interval = setInterval(update, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [patients]);
 
   return (
     <aside
@@ -365,8 +370,15 @@ export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavig
               disabled={isRefreshing}
               onClick={async () => {
                 setIsRefreshing(true);
+                const currentSelectedId = useRTSASStore.getState().selectedPatient?.id;
                 try {
                   await onRefresh();
+                  if (currentSelectedId) {
+                    const currentSelected = useRTSASStore.getState().selectedPatient;
+                    if (!currentSelected) {
+                      useRTSASStore.getState().selectPatient(currentSelectedId);
+                    }
+                  }
                   showToast('ดึงข้อมูลล่าสุดเรียบร้อย', 'success');
                 } catch {
                   showToast('ไม่สามารถดึงข้อมูลได้', 'error');

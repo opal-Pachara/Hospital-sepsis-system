@@ -115,7 +115,7 @@ class TestServicesNEWS(unittest.TestCase):
         res = calculate_news_from_row(row)
         self.assertEqual(res.missingDataCount, 3)
         self.assertEqual(res.totalScore, 0)
-        self.assertEqual(res.riskLevel, 'low')
+        self.assertEqual(res.riskLevel, 'incomplete')
 
 
 class TestServicesTimeParsing(unittest.TestCase):

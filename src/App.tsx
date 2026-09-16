@@ -265,11 +265,12 @@ export default function App() {
   // 2. WebSocket connection for real-time alerts from /ws/alerts
   useWebSocketAlerts();
 
-  const { ui, selectedPatient, patientData } = useRTSASStore();
-  const isHistorical = isHistoricalPatient(selectedPatient, patientData);
-  const currentData = selectedPatient ? patientData[selectedPatient.id] : null;
+  const selectedPatient = useRTSASStore((s) => s.selectedPatient);
+  const isHistorical = useRTSASStore((s) => isHistoricalPatient(s.selectedPatient, s.patientData));
+  const currentData = useRTSASStore((s) => (s.selectedPatient ? s.patientData[s.selectedPatient.id] : null));
+  const isLoading = useRTSASStore((s) => s.ui.isLoading);
 
-  if (ui.isLoading) {
+  if (isLoading) {
     return (
       <>
         <ErrorBanner fetchPatients={fetchPatients} />

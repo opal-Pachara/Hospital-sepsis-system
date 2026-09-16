@@ -55,7 +55,7 @@ class TestApiEndpoints(unittest.TestCase):
         ack_data = ack_res.json()["data"]
         self.assertEqual(ack_data["hn"], test_hn)
         self.assertTrue(ack_data["acknowledged"])
-        self.assertTrue(ack_data["doctor_confirmed"])
+        self.assertTrue(ack_data.get("doctor_confirmed", False))
 
         # 2. Get status for HN
         get_res = self.client.get(f"/api/treatment-status/{test_hn}")

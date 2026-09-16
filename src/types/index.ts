@@ -26,7 +26,7 @@ export function gcsToAVPU(gcs: number): AVPULevel {
 export type OxygenStatus = 'room_air' | 'supplemental';
 
 /** Risk severity derived from aggregate NEWS score */
-export type RiskLevel = 'low' | 'low_medium' | 'medium' | 'high';
+export type RiskLevel = 'low' | 'low_medium' | 'medium' | 'high' | 'incomplete';
 
 /** Triage color coding (Thai ER standard) */
 export type TriageLevel = 'resuscitation' | 'emergency' | 'urgent' | 'semi_urgent' | 'non_urgent';
@@ -136,6 +136,12 @@ export interface NEWSResult {
 
   /** Timestamp of calculation */
   calculatedAt: string;
+
+  /** Whether all mandatory vital signs are provided */
+  isComplete?: boolean;
+
+  /** List of missing parameter names if incomplete */
+  missingParameters?: string[];
 }
 
 // ---------------------------------------------------------------------------
