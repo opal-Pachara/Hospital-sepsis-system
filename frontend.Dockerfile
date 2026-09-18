@@ -9,7 +9,7 @@ RUN npm ci
 
 # Copy source code and build production bundle
 COPY . .
-RUN npm run build
+RUN npx vite build
 
 # Stage 2: Production Nginx server
 FROM nginx:alpine

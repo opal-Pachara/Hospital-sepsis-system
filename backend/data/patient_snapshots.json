@@ -1,27 +1,9 @@
 {
-  "000757053": {
-    "hn": "000757053",
-    "vn": "690918144259",
+  "000497603": {
+    "hn": "000497603",
+    "vn": "690918163503",
     "vstdate": "2026-09-18",
-    "vsttime": "14:42:59",
-    "news_score": 16,
-    "risk_level": "high",
-    "vitals": {
-      "sbp": 86.0,
-      "dbp": 52.0,
-      "heart_rate": 126.0,
-      "resp_rate": 26.0,
-      "temperature": 39.4,
-      "spo2": 89.0,
-      "gcs": 13
-    },
-    "is_complete": true
-  },
-  "000505401": {
-    "hn": "000505401",
-    "vn": "690918144256",
-    "vstdate": "2026-09-18",
-    "vsttime": "14:42:56",
+    "vsttime": "16:35:03",
     "news_score": 16,
     "risk_level": "high",
     "vitals": {

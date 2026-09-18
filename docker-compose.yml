@@ -16,6 +16,7 @@ services:
     container_name: rtsas_auth_db
     restart: unless-stopped
     environment:
+      TZ: Asia/Bangkok
       MYSQL_ROOT_PASSWORD: ${AUTH_DB_ROOT_PASSWORD:-rtsas_root}
       MYSQL_DATABASE: rtsas_auth
       MYSQL_USER: rtsas
@@ -35,29 +36,42 @@ services:
   # ── Backend (FastAPI) ─────────────────────────────────────────────────────
   backend:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: rtsas_backend
     restart: unless-stopped
     depends_on:
       auth_db:
         condition: service_healthy
     environment:
+      TZ: Asia/Bangkok
       # Auth DB (inside Docker)
       AUTH_DB_URL: mysql+pymysql://rtsas:${AUTH_DB_PASSWORD:-rtsas}@auth_db:3306/rtsas_auth
       # JWT
       JWT_SECRET: ${JWT_SECRET:-CHANGE_ME_BEFORE_DEPLOY}
       JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-8}
-      # HOSxP — external MySQL over LAN
-      DB_HOST: ${DB_HOST:-192.168.2.230}
+      # HOSxP — external MySQL (host machine or LAN)
+      DB_HOST: ${DB_HOST:-host.docker.internal}
       DB_PORT: ${DB_PORT:-3306}
-      DB_USER: ${DB_USER:-bk}
-      DB_PASSWORD: ${DB_PASSWORD:-bk}
-      DB_NAME: ${DB_NAME:-hos}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-12345678}
+      DB_NAME: ${DB_NAME:-sepsis_db}
+      DB_MIN_CONNECTIONS: ${DB_MIN_CONNECTIONS:-1}
+      DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-10}
+      # Dashboard DB
+      DASHBOARD_DB_HOST: ${DASHBOARD_DB_HOST:-host.docker.internal}
+      DASHBOARD_DB_PORT: ${DASHBOARD_DB_PORT:-3306}
+      DASHBOARD_DB_USER: ${DASHBOARD_DB_USER:-root}
+      DASHBOARD_DB_PASSWORD: ${DASHBOARD_DB_PASSWORD:-12345678}
+      DASHBOARD_DB_NAME: ${DASHBOARD_DB_NAME:-rtsas_dashboard}
+      DASHBOARD_DB_MIN_CONNECTIONS: ${DASHBOARD_DB_MIN_CONNECTIONS:-1}
+      DASHBOARD_DB_MAX_CONNECTIONS: ${DASHBOARD_DB_MAX_CONNECTIONS:-5}
+      # Query Behavior
+      ENABLE_DATE_FALLBACK: ${ENABLE_DATE_FALLBACK:-true}
     ports:
       - "8000:8000"
     extra_hosts:
-      - "host.docker.internal:host-gateway"  # allow backend to reach LAN host
+      - "host.docker.internal:host-gateway"  # allow backend to reach host MySQL / LAN
     networks:
       - rtsas_net
 
@@ -70,6 +84,8 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    environment:
+      TZ: Asia/Bangkok
     ports:
       - "80:80"
     networks:

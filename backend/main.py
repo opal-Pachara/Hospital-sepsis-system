@@ -409,13 +409,15 @@ async def get_patients(refresh: bool = False):
 
 @app.get("/api/patients/{hn}")
 async def get_patient(hn: str):
-    """Return a single patient by HN. Checks memory cache first, then falls back to database for historical visits."""
+    """Return a single patient by HN. Checks memory cache first, then falls back to database or archive for historical visits."""
     from .scheduler import get_patients_cache, build_patient_list
     from .treatment_service import get_treatment_status
     import aiomysql
 
     cache = get_patients_cache()
     patient = next((p for p in cache if p.get("hn") == hn), None)
+    archive_t_status = None
+
     if patient is None:
         try:
             async with db_pool.get_connection() as conn:
@@ -432,13 +434,80 @@ async def get_patient(hn: str):
                     if built:
                         patient = built[0]
         except Exception as e:
-            logger.error(f"Error fetching historical patient {hn} from DB: {e}")
+            logger.error(f"Error fetching historical patient {hn} from patient_visits: {e}")
+
+    # Fallback 2: Check treated_patient_archive in dashboard_pool
+    if patient is None:
+        try:
+            async with dashboard_pool.get_connection() as conn:
+                cur = await conn.cursor(aiomysql.DictCursor)
+                await cur.execute(
+                    "SELECT hn, vn, sex, age, chief_complaint, sbp, dbp, heart_rate, resp_rate, "
+                    "temperature, spo2, gcs, weight, height, news_score, risk_level, has_single_alert, "
+                    "arrival_date AS vstdate, arrival_time AS vsttime, acknowledged_at, acknowledged_by, "
+                    "doctor_confirmed, countdown_started_at, countdown_duration, treatment_completed, "
+                    "treatment_completed_at, treatment_completed_by, sepsis_ruled_out, checklist_json, "
+                    "timeline_json, outcome_label, archived_at "
+                    "FROM treated_patient_archive WHERE hn = %s ORDER BY id DESC LIMIT 1",
+                    (hn,)
+                )
+                arch_row = await cur.fetchone()
+                if arch_row:
+                    built = build_patient_list([arch_row])
+                    if built:
+                        patient = built[0]
+                        archive_t_status = {
+                            "hn": hn,
+                            "vn": arch_row.get("vn"),
+                            "acknowledged": bool(arch_row.get("acknowledged_at")),
+                            "acknowledged_at": arch_row["acknowledged_at"].isoformat() if arch_row.get("acknowledged_at") else None,
+                            "acknowledged_by": arch_row.get("acknowledged_by"),
+                            "doctor_confirmed": bool(arch_row.get("doctor_confirmed")),
+                            "countdown_started_at": arch_row["countdown_started_at"].isoformat() if arch_row.get("countdown_started_at") else None,
+                            "countdown_duration": arch_row.get("countdown_duration") or 3600,
+                            "treatment_completed": bool(arch_row.get("treatment_completed")),
+                            "treatment_completed_at": arch_row["treatment_completed_at"].isoformat() if arch_row.get("treatment_completed_at") else None,
+                            "treatment_completed_by": arch_row.get("treatment_completed_by"),
+                            "sepsis_ruled_out": bool(arch_row.get("sepsis_ruled_out")),
+                            "checklist_json": arch_row.get("checklist_json"),
+                            "updated_at": arch_row["archived_at"].isoformat() if arch_row.get("archived_at") else None,
+                        }
+        except Exception as e:
+            logger.error(f"Error fetching archived patient {hn} from dashboard DB: {e}")
+
+    # Fallback 3: Check opdscreen in db_pool
+    if patient is None:
+        try:
+            async with db_pool.get_connection() as conn:
+                cur = await conn.cursor(aiomysql.DictCursor)
+                await cur.execute(
+                    "SELECT o.hn, o.vn, o.vstdate, o.vsttime, "
+                    "o.bpd AS dbp, o.bps AS sbp, o.pulse AS heart_rate, o.rr AS resp_rate, "
+                    "o.temperature, o.spo2, o.cc AS chief_complaint, "
+                    "o.bw AS weight, o.height AS height, "
+                    "(e.gcs_e + e.gcs_v + e.gcs_m) AS gcs "
+                    "FROM opdscreen o "
+                    "LEFT JOIN er_nursing_detail e ON e.vn = o.vn "
+                    "WHERE o.hn = %s ORDER BY o.vstdate DESC, o.vsttime DESC LIMIT 1",
+                    (hn,)
+                )
+                opd_row = await cur.fetchone()
+                if opd_row:
+                    built = build_patient_list([opd_row])
+                    if built:
+                        patient = built[0]
+        except Exception as e:
+            logger.error(f"Error fetching opdscreen patient {hn} from DB: {e}")
 
     if patient is None:
         return JSONResponse(status_code=404, content={"detail": f"Patient HN={hn} not found"})
 
     patient_copy = dict(patient)
-    patient_copy["treatment_status"] = await get_treatment_status(hn)
+    current_status = await get_treatment_status(hn)
+    if (not current_status or (not current_status.get("treatment_completed") and not current_status.get("sepsis_ruled_out"))) and archive_t_status:
+        patient_copy["treatment_status"] = archive_t_status
+    else:
+        patient_copy["treatment_status"] = current_status
     return JSONResponse(content=patient_copy)
 
 
@@ -464,6 +533,40 @@ async def get_patient_timeline_route(hn: str):
     except Exception as e:
         logger.error(f"Error fetching visit for timeline {hn}: {e}")
 
+    # Fallback to treated_patient_archive if visit not in patient_visits
+    if visit is None:
+        try:
+            async with dashboard_pool.get_connection() as conn:
+                cur = await conn.cursor(aiomysql.DictCursor)
+                await cur.execute(
+                    "SELECT arrival_date AS vstdate, arrival_time AS vsttime, chief_complaint, "
+                    "sbp, dbp, heart_rate, resp_rate, temperature, spo2, "
+                    "acknowledged_at, acknowledged_by, doctor_confirmed, countdown_started_at, countdown_duration, "
+                    "treatment_completed, treatment_completed_at, treatment_completed_by, sepsis_ruled_out, "
+                    "checklist_json, timeline_json, archived_at "
+                    "FROM treated_patient_archive WHERE hn = %s ORDER BY id DESC LIMIT 1",
+                    (hn,)
+                )
+                visit = await cur.fetchone()
+                if visit and (not t_status or (not t_status.get("treatment_completed") and not t_status.get("sepsis_ruled_out"))):
+                    t_status = {
+                        "hn": hn,
+                        "acknowledged": bool(visit.get("acknowledged_at")),
+                        "acknowledged_at": visit["acknowledged_at"].isoformat() if visit.get("acknowledged_at") else None,
+                        "acknowledged_by": visit.get("acknowledged_by"),
+                        "doctor_confirmed": bool(visit.get("doctor_confirmed")),
+                        "countdown_started_at": visit["countdown_started_at"].isoformat() if visit.get("countdown_started_at") else None,
+                        "countdown_duration": visit.get("countdown_duration") or 3600,
+                        "treatment_completed": bool(visit.get("treatment_completed")),
+                        "treatment_completed_at": visit["treatment_completed_at"].isoformat() if visit.get("treatment_completed_at") else None,
+                        "treatment_completed_by": visit.get("treatment_completed_by"),
+                        "sepsis_ruled_out": bool(visit.get("sepsis_ruled_out")),
+                        "checklist_json": visit.get("checklist_json"),
+                        "updated_at": visit["archived_at"].isoformat() if visit.get("archived_at") else None,
+                    }
+        except Exception as e:
+            logger.error(f"Error fetching archived visit for timeline {hn}: {e}")
+
     events = []
     arrival_iso = datetime.now().isoformat()
     if visit:
@@ -479,14 +582,10 @@ async def get_patient_timeline_route(hn: str):
         })
 
         # Calculate NEWS score from visit vitals
-        from .services import calculate_news_score
-        sbp = visit.get("sbp")
-        dbp = visit.get("dbp")
-        hr = visit.get("heart_rate")
-        rr = visit.get("resp_rate")
-        temp = visit.get("temperature")
-        spo2 = visit.get("spo2")
-        news_score, risk_level = calculate_news_score(rr, spo2, temp, sbp, hr)
+        from .services import calculate_news_from_row
+        news_res = calculate_news_from_row(visit)
+        news_score = news_res.totalScore
+        risk_level = news_res.riskLevel
         risk_text = "เสี่ยงสูง" if risk_level == "high" or news_score >= 5 else "เสี่ยงปานกลาง" if risk_level == "medium" else "เสี่ยงต่ำ"
         events.append({
             "id": f"news_{hn}",

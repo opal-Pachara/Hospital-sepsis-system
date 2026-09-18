@@ -469,7 +469,7 @@ export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavig
             opacity: isDoctorOrNurse ? 1 : 0.7,
           }}
         >
-          ✅ Dashborad ผู้ปว่ยรักษาแล้ว 
+          ✅ Dashborad ผู้ป่วยรักษาแล้ว 
         </button>
       </div>
 

@@ -60,6 +60,15 @@ export default memo(function TreatedDashboard({
   onSelectPatientTimeline,
 }: TreatedDashboardProps) {
   const setActiveTab = useRTSASStore((s) => s.setActiveTab);
+  const currentUser = useRTSASStore((s) => s.currentUser);
+
+  const currentUserRoleTh = currentUser?.role === 'doctor'
+    ? 'แพทย์'
+    : currentUser?.role === 'nurse'
+      ? 'พยาบาล'
+      : currentUser?.role === 'it_admin'
+        ? 'เจ้าหน้าที่ IT'
+        : (currentUser?.role || '');
 
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('');
@@ -412,7 +421,7 @@ export default memo(function TreatedDashboard({
           ? new Date(c.treatment_completed_at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
           : '',
         c.outcome_label,
-        c.treated_by,
+        currentUserRoleTh || c.treated_by || '',
       ]),
     ];
 
