@@ -276,6 +276,99 @@ describe('getTimelineText formatting for HIS', () => {
     const phase2Unlocked = statePatientB.checklist.find((p) => p.phase === 'doctor_confirmation')?.isUnlocked;
     expect(phase2Unlocked).toBe(false);
   });
+
+  it('strictly isolates timelines when alerts for 2 patients are acknowledged sequentially', () => {
+    const store = useRTSASStore.getState();
+
+    const patient1: any = {
+      id: 'pt_101',
+      hn: '1010101',
+      fullName: 'นาย หนึ่ง ทดสอบ',
+      currentRiskLevel: 'high',
+      hasSepsisAlert: true,
+      latestNewsScore: 6,
+      arrivalTime: '2026-09-18T11:00:00',
+    };
+    const patient2: any = {
+      id: 'pt_102',
+      hn: '2020202',
+      fullName: 'นาง สอง ทดสอบ',
+      currentRiskLevel: 'high',
+      hasSepsisAlert: true,
+      latestNewsScore: 7,
+      arrivalTime: '2026-09-18T11:30:00',
+    };
+
+    store.setPatients([patient1, patient2]);
+
+    // 1. Acknowledge Alert for Patient 1
+    store.selectPatient('pt_101');
+    store.startCountdown('2026-09-18T11:05:00', 'pt_101');
+    store.addTimelineEvent(
+      '🏥 ผู้ป่วยมาถึง ER เวลา 11:00 น.',
+      'blue',
+      'ระบบ',
+      undefined,
+      '2026-09-18T11:00:00',
+      'pt_101'
+    );
+    store.addTimelineEvent(
+      '🧮 ระบบคำนวณ NEWS Score = 6 (เสี่ยงสูง)',
+      'red',
+      'ระบบ RTSAS',
+      undefined,
+      '2026-09-18T11:02:00',
+      'pt_101'
+    );
+
+    // 2. Alert popup for Patient 2 arrives and is acknowledged
+    store.selectPatient('pt_102');
+    store.startCountdown('2026-09-18T11:35:00', 'pt_102');
+    store.addTimelineEvent(
+      '🏥 ผู้ป่วยมาถึง ER เวลา 11:30 น.',
+      'blue',
+      'ระบบ',
+      undefined,
+      '2026-09-18T11:30:00',
+      'pt_102'
+    );
+    store.addTimelineEvent(
+      '🧮 ระบบคำนวณ NEWS Score = 7 (เสี่ยงสูง)',
+      'red',
+      'ระบบ RTSAS',
+      undefined,
+      '2026-09-18T11:32:00',
+      'pt_102'
+    );
+
+    const currentStore = useRTSASStore.getState();
+    const data1 = currentStore.patientData['pt_101'];
+    const data2 = currentStore.patientData['pt_102'];
+
+    expect(data1).toBeDefined();
+    expect(data2).toBeDefined();
+
+    // Patient 1 must have 11:00 / NEWS 6, NOT 11:30 / NEWS 7
+    expect(data1.timeline.some((e) => e.actionText.includes('11:00'))).toBe(true);
+    expect(data1.timeline.some((e) => e.actionText.includes('NEWS Score = 6'))).toBe(true);
+    expect(data1.timeline.some((e) => e.actionText.includes('11:30'))).toBe(false);
+    expect(data1.timeline.some((e) => e.actionText.includes('NEWS Score = 7'))).toBe(false);
+
+    // Patient 2 must have 11:30 / NEWS 7, NOT 11:00 / NEWS 6
+    expect(data2.timeline.some((e) => e.actionText.includes('11:30'))).toBe(true);
+    expect(data2.timeline.some((e) => e.actionText.includes('NEWS Score = 7'))).toBe(true);
+    expect(data2.timeline.some((e) => e.actionText.includes('11:00'))).toBe(false);
+    expect(data2.timeline.some((e) => e.actionText.includes('NEWS Score = 6'))).toBe(false);
+
+    // Switching between patients shows exclusively their own timeline
+    store.selectPatient('pt_101');
+    const timelineActive1 = useRTSASStore.getState().timeline;
+    expect(timelineActive1.some((e) => e.actionText.includes('NEWS Score = 7'))).toBe(false);
+
+    store.selectPatient('pt_102');
+    const timelineActive2 = useRTSASStore.getState().timeline;
+    expect(timelineActive2.some((e) => e.actionText.includes('NEWS Score = 6'))).toBe(false);
+  });
 });
 
 

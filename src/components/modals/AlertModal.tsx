@@ -70,18 +70,18 @@ export default function AlertModal() {
       }),
     }).catch((err) => console.warn('[AlertModal] Failed to sync acknowledge to backend:', err));
 
-    // If the alerted patient is not currently selected, select them first
-    if (alertedPatient && alertedPatient.id !== selectedPatient?.id) {
-      selectPatient(alertedPatient.id);
-    }
+    const allPatients = useRTSASStore.getState().patients;
+    const targetPatient = alertedPatient ?? allPatients.find((p) => p.hn === targetHn || p.id === targetHn);
+    const targetPatientId = targetPatient?.id || targetHn;
 
-    // Check if countdown is already running for this patient
-    const targetPatientId = alertedPatient?.id ?? selectedPatient?.id ?? '';
+    // Switch context to target patient
+    selectPatient(targetPatientId);
+
+    // Check if countdown is already running for this target patient strictly
     const existingTimer = targetPatientId ? useRTSASStore.getState().patientData[targetPatientId]?.countdownTimer : undefined;
     const alreadyRunning = Boolean(
       existingTimer?.isActive ||
-      alertedPatient?.treatmentStatus?.countdown_started_at ||
-      selectedPatient?.treatmentStatus?.countdown_started_at
+      targetPatient?.treatmentStatus?.countdown_started_at
     );
 
     if (!alreadyRunning) {
@@ -90,8 +90,8 @@ export default function AlertModal() {
       useRTSASStore.getState().startCountdown(nowIso, targetPatientId);
 
       // Auto-record visit time + NEWS calculation in timeline with real timestamps
-      const patient = alertedPatient ?? selectedPatient;
-      const newsScore = patient?.latestNewsScore ?? 0;
+      const patient = targetPatient;
+      const newsScore = patient?.latestNewsScore ?? alertNewsScore ?? 0;
       const riskLevel = patient?.currentRiskLevel ?? 'low';
       const arrivalIso = patient?.arrivalTime || nowIso;
       const arrivalTime = patient?.arrivalTime
@@ -103,7 +103,8 @@ export default function AlertModal() {
         'blue',
         'ระบบ',
         undefined,
-        arrivalIso
+        arrivalIso,
+        targetPatientId
       );
 
       const calcIso = patient?.latestNewsResult?.calculatedAt || nowIso;
@@ -112,7 +113,8 @@ export default function AlertModal() {
         newsScore >= 5 ? 'red' : 'orange',
         'ระบบ RTSAS',
         undefined,
-        calcIso
+        calcIso,
+        targetPatientId
       );
     }
 

@@ -49,7 +49,8 @@ export default function MultiAlertModal() {
         'blue',
         'ระบบ',
         undefined,
-        arrivalIso
+        arrivalIso,
+        patient.id
       );
 
       const calcIso = patient?.latestNewsResult?.calculatedAt || nowIso;
@@ -58,7 +59,8 @@ export default function MultiAlertModal() {
         newsScore >= 5 ? 'red' : 'orange',
         'ระบบ RTSAS',
         undefined,
-        calcIso
+        calcIso,
+        patient.id
       );
     }
 

@@ -84,7 +84,7 @@ function TreatmentTimeSummary() {
 
   const data = patientData[selectedPatient.id];
   const ts = selectedPatient.treatmentStatus;
-  const rawTimeline = (timeline && timeline.length > 0) ? timeline : (data?.timeline || []);
+  const rawTimeline = (data?.timeline && data.timeline.length > 0) ? data.timeline : (timeline || []);
 
   const formatThaiTime = (isoStr: string | null | undefined): string => {
     if (!isoStr) return '—';
@@ -285,7 +285,7 @@ function TreatmentTimeSummary() {
 export default function TimelinePanel() {
   const { timeline, selectedPatient, patientData, isAuthenticated } = useRTSASStore();
   const data = selectedPatient ? patientData[selectedPatient.id] : null;
-  const rawTimeline = (timeline && timeline.length > 0) ? timeline : (data?.timeline || []);
+  const rawTimeline = (data?.timeline && data.timeline.length > 0) ? data.timeline : (timeline || []);
   const guaranteedTimeline = ensureInitialTimelineEvents(selectedPatient, rawTimeline);
   const treatmentEvents = guaranteedTimeline.filter(isTreatmentTimelineEvent);
 

@@ -497,7 +497,8 @@ export interface RTSASState {
     color: TimelineEventColor,
     actor: string,
     metadata?: Record<string, unknown>,
-    customTimestamp?: string
+    customTimestamp?: string,
+    targetPatientId?: string
   ) => void;
   clearTimeline: () => void;
   getTimelineText: () => string;
@@ -1332,7 +1333,7 @@ export const useRTSASStore = create<RTSASState>()(
       // TIMELINE ACTIONS
       // ===========================================================================
 
-      addTimelineEvent: (actionText, color, actor, metadata, customTimestamp) => {
+      addTimelineEvent: (actionText, color, actor, metadata, customTimestamp, targetPatientId) => {
         const event: TimelineEvent = {
           id: generateId(),
           timestamp: customTimestamp || new Date().toISOString(),
@@ -1348,19 +1349,37 @@ export const useRTSASStore = create<RTSASState>()(
         }
 
         set((state) => {
-          const currentEvents = (state.timeline || []).filter(isTreatmentTimelineEvent);
-          let baseEvents = currentEvents;
+          const effectivePatientId = targetPatientId || state.selectedPatient?.id;
+          const targetPt = effectivePatientId
+            ? (state.patients.find((p) => p.id === effectivePatientId || p.hn === effectivePatientId) || state.selectedPatient)
+            : state.selectedPatient;
+
+          const existingEvents = (effectivePatientId && state.patientData[effectivePatientId]?.timeline)
+            ? (state.patientData[effectivePatientId].timeline || []).filter(isTreatmentTimelineEvent)
+            : (state.selectedPatient?.id === effectivePatientId ? (state.timeline || []).filter(isTreatmentTimelineEvent) : []);
+
+          // Prevent duplicate initial events (visit time & NEWS calculation)
+          if ((event.actionText || '').startsWith('🏥') && existingEvents.some((e) => (e.actionText || '').startsWith('🏥'))) {
+            return state;
+          }
+          if ((event.actionText || '').startsWith('🧮') && existingEvents.some((e) => (e.actionText || '').startsWith('🧮'))) {
+            return state;
+          }
+
+          let baseEvents = existingEvents;
           const isInitial = (event.actionText || '').startsWith('🏥') || (event.actionText || '').startsWith('🧮');
-          if (!isInitial && state.selectedPatient) {
-            baseEvents = ensureInitialTimelineEvents(state.selectedPatient, currentEvents);
+          if (!isInitial && targetPt) {
+            baseEvents = ensureInitialTimelineEvents(targetPt, existingEvents);
           }
           const newTimeline = [...baseEvents, event];
+          const isCurrentlySelected = state.selectedPatient?.id === effectivePatientId || !state.selectedPatient;
+
           return {
-            timeline: newTimeline,
-            patientData: state.selectedPatient ? {
+            timeline: isCurrentlySelected ? newTimeline : state.timeline,
+            patientData: effectivePatientId ? {
               ...state.patientData,
-              [state.selectedPatient.id]: {
-                ...(state.patientData[state.selectedPatient.id] || {}),
+              [effectivePatientId]: {
+                ...(state.patientData[effectivePatientId] || {}),
                 timeline: newTimeline,
               }
             } : state.patientData
@@ -1382,7 +1401,7 @@ export const useRTSASStore = create<RTSASState>()(
       getTimelineText: () => {
         const { timeline, selectedPatient, isAuthenticated, patientData } = get();
         const data = selectedPatient ? patientData[selectedPatient.id] : null;
-        const rawTimeline = (timeline && timeline.length > 0) ? timeline : (data?.timeline || []);
+        const rawTimeline = (data?.timeline && data.timeline.length > 0) ? data.timeline : (timeline || []);
         const guaranteedTimeline = ensureInitialTimelineEvents(selectedPatient, rawTimeline);
         const treatmentEvents = guaranteedTimeline.filter(isTreatmentTimelineEvent);
         // Sort chronologically
@@ -1492,7 +1511,8 @@ export const useRTSASStore = create<RTSASState>()(
           const targetPt = targetPatient || state.selectedPatient;
           let activeTimeline = state.timeline;
           if (targetPt) {
-            const existingTl = (pId && updatedPatientData[pId]?.timeline) || activeTimeline || [];
+            // Strictly isolate timeline: do not fall back to activeTimeline of another patient
+            const existingTl = (pId && updatedPatientData[pId]?.timeline) || [];
             const guaranteedTl = ensureInitialTimelineEvents(targetPt, existingTl);
             if (pId) {
               updatedPatientData[pId] = {
