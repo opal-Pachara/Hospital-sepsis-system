@@ -7,6 +7,7 @@ from datetime import datetime, date
 from aiomysql import DictCursor
 from typing import List, Dict, Any, Optional
 
+from .config import settings
 from .database import db_pool
 from .schemas import SepsisAlertPayload, PatientListItem
 from .services import (
@@ -151,30 +152,40 @@ def get_cache_stats() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# SQL queries
+# SQL queries (Strict Today vs Date Fallback)
 # ---------------------------------------------------------------------------
 
-QUERY_PATIENT_VISITS = """
+# 1. Production Mode: Only patients visited today (CURDATE())
+QUERY_PATIENT_VISITS_TODAY = """
 SELECT
-    id,
-    vstdate,
-    vsttime,
-    hn,
-    vn,
-    NULL AS patient_name,
-    sex,
-    age,
-    chief_complaint,
-    gcs,
-    spo2,
-    heart_rate,
-    sbp,
-    dbp,
-    resp_rate,
-    temperature,
-    weight,
-    height,
-    created_at
+    id, vstdate, vsttime, hn, vn, NULL AS patient_name,
+    sex, age, chief_complaint, gcs, spo2, heart_rate, sbp, dbp,
+    resp_rate, temperature, weight, height, created_at
+FROM patient_visits
+WHERE vstdate >= CURDATE()
+ORDER BY created_at DESC, vstdate DESC, vsttime DESC
+LIMIT 200;
+"""
+
+QUERY_OPDSCREEN_TODAY = """
+SELECT
+    o.hn, o.vn, o.vstdate, o.vsttime, o.sex,
+    (COALESCE(e.gcs_e,0) + COALESCE(e.gcs_v,0) + COALESCE(e.gcs_m,0)) AS gcs,
+    e.o2sat AS spo2, o.pulse AS heart_rate, o.bps AS sbp, o.bpd AS dbp,
+    o.rr AS resp_rate, o.temperature, o.weight, o.height, e.chief_complaint
+FROM opdscreen o
+LEFT JOIN er_nursing_detail e ON o.vn = e.vn
+WHERE o.vstdate >= CURDATE()
+ORDER BY o.vsttime DESC
+LIMIT 200;
+"""
+
+# 2. Development/Staging Mode: Fallback to latest past date if today is empty
+QUERY_PATIENT_VISITS_FALLBACK = """
+SELECT
+    id, vstdate, vsttime, hn, vn, NULL AS patient_name,
+    sex, age, chief_complaint, gcs, spo2, heart_rate, sbp, dbp,
+    resp_rate, temperature, weight, height, created_at
 FROM patient_visits
 WHERE vstdate >= DATE_SUB(COALESCE((SELECT MAX(vstdate) FROM patient_visits), CURDATE()), INTERVAL 1 DAY)
    OR vstdate >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
@@ -184,21 +195,10 @@ LIMIT 200;
 
 QUERY_OPDSCREEN_FALLBACK = """
 SELECT
-    o.hn,
-    o.vn,
-    o.vstdate,
-    o.vsttime,
-    o.sex,
+    o.hn, o.vn, o.vstdate, o.vsttime, o.sex,
     (COALESCE(e.gcs_e,0) + COALESCE(e.gcs_v,0) + COALESCE(e.gcs_m,0)) AS gcs,
-    e.o2sat AS spo2,
-    o.pulse AS heart_rate,
-    o.bps AS sbp,
-    o.bpd AS dbp,
-    o.rr AS resp_rate,
-    o.temperature,
-    o.weight,
-    o.height,
-    e.chief_complaint
+    e.o2sat AS spo2, o.pulse AS heart_rate, o.bps AS sbp, o.bpd AS dbp,
+    o.rr AS resp_rate, o.temperature, o.weight, o.height, e.chief_complaint
 FROM opdscreen o
 LEFT JOIN er_nursing_detail e ON o.vn = e.vn
 WHERE o.vstdate = (SELECT MAX(vstdate) FROM opdscreen)
@@ -213,19 +213,23 @@ LIMIT 200;
 
 async def fetch_vitals_from_db() -> List[Dict[str, Any]]:
     """
-    Fetch today's vital signs.
-    Primary source: patient_visits table.
-    Fallback: opdscreen JOIN er_nursing_detail (legacy HOSxP schema).
+    Fetch vital signs from database.
+    If ENABLE_DATE_FALLBACK is False (Production): strictly queries CURDATE().
+    If ENABLE_DATE_FALLBACK is True (Dev/Staging): falls back to MAX(vstdate).
     """
+    enable_fallback = getattr(settings, "ENABLE_DATE_FALLBACK", False)
+    query_visits = QUERY_PATIENT_VISITS_FALLBACK if enable_fallback else QUERY_PATIENT_VISITS_TODAY
+    query_opd = QUERY_OPDSCREEN_FALLBACK if enable_fallback else QUERY_OPDSCREEN_TODAY
+
     try:
         async with db_pool.get_connection() as conn:
             async with conn.cursor(DictCursor) as cursor:
                 # Try patient_visits first
-                await cursor.execute(QUERY_PATIENT_VISITS)
+                await cursor.execute(query_visits)
                 rows = await cursor.fetchall()
 
                 if rows:
-                    logger.info(f"Fetched {len(rows)} rows from patient_visits.")
+                    logger.info(f"Fetched {len(rows)} rows from patient_visits (fallback={enable_fallback}).")
                     result = []
                     for r in rows:
                         d = dict(r)
@@ -234,10 +238,10 @@ async def fetch_vitals_from_db() -> List[Dict[str, Any]]:
                     return result
 
                 # Fallback to HOSxP legacy tables
-                logger.info("patient_visits is empty — falling back to opdscreen JOIN er_nursing_detail.")
-                await cursor.execute(QUERY_OPDSCREEN_FALLBACK)
+                logger.info(f"patient_visits is empty — querying opdscreen JOIN er_nursing_detail (fallback={enable_fallback}).")
+                await cursor.execute(query_opd)
                 rows = await cursor.fetchall()
-                logger.info(f"Fetched {len(rows)} rows from opdscreen (fallback).")
+                logger.info(f"Fetched {len(rows)} rows from opdscreen.")
                 result = []
                 for r in rows:
                     d = dict(r)
@@ -432,11 +436,25 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
     new_patients_logged = 0
     updated_patients_logged = 0
 
+    try:
+        from .treatment_service import get_all_treatment_statuses
+        treatment_statuses = await get_all_treatment_statuses()
+    except Exception as te:
+        logger.warning(f"Could not load treatment statuses: {te}")
+        treatment_statuses = {}
+
     for row in rows:
         try:
             hn = str(row.get('hn', '')).strip()
             if not hn:
                 continue
+
+            t_status = treatment_statuses.get(hn, {})
+            is_finished_treatment = bool(
+                t_status.get("treatment_completed") or
+                t_status.get("sepsis_ruled_out") or
+                t_status.get("is_archived")
+            )
             vn = str(row.get('vn', '') or '')
             vstdate = row.get('vstdate')
             vsttime = row.get('vsttime')
@@ -531,6 +549,10 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                     details["present_fields"] = present_fields
 
                 is_high = (risk_lvl == "high" or total_score >= 5 or single_alert)
+                is_new_alert = is_high and not is_finished_treatment
+                if is_finished_treatment:
+                    is_high = False
+
                 record_log(
                     level="Warning" if is_high else "Note",
                     message=msg,
@@ -572,7 +594,7 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                     vstdate=vstdate_str,
                     vsttime=vsttime_str,
                     news_result=r_news,
-                    is_new_alert=True,
+                    is_new_alert=is_new_alert,
                     timestamp=arrival_iso,
                 )
                 await broadcast_message(payload.model_dump_json())
@@ -665,6 +687,10 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                         details["present_fields"] = present_fields
 
                     is_high = (risk_lvl == "high" or total_score >= 5 or single_alert)
+                    is_new_alert = is_high and not is_finished_treatment
+                    if is_finished_treatment:
+                        is_high = False
+
                     record_log(
                         level="Warning" if is_high else "Note",
                         message=msg,
@@ -706,7 +732,7 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                         vstdate=vstdate_str,
                         vsttime=vsttime_str,
                         news_result=r_news,
-                        is_new_alert=(total_score >= 5 or single_alert),
+                        is_new_alert=is_new_alert,
                         timestamp=arrival_iso,
                     )
                     await broadcast_message(payload.model_dump_json())

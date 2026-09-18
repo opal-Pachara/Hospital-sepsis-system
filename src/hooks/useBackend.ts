@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
-import type { Patient, VitalSigns, NEWSResult, NEWSParameterScore } from '../types';
+import type { Patient, VitalSigns, NEWSResult, NEWSParameterScore, TreatmentStatus } from '../types';
 import { gcsToAVPU } from '../types';
 import { maskHN } from '../utils/hnMask';
 import { MOCK_PATIENTS } from '../data/mockData';
@@ -376,8 +376,16 @@ export function useWebSocketAlerts() {
         }
 
         // 🚨 Queue alert for high-risk patients (new readings only)
-        // Use queueAlert instead of openModal to avoid interrupting the current patient view
-        if (payload.is_new_alert &&
+        // Guard: Never alert or re-treat if treatment is already completed or ruled out
+        const pData = useRTSASStore.getState().patientData[payload.hn] || useRTSASStore.getState().patientData[patient.id];
+        const isFinished = Boolean(
+          pData?.treatmentCompleted ||
+          pData?.sepsisRuledOut ||
+          patient.treatmentStatus?.treatment_completed ||
+          patient.treatmentStatus?.sepsis_ruled_out
+        );
+
+        if (!isFinished && payload.is_new_alert &&
           (payload.news_result.totalScore >= 5 || payload.news_result.hasSingleParameterAlert)) {
 
           // Queue the alert — if modal is already open it will stack, not override

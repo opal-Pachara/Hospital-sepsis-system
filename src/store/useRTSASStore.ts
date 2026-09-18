@@ -172,12 +172,6 @@ export function ensureInitialTimelineEvents(
   if (!hasNews) {
     const score = patient.latestNewsResult?.totalScore ?? patient.latestNewsScore ?? 0;
     const riskLevel = patient.latestNewsResult?.riskLevel ?? patient.currentRiskLevel ?? 'low';
-    const riskText =
-      riskLevel === 'high' || score >= 5
-        ? 'เสี่ยงสูง'
-        : riskLevel === 'medium' || score >= 3
-        ? 'เสี่ยงปานกลาง'
-        : 'เสี่ยงต่ำ';
 
     let calcIso = patient.latestNewsResult?.calculatedAt;
     if (!calcIso) {
@@ -188,7 +182,7 @@ export function ensureInitialTimelineEvents(
     eventsToAdd.push({
       id: `news_${patient.id || patient.hn}`,
       timestamp: calcIso,
-      actionText: `🧮 ระบบคำนวณ NEWS Score = ${score} (${riskText})`,
+      actionText: `🧮 ระบบคำนวณ NEWS Score = ${score}`,
       color: score >= 5 ? 'red' : score >= 1 ? 'orange' : 'green',
       actor: 'ระบบ RTSAS',
     });

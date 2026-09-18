@@ -80,50 +80,87 @@
 
 ---
 
-## 🚀 วิธีการติดตั้งและเริ่มต้นใช้งาน (Quick Start with Docker)
+## 🚀 วิธีการติดตั้งและเริ่มต้นใช้งาน (Step-by-Step with Docker)
 
-### 1. โคลนโปรเจกต์
+> 💡 **เข้าใจสถาปัตยกรรมใน 1 นาที:**  
+> ระบบ **Web App, Backend API, Auth DB (MySQL ในตัว) และ SQLite Logs** จะทำงานอยู่ใน **Docker ทั้งหมด 100%**  
+> ผู้ดูแลระบบเพียงแค่ **(1) ระบุ IP ของ HOSxP ในไฟล์ `.env`** และ **(2) สร้างฐานข้อมูล `rtsas_dashboard` บน Server โรงพยาบาล 1 ครั้ง** แล้วสั่งรัน Docker ได้ทันที!  
+> *(อ่านคู่มืออย่างละเอียดพร้อมวิธีแก้ปัญหาได้ที่ [DEPLOYMENT_GUIDE.md](file:///Users/phatchara/Desktop/Hospital/DEPLOYMENT_GUIDE.md))*
+
+### ขั้นตอนที่ 1: ตรวจสอบการเชื่อมต่อ LAN ไปยังเครื่อง HOSxP
+เปิด Terminal บนเครื่องที่จะติดตั้ง RTSAS แล้วทดสอบว่าเชื่อมต่อกับ Server HOSxP ได้หรือไม่:
 ```bash
+ping -c 4 192.168.2.230
+nc -zv 192.168.2.230 3306   # หรือ telnet 192.168.2.230 3306
+```
+
+### ขั้นตอนที่ 2: สร้างฐานข้อมูล `rtsas_dashboard` บน MySQL ของโรงพยาบาล (ทำครั้งเดียว)
+ล็อกอินเข้า MySQL บนเครื่อง Server โรงพยาบาล แล้วรันคำสั่ง SQL เตรียมไว้:
+```sql
+CREATE DATABASE IF NOT EXISTS rtsas_dashboard CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+GRANT ALL PRIVILEGES ON rtsas_dashboard.* TO 'bk'@'%';
+FLUSH PRIVILEGES;
+```
+*(ตารางจัดเก็บสถานะและการรักษาภายในฐานข้อมูลนี้ Backend ใน Docker จะสร้างให้อัตโนมัติเมื่อเริ่มระบบ)*
+
+### ขั้นตอนที่ 3: โคลนโปรเจกต์และตั้งค่าไฟล์ `.env`
+```bash
+# โคลนโปรเจกต์เข้าเครื่อง
 git clone https://github.com/opal-Pachara/Hospital-sepsis-system.git
 cd Hospital-sepsis-system
-```
 
-### 2. ตั้งค่าไฟล์ Environment Variables (`.env`)
-คัดลอกไฟล์ตัวอย่าง `.env.example` ไปเป็น `.env`:
-```bash
+# คัดลอกและเปิดไฟล์ .env ขึ้นมาแก้ไข
 cp .env.example .env
+nano .env
 ```
 
-แก้ไขค่าในไฟล์ `.env` ให้ตรงกับระบบของโรงพยาบาล:
+ระบุ IP และการตั้งค่าของโรงพยาบาล:
 ```ini
-# ── JWT Secret & Expiry ──
-JWT_SECRET=YOUR_SUPER_SECRET_KEY_HERE_2026
-JWT_EXPIRE_HOURS=8
-
-# ── Auth DB (MySQL ใน Docker) ──
-AUTH_DB_ROOT_PASSWORD=rtsas_root_password
-AUTH_DB_PASSWORD=rtsas_secure_password
-
-# ── HOSxP Database (LAN นอก Docker) ──
-DB_HOST=192.168.2.230
+# ── HOSxP Database (อ่านสัญญาณชีพและผลแล็บจาก LAN โรงพยาบาล) ──
+DB_HOST=192.168.2.230             # 👈 ใส่ IP เครื่อง HOSxP ของ รพ.
 DB_PORT=3306
 DB_USER=bk
 DB_PASSWORD=bk
 DB_NAME=hos
+
+# ── Dashboard Database (เก็บประวัติการรักษาในฐานข้อมูล รพ.) ──
+DASHBOARD_DB_HOST=192.168.2.230   # 👈 ใส่ IP เดียวกับ DB_HOST
+DASHBOARD_DB_PORT=3306
+DASHBOARD_DB_USER=bk
+DASHBOARD_DB_PASSWORD=bk
+DASHBOARD_DB_NAME=rtsas_dashboard
+
+# ── Auth DB (MySQL ใน Docker — ไม่ต้องแก้ ใช้ค่านี้ได้เลย) ──
+AUTH_DB_ROOT_PASSWORD=rtsas_root_password
+AUTH_DB_PASSWORD=rtsas_secure_password
+
+# ── ความปลอดภัยและอายุ Token ──
+JWT_SECRET=RTSAS_PROD_SECURE_TOKEN_2026_CHANGE_THIS
+JWT_EXPIRE_HOURS=8
+
+# ── โหมดการค้นหาข้อมูล (false = คนไข้วันนี้ / true = fallback วันล่าสุด) ──
+ENABLE_DATE_FALLBACK=false
 ```
 
-### 3. สั่งรันด้วย Docker Compose
+### ขั้นตอนที่ 4: สั่งเริ่มระบบผ่าน Docker Compose
 ```bash
 docker compose up -d --build
 ```
 
-### 4. ตรวจสอบสถานะการทำงาน
+### ขั้นตอนที่ 5: ตรวจสอบสถานะการทำงาน
 ```bash
+# ตรวจสอบสถานะ Container ทุกตัว (ต้องขึ้นสถานะ Up)
 docker compose ps
+
+# ดู Log ของ Backend เพื่อยืนยันการเชื่อมต่อ HOSxP
+docker compose logs -f backend
 ```
-เมื่อทุก Container รันสมบูรณ์:
-- เข้าสู่ระบบผ่านเบราว์เซอร์: **`http://localhost`** (หรือ IP ของเครื่อง Server เช่น `http://192.168.x.x`)
-- Backend API Docs (Swagger): **`http://localhost:8000/docs`**
+เมื่อเชื่อมต่อสำเร็จจะปรากฏข้อความ:  
+`[INFO] Successfully connected to HOSxP database pool (192.168.2.230:3306/hos)`
+
+- **เข้าใช้งานระบบผ่านเบราว์เซอร์:** `http://localhost` หรือ `http://<IP-เครื่อง-RTSAS>`
+- **API Documentation (Swagger):** `http://localhost:8000/docs`
+- 📖 **คู่มือการติดตั้งฉบับสมบูรณ์:** ดูรายละเอียดเชิงลึกและวิธีแก้ปัญหาได้ที่ [DEPLOYMENT_GUIDE.md](file:///Users/phatchara/Desktop/Hospital/DEPLOYMENT_GUIDE.md)
 
 ---
 
@@ -224,13 +261,14 @@ ORDER BY o.vstdate DESC, o.vsttime DESC;
 
 ---
 
-## 📑 เอกสารและรายงานผลการทดสอบ (Documentation & QA Reports)
+## 📑 เอกสารและคู่มือในโปรเจกต์ (Project Documentation)
 
-สามารถดูรายละเอียดเอกสารประกอบและผลการทดสอบระบบได้ที่โฟลเดอร์ [`docs/`](file:///Users/phatchara/Desktop/Hospital/docs/README.md):
-- 📖 **[คู่มือการใช้งานระบบ RTSAS (User & Operations Manual)](file:///Users/phatchara/Desktop/Hospital/docs/USER_MANUAL.md)** — คู่มือการใช้งานระบบฉบับสมบูรณ์อย่างละเอียด พร้อมภาพถ่ายหน้าจอประกอบทุกฟังก์ชัน
-- 🧪 **[Comprehensive System Test Report](file:///Users/phatchara/Desktop/Hospital/docs/reports/COMPREHENSIVE_SYSTEM_TEST_REPORT.md)** — รายงานการทดสอบระบบแบบละเอียดทุกโมดูล
-- 🛡️ **[QA System Test Report](file:///Users/phatchara/Desktop/Hospital/docs/reports/QA_SYSTEM_TEST_REPORT.md)** — รายงานการตรวจสอบความเสถียร ระบบ Audit และ Persistence
-- 🎨 **[Real-Time Alert UI Mockup](file:///Users/phatchara/Desktop/Hospital/docs/mockups/real_time_alert_mockup_phanikarn.html)** — ต้นแบบหน้าจอการออกแบบดั้งเดิม
+เอกสารสำคัญที่จัดทำขึ้นสำหรับทีมงานและผู้ดูแลระบบ:
+- 🚀 **[DEPLOYMENT_GUIDE.md](file:///Users/phatchara/Desktop/Hospital/DEPLOYMENT_GUIDE.md)** — คู่มือการติดตั้ง เชื่อมต่อ HOSxP และการรัน Docker อย่างละเอียด (พร้อมคำสั่ง SQL, การแก้ปัญหา, และคำถาม-คำตอบ)
+- 🧹 **[DATABASE_CLEANUP_GUIDE.md](file:///Users/phatchara/Desktop/Hospital/DATABASE_CLEANUP_GUIDE.md)** — คู่มือการเคลียร์และลบข้อมูลใน SQLite (`rtsas_local.db` & `timestamp_logs.db`) ทั้ง Host และ Docker
+- 📁 **[PROJECT_STRUCTURE.md](file:///Users/phatchara/Desktop/Hospital/PROJECT_STRUCTURE.md)** — โครงสร้างและสถาปัตยกรรมไฟล์ทั้งหมดของระบบ (Frontend, Backend, Config)
+- 📘 **[CODEBASE_GUIDE.md](file:///Users/phatchara/Desktop/Hospital/CODEBASE_GUIDE.md)** — คู่มืออธิบายหน้าที่ของแต่ละไฟล์ สถาปัตยกรรม และ Clinical Logic (RCP NEWS 2017 & Sepsis Bundle)
+- 📝 **[TODO.md](file:///Users/phatchara/Desktop/Hospital/TODO.md)** — บันทึกสถานะงานและการวางแผนฟีเจอร์ของระบบ
 
 ---
 

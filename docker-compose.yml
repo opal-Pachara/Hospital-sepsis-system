@@ -1,16 +1,29 @@
+# ═════════════════════════════════════════════════════════════════════════════
 # RTSAS — Real-Time Sepsis Alert System
-# Docker Compose v3 — รัน: docker compose up --build
+# ไฟล์ Docker Compose สำหรับรันระบบทั้งระบบแบบ Containerization
 #
-# Services:
-#   auth_db  — MySQL 8 สำหรับ user accounts (ภายใน Docker)
-#   backend  — FastAPI (เชื่อม auth_db + HOSxP ผ่าน LAN)
-#   frontend — Vite build + nginx (port 80)
+# คำสั่งพื้นฐานที่ใช้งานบ่อย:
+#   - สั่งเริ่มระบบและ Build ใหม่:     docker compose up -d --build
+#   - ดูสถานะการทำงาน:               docker compose ps
+#   - ดู Log การทำงานแบบ Real-time:  docker compose logs -f
+#   - หยุดการทำงานของระบบ:            docker compose down
 #
-# HOSxP MySQL อยู่นอก Docker — เชื่อมผ่าน LAN ด้วย DB_HOST ใน .env
+# Services ทั้งหมด:
+#   1. auth_db  — MySQL 8 สำหรับเก็บบัญชีผู้ใช้งานระบบ (รันภายใน Docker)
+#   2. backend  — FastAPI API Server (เชื่อมต่อ auth_db + ดึงข้อมูล HOSxP ผ่าน LAN)
+#   3. frontend — React + Nginx Web Server (เสิร์ฟหน้าเว็บพอร์ต 80)
+#
+# หมายเหตุเรื่องฐานข้อมูล:
+#   - HOSxP MySQL อยู่นอก Docker: เชื่อมต่อผ่าน LAN โดยดึง IP จาก DB_HOST ในไฟล์ .env
+# ═════════════════════════════════════════════════════════════════════════════
 
 services:
 
-  # ── Auth Database ─────────────────────────────────────────────────────────
+  # ── 1. Auth Database (ฐานข้อมูลบัญชีผู้ใช้งาน) ──────────────────────────────
+  # หน้าที่: เก็บข้อมูลผู้ใช้ (แพทย์, พยาบาล, IT Admin) และสิทธิ์การเข้าใช้งานระบบ
+  # สิ่งที่ต้องเตรียม:
+  #   - ไม่ต้องติดตั้ง MySQL เพิ่ม ระบบจะสร้าง container ให้เองอัตโนมัติ
+  #   - ข้อมูลผู้ใช้จะถูกเก็บถาวรไว้ใน Docker Volume ชื่อ auth_db_data (ไม่หายเมื่อรีสตาร์ต)
   auth_db:
     image: mysql:8.0
     container_name: rtsas_auth_db
@@ -22,7 +35,8 @@ services:
       MYSQL_USER: rtsas
       MYSQL_PASSWORD: ${AUTH_DB_PASSWORD:-rtsas}
     ports:
-      - "3307:3306"   # expose on 3307 to avoid conflict with HOSxP on host
+      # เปิดพอร์ต 3307 บนเครื่อง Host เพื่อไม่ให้ชนกับพอร์ต 3306 ของ HOSxP
+      - "3307:3306"
     volumes:
       - auth_db_data:/var/lib/mysql
     healthcheck:
@@ -33,7 +47,11 @@ services:
     networks:
       - rtsas_net
 
-  # ── Backend (FastAPI) ─────────────────────────────────────────────────────
+  # ── 2. Backend (FastAPI Application Server) ────────────────────────────────
+  # หน้าที่: คำนวณ NEWS Score, เช็คเตือนภัย Sepsis, ส่ง WebSocket, และให้บริการ REST API
+  # สิ่งที่ต้องเตรียม:
+  #   - ตรวจสอบไฟล์ .env ว่าตั้งค่า IP และสิทธิ์เชื่อมต่อ HOSxP ถูกต้องแล้ว
+  #   - Backend จะรอให้ auth_db พร้อมทำงานก่อน (service_healthy) จึงจะเริ่มระบบ
   backend:
     build:
       context: ./backend
@@ -45,12 +63,14 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Bangkok
-      # Auth DB (inside Docker)
+      # 1. การเชื่อมต่อ Auth DB ภายในเครือข่าย Docker
       AUTH_DB_URL: mysql+pymysql://rtsas:${AUTH_DB_PASSWORD:-rtsas}@auth_db:3306/rtsas_auth
-      # JWT
+
+      # 2. ความปลอดภัย JWT สำหรับ Token Login
       JWT_SECRET: ${JWT_SECRET:-CHANGE_ME_BEFORE_DEPLOY}
       JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-8}
-      # HOSxP — external MySQL (host machine or LAN)
+
+      # 3. การเชื่อมต่อฐานข้อมูล HOSxP โรงพยาบาล (อ่านข้อมูลสัญญาณชีพ)
       DB_HOST: ${DB_HOST:-host.docker.internal}
       DB_PORT: ${DB_PORT:-3306}
       DB_USER: ${DB_USER:-root}
@@ -58,7 +78,8 @@ services:
       DB_NAME: ${DB_NAME:-sepsis_db}
       DB_MIN_CONNECTIONS: ${DB_MIN_CONNECTIONS:-1}
       DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-10}
-      # Dashboard DB
+
+      # 4. การเชื่อมต่อฐานข้อมูล Dashboard (บันทึกและติดตามสถานะการรักษา)
       DASHBOARD_DB_HOST: ${DASHBOARD_DB_HOST:-host.docker.internal}
       DASHBOARD_DB_PORT: ${DASHBOARD_DB_PORT:-3306}
       DASHBOARD_DB_USER: ${DASHBOARD_DB_USER:-root}
@@ -66,16 +87,23 @@ services:
       DASHBOARD_DB_NAME: ${DASHBOARD_DB_NAME:-rtsas_dashboard}
       DASHBOARD_DB_MIN_CONNECTIONS: ${DASHBOARD_DB_MIN_CONNECTIONS:-1}
       DASHBOARD_DB_MAX_CONNECTIONS: ${DASHBOARD_DB_MAX_CONNECTIONS:-5}
-      # Query Behavior
-      ENABLE_DATE_FALLBACK: ${ENABLE_DATE_FALLBACK:-true}
+
+      # 5. ตัวเลือกการดึงข้อมูลย้อนหลัง (false = Production ดึงเฉพาะวันนี้, true = ทดสอบดึงวันล่าสุด)
+      ENABLE_DATE_FALLBACK: ${ENABLE_DATE_FALLBACK:-false}
     ports:
+      # เปิดพอร์ต 8000 สำหรับ API Server และ WebSocket (/ws/alerts)
       - "8000:8000"
     extra_hosts:
-      - "host.docker.internal:host-gateway"  # allow backend to reach host MySQL / LAN
+      # อนุญาตให้ container backend มองเห็น Host Machine และเครือข่าย LAN ภายนอกได้
+      - "host.docker.internal:host-gateway"
     networks:
       - rtsas_net
 
-  # ── Frontend (nginx) ──────────────────────────────────────────────────────
+  # ── 3. Frontend (Web Application เสิร์ฟผ่าน Nginx) ──────────────────────────
+  # หน้าที่: ส่วนติดต่อผู้ใช้งาน (UI) สำหรับแพทย์และพยาบาล รองรับ Real-time Sepsis Monitoring
+  # สิ่งที่ต้องเตรียม:
+  #   - ระบบจะ Build source code React/Vite และนำไฟล์ไปรันบน Nginx โดยอัตโนมัติ
+  #   - เข้าใช้งานผ่านเว็บเบราว์เซอร์ได้ที่ http://localhost หรือ http://<IP-เครื่องเซิร์ฟเวอร์>
   frontend:
     build:
       context: .
@@ -87,14 +115,18 @@ services:
     environment:
       TZ: Asia/Bangkok
     ports:
+      # พอร์ต 80 สำหรับเข้าใช้งานหน้าเว็บหลัก
       - "80:80"
     networks:
       - rtsas_net
 
-# ── Volumes & Networks ─────────────────────────────────────────────────────
+# ── พื้นที่จัดเก็บข้อมูลแบบถาวร (Persistent Volumes) ─────────────────────────
 volumes:
+  # บันทึกไฟล์ฐานข้อมูล auth_db เพื่อไม่ให้ User/Password สูญหายเมื่อปิดหรือ rebuild container
   auth_db_data:
 
+# ── เครือข่ายภายใน (Internal Bridge Network) ──────────────────────────────────
 networks:
+  # เครือข่ายบริดจ์สำหรับให้ container ต่างๆ คุยหากันได้ด้วยชื่อ service (auth_db, backend, frontend)
   rtsas_net:
     driver: bridge

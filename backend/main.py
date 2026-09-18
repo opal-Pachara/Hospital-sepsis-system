@@ -167,7 +167,11 @@ class ClearCacheRequest(BaseModel):
     preserve_hns: Optional[List[str]] = None
 
 
-@app.post("/api/admin/clear-cache")
+@app.post(
+    "/api/admin/clear-cache",
+    tags=["System Reset & Maintenance"],
+    summary="ล้างแคชผู้ป่วยในหน่วยความจำ (Clear Memory Cache)"
+)
 async def admin_clear_cache(
     payload: Optional[ClearCacheRequest] = None,
     current_user: Any = None,
@@ -278,8 +282,16 @@ async def reconnect_db_route():
         return JSONResponse(status_code=500, content={"status": "error", "error": str(e)})
 
 
-@app.post("/api/system/logs/clear")
-@app.delete("/api/system/logs")
+@app.post(
+    "/api/system/logs/clear",
+    tags=["System Reset & Maintenance"],
+    summary="เคลียร์ System Diagnostic Logs ทั้งหมด (Clear Logs)"
+)
+@app.delete(
+    "/api/system/logs",
+    tags=["System Reset & Maintenance"],
+    summary="ลบ System Diagnostic Logs ด้วย DELETE Method"
+)
 async def clear_logs_route():
     """Clear all system logs."""
     from .log_service import clear_logs, record_log
@@ -336,7 +348,11 @@ async def inject_patient_route(payload: InjectPatientRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/admin/reset-dashboard")
+@app.post(
+    "/api/admin/reset-dashboard",
+    tags=["System Reset & Maintenance"],
+    summary="รีเซ็ตและลบข้อมูล Dashboard ทั้งหมดกลับเป็นสถานะเริ่มต้น (Reset Dashboard to Zero-State)"
+)
 async def admin_reset_dashboard():
     """Clear all treated statuses and reset dashboard to clean zero-state for testing or production."""
     from .treatment_service import clear_treated_statuses
@@ -345,6 +361,15 @@ async def admin_reset_dashboard():
     try:
         cleared_hns = await clear_treated_statuses()
         clear_cache()
+        # Also clear treated_patient_archive to reset dashboard stats to zero-state
+        if dashboard_pool.pool and not getattr(dashboard_pool.pool, '_closed', False):
+            try:
+                async with dashboard_pool.get_connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute("DELETE FROM treated_patient_archive;")
+                logger.info("Cleared all records from treated_patient_archive.")
+            except Exception as arch_err:
+                logger.warning(f"Could not clear treated_patient_archive: {arch_err}")
         await broadcast_message(json.dumps({
             "type": "TREATMENT_STATUS_UPDATE",
             "action": "clear_treated",
@@ -787,7 +812,11 @@ async def checklist_route(body: ChecklistRequest):
     }))
     return JSONResponse(content={"status": "saved", "data": status})
 
-@app.post("/api/treatment-status/clear-treated")
+@app.post(
+    "/api/treatment-status/clear-treated",
+    tags=["System Reset & Maintenance"],
+    summary="ลบเฉพาะผู้ป่วยที่รักษาเสร็จสิ้นแล้วออกจากหน้า Dashboard (Clear Treated Patients)"
+)
 async def clear_treated_route():
     """Clear all records where treatment was completed, preserving active patients and visits."""
     from .treatment_service import clear_treated_statuses

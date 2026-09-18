@@ -8,13 +8,12 @@
 
 ```
 Hospital/
-├── docs/                                # 📚 เอกสารประกอบ, Mockups, และรายงานการทดสอบ
-│   ├── README.md                        # สารบัญเอกสารทั้งหมด
-│   ├── mockups/                         # ต้นแบบ UI ดั้งเดิม
-│   │   └── real_time_alert_mockup_phanikarn.html
-│   └── reports/                         # รายงานผลการทดสอบระบบและ QA Audits
-│       ├── COMPREHENSIVE_SYSTEM_TEST_REPORT.md
-│       └── QA_SYSTEM_TEST_REPORT.md
+├── DEPLOYMENT_GUIDE.md                  # 🚀 คู่มือการติดตั้ง เชื่อมต่อ HOSxP และ Docker Compose
+├── DATABASE_CLEANUP_GUIDE.md            # 🧹 คู่มือการเคลียร์และลบข้อมูลใน SQLite (Local & Docker)
+├── PROJECT_STRUCTURE.md                 # 📁 โครงสร้างและสถาปัตยกรรมไฟล์ของระบบฉบับนี้
+├── README.md                            # 📌 ภาพรวมระบบและการเริ่มต้นใช้งานแบบย่อ
+├── CODEBASE_GUIDE.md                    # 📘 คู่มืออธิบายโค้ดและสถาปัตยกรรมเชิงลึก
+├── TODO.md                              # 📝 บันทึกความคืบหน้าและการวางแผนระบบ
 │
 ├── src/                                 # ⚛️ รหัสต้นฉบับ Frontend (React 19 + TypeScript)
 │   ├── pages/                           # 📄 หน้าจอหลักแบบเต็มหน้า (Full-page Views)
@@ -119,8 +118,7 @@ Hospital/
 ├── tsconfig.json                        # Master TypeScript Configuration
 ├── tsconfig.app.json                    # Frontend App TypeScript Config (พร้อม @/* alias)
 ├── vite.config.ts                       # Vite Bundler Config (พร้อม Tailwind CSS & @/* alias)
-├── eslint.config.js                     # ESLint Configuration
-└── README.md                            # คู่มือการติดตั้งและใช้งานระบบ
+└── eslint.config.js                     # ESLint Configuration
 ```
 
 ---
