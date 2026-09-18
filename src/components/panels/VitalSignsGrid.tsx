@@ -1,4 +1,5 @@
 import type { NEWSResult, NEWSParameterScore } from '../../types';
+import { useRTSASStore } from '../../store/useRTSASStore';
 
 const paramConfig: Record<string, { icon: string; label: string; unit: string }> = {
   respiratoryRate: { icon: '🫁', label: 'RR', unit: 'ครั้ง/นาที' },
@@ -95,14 +96,39 @@ function VitalCard({ param }: { param: NEWSParameterScore }) {
 }
 
 export default function VitalSignsGrid({ newsResult }: { newsResult: NEWSResult }) {
-  const timeStr = new Date(newsResult.calculatedAt).toLocaleTimeString('th-TH', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+  const { selectedPatient, patientData, assessmentSchedule } = useRTSASStore();
+
+  // Find the latest completed assessment entry from the patient's schedule (Phase 4)
+  const schedule = (selectedPatient ? patientData[selectedPatient.id]?.assessmentSchedule : null) || assessmentSchedule;
+  const completedEntries = (schedule?.entries || []).filter(
+    (e) => e.isCompleted && e.newsResult
+  );
+  const latestAssessment = completedEntries.length > 0 ? completedEntries[completedEntries.length - 1] : null;
+
+  // Use the re-assessed newsResult and timestamp if available, otherwise fall back to initial newsResult
+  const effectiveNewsResult = latestAssessment?.newsResult || newsResult;
+  const effectiveTimeIso = latestAssessment?.completedAt || latestAssessment?.newsResult?.calculatedAt || effectiveNewsResult.calculatedAt;
+
+  let timeStr = '--:--:--';
+  if (effectiveTimeIso) {
+    try {
+      const d = new Date(effectiveTimeIso);
+      if (!isNaN(d.getTime())) {
+        timeStr = d.toLocaleTimeString('th-TH', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        });
+      }
+    } catch {
+      timeStr = '--:--:--';
+    }
+  }
+
+  const roundSuffix = latestAssessment ? ` (ประเมินซ้ำครั้งที่ ${latestAssessment.sequence})` : '';
 
   // Filter out oxygenSupplementation for the grid display (mockup doesn't show it)
-  const displayParams = newsResult.breakdown.filter(
+  const displayParams = effectiveNewsResult.breakdown.filter(
     (p) => p.parameter !== 'oxygenSupplementation'
   );
 
@@ -110,7 +136,7 @@ export default function VitalSignsGrid({ newsResult }: { newsResult: NEWSResult 
     <div className="section-card">
       <div className="section-card-header">
         <div className="section-card-title">
-          <span>📊</span> สัญญาณชีพ — ณ เวลา {timeStr} น.
+          <span>📊</span> สัญญาณชีพ — ณ เวลา {timeStr} น.{roundSuffix}
         </div>
         <div style={{ fontSize: '10px', color: '#94a3b8' }}>🔵 ตัวเลขในวงกลม = คะแนน NEWS</div>
       </div>
