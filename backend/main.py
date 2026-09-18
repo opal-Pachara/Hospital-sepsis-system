@@ -585,12 +585,10 @@ async def get_patient_timeline_route(hn: str):
         from .services import calculate_news_from_row
         news_res = calculate_news_from_row(visit)
         news_score = news_res.totalScore
-        risk_level = news_res.riskLevel
-        risk_text = "เสี่ยงสูง" if risk_level == "high" or news_score >= 5 else "เสี่ยงปานกลาง" if risk_level == "medium" else "เสี่ยงต่ำ"
         events.append({
             "id": f"news_{hn}",
             "timestamp": arrival_iso,
-            "actionText": f"🧮 ระบบคำนวณ NEWS Score = {news_score} ({risk_text})",
+            "actionText": f"🧮 ระบบคำนวณ NEWS Score = {news_score} ",
             "color": "red" if news_score >= 5 else "orange" if news_score >= 1 else "green",
             "actor": "ระบบ RTSAS",
         })

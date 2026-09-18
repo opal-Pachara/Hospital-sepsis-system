@@ -1,10 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 
 import { useRTSASStore, isHistoricalPatient } from '../../store/useRTSASStore';
-import type { ChecklistPhase, ChecklistItem, VitalSigns, OxygenStatus, AVPU, TimelineEvent } from '../../types';
+import type { ChecklistPhase, ChecklistItem, VitalSigns, NEWSResult } from '../../types';
 import { calculateNEWS } from '../../utils/newsCalculator';
 import { showToast } from '../common/Toast';
-import { maskHN } from '../../utils/hnMask';
 
 // Thai labels for checklist items
 const thaiLabels: Record<string, string> = {
@@ -552,6 +551,76 @@ function PhaseSection({ phase }: { phase: ChecklistPhase }) {
   );
 }
 
+const ASSESSMENT_GRID_TEMPLATE = '30px minmax(66px, 1fr) 38px 44px 46px 58px 40px 54px 40px minmax(104px, 1.2fr)';
+
+function getParamDetails(
+  vitals: VitalSigns | null,
+  newsResult: NEWSResult | null
+) {
+  if (!vitals) return null;
+
+  const breakdown = newsResult?.breakdown || [];
+  const getScore = (param: string) => breakdown.find((b) => b.parameter === param)?.score ?? 0;
+
+  const rrScore = getScore('respiratoryRate');
+  const spo2Score = getScore('spO2');
+  const tempScore = getScore('temperature');
+  const sbpScore = getScore('systolicBP');
+  const hrScore = getScore('heartRate');
+  const avpuScore = getScore('avpu');
+
+  const getColor = (score: number) => {
+    if (score >= 3) return '#dc2626'; // Red (Critical)
+    if (score === 2) return '#ea580c'; // Orange (Moderate)
+    if (score === 1) return '#ca8a04'; // Amber (Mild)
+    return '#16a34a'; // Green (Normal)
+  };
+
+  const bpDisplay = vitals.diastolicBP
+    ? `${vitals.systolicBP}/${vitals.diastolicBP}`
+    : `${vitals.systolicBP ?? '—'}`;
+  const gcsDisplay = `${vitals.gcs ?? 15} (${vitals.avpu || 'A'})`;
+
+  return {
+    rr: {
+      val: vitals.respiratoryRate ?? '—',
+      score: rrScore,
+      color: getColor(rrScore),
+      tooltip: `อัตราการหายใจ (RR): ${vitals.respiratoryRate ?? '—'} bpm (เกณฑ์ปกติ 12-20) | คะแนน: +${rrScore}`,
+    },
+    spo2: {
+      val: vitals.spO2 !== null ? `${vitals.spO2}%` : '—',
+      score: spo2Score,
+      color: getColor(spo2Score),
+      tooltip: `ความอิ่มตัว O₂ (SpO2): ${vitals.spO2 ?? '—'}% (เกณฑ์ปกติ ≥96%) | คะแนน: +${spo2Score}`,
+    },
+    temp: {
+      val: vitals.temperature !== null ? `${vitals.temperature}°` : '—',
+      score: tempScore,
+      color: getColor(tempScore),
+      tooltip: `อุณหภูมิ (Temp): ${vitals.temperature ?? '—'}°C (เกณฑ์ปกติ 36.1-38.0) | คะแนน: +${tempScore}`,
+    },
+    bp: {
+      val: bpDisplay,
+      score: sbpScore,
+      color: getColor(sbpScore),
+      tooltip: `ความดันโลหิต (BP): ${bpDisplay} mmHg (เกณฑ์ปกติ SBP 111-219) | คะแนน: +${sbpScore}`,
+    },
+    hr: {
+      val: vitals.heartRate ?? '—',
+      score: hrScore,
+      color: getColor(hrScore),
+      tooltip: `ชีพจร (HR): ${vitals.heartRate ?? '—'} bpm (เกณฑ์ปกติ 51-90) | คะแนน: +${hrScore}`,
+    },
+    gcsAvpu: {
+      val: gcsDisplay,
+      score: avpuScore,
+      color: getColor(avpuScore),
+      tooltip: `ระดับความรู้สึกตัว: GCS ${vitals.gcs ?? 15} / AVPU ${vitals.avpu || 'A'} (เกณฑ์ปกติ 15/A) | คะแนน: +${avpuScore}`,
+    },
+  };
+}
+
 function AssessmentScheduleSection({
   phase,
 }: {
@@ -640,324 +709,480 @@ function AssessmentScheduleSection({
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
           }}
         >
-          {/* Table Header */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '34px 1fr 44px 126px',
-              gap: '4px',
-              padding: '6px 8px',
-              background: '#eff6ff',
-              borderBottom: '1px solid #bfdbfe',
-              fontSize: '9.5px',
-              fontWeight: 700,
-              color: '#2563eb',
-              letterSpacing: '0.5px',
-              textTransform: 'uppercase',
-            }}
-          >
-            <span style={{ textAlign: 'center' }}>รอบ</span>
-            <span style={{ textAlign: 'center' }}>เวลาที่บันทึก</span>
-            <span style={{ textAlign: 'center' }}>NEWS</span>
-            <span style={{ textAlign: 'center' }}>สถานะ</span>
-          </div>
-
-          {/* Table Body */}
-          {entries.length > 0 ? (
-            <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
-              {(() => {
-                const firstUncompletedSeq =
-                  entries.find((e) => !e.isCompleted && !e.isCanceled)?.sequence ?? -1;
-                const firstCanceledSeq = entries.find((e) => e.isCanceled)?.sequence ?? -1;
-
-                return entries.map((entry) => {
-                  const isDone = entry.isCompleted;
-                  const isDue = !isDone && new Date() >= new Date(entry.scheduledTime);
-                  const recordedTimeStr = entry.completedAt
-                    ? new Date(entry.completedAt).toLocaleTimeString('th-TH', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })
-                    : null;
-
-                  return (
-                    <div
-                      key={entry.id}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '34px 1fr 44px 126px',
-                        gap: '4px',
-                        padding: '6px 8px',
-                        borderBottom: '1px solid #f1f5f9',
-                        alignItems: 'center',
-                        fontSize: '10px',
-                        ...(isDone
-                          ? { background: '#f0fdf440' }
-                          : isDue
-                            ? { background: '#fef2f250' }
-                            : {}),
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: '9.5px',
-                          color: '#64748b',
-                          fontWeight: 700,
-                          textAlign: 'center',
-                        }}
-                      >
-                        {entry.sequence}
-                      </span>
-                      <span style={{ textAlign: 'center' }}>
-                        {isDone && recordedTimeStr ? (
-                          <>
-                            <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#1e293b' }}>
-                              {recordedTimeStr} น.
-                            </span>
-                            <span style={{ fontSize: '8px', color: '#16a34a', display: 'block', fontWeight: 700 }}>
-                              ✓ {entry.intervalType}
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>—</span>
-                            <span style={{ fontSize: '8px', color: '#94a3b8', display: 'block' }}>
-                              {entry.intervalType}
-                            </span>
-                          </>
-                        )}
-                      </span>
-                      <span style={{ textAlign: 'center' }}>
-                        {entry.newsResult ? (
-                          <span
-                            style={{
-                              fontWeight: 800,
-                              fontSize: '10.5px',
-                              color:
-                                entry.newsResult.totalScore >= 7
-                                  ? '#dc2626'
-                                  : entry.newsResult.totalScore >= 5
-                                    ? '#ea580c'
-                                    : '#16a34a',
-                            }}
-                          >
-                            {entry.newsResult.totalScore}
-                          </span>
-                        ) : (
-                          <span style={{ color: '#94a3b8' }}>—</span>
-                        )}
-                      </span>
-                      <span style={{ textAlign: 'center' }}>
-                        {entry.isCanceled ? (
-                          <span
-                            style={{
-                              padding: '2px 6px',
-                              borderRadius: '10px',
-                              fontSize: '8px',
-                              fontWeight: 700,
-                              background:
-                                entry.sequence === firstCanceledSeq ? '#dcfce7' : '#f1f5f9',
-                              color:
-                                entry.sequence === firstCanceledSeq ? '#16a34a' : '#64748b',
-                              border: `1px solid ${entry.sequence === firstCanceledSeq ? '#16a34a' : '#cbd5e1'
-                                }`,
-                            }}
-                          >
-                            {entry.sequence === firstCanceledSeq ? '✅ เสร็จตรงนี้' : '— ยกเลิก'}
-                          </span>
-                        ) : isDone ? (
-                          <span
-                            style={{
-                              padding: '2px 6px',
-                              borderRadius: '10px',
-                              fontSize: '8px',
-                              fontWeight: 700,
-                              background: '#dcfce7',
-                              color: '#16a34a',
-                              border: '1px solid #bbf7d0',
-                            }}
-                          >
-                            ✓ บันทึกแล้ว
-                          </span>
-                        ) : !phase.isUnlocked ? (
-                          <span
-                            style={{
-                              padding: '2px 6px',
-                              borderRadius: '10px',
-                              fontSize: '8px',
-                              fontWeight: 700,
-                              background: '#f1f5f9',
-                              color: '#94a3b8',
-                              border: '1px solid #cbd5e1',
-                            }}
-                          >
-                            🔒 รอ Phase 3
-                          </span>
-                        ) : entry.sequence !== firstUncompletedSeq ? (
-                          <span
-                            style={{
-                              padding: '2px 6px',
-                              borderRadius: '10px',
-                              fontSize: '8px',
-                              fontWeight: 700,
-                              background: '#f1f5f9',
-                              color: '#94a3b8',
-                              border: '1px solid #cbd5e1',
-                            }}
-                          >
-                            🔒 รอครั้งก่อนหน้า
-                          </span>
-                        ) : isReadOnly ? (
-                          <span
-                            style={{
-                              padding: '2px 6px',
-                              borderRadius: '10px',
-                              fontSize: '8px',
-                              fontWeight: 700,
-                              background: '#f1f5f9',
-                              color: '#94a3b8',
-                              border: '1px solid #cbd5e1',
-                            }}
-                          >
-                            — ข้าม
-                          </span>
-                        ) : isDue && !isGloballyCompleted ? (
-                          <div style={{ display: 'flex', gap: '3px', width: '100%' }}>
-                            <button
-                              type="button"
-                              className="animate-pulse-btn"
-                              onClick={() => {
-                                if (!checkClinicalAuthOrPrompt()) return;
-                                openModal('assessment_form', {
-                                  entryId: entry.id,
-                                  sequence: entry.sequence,
-                                });
-                              }}
-                              style={{
-                                padding: '2px 6px',
-                                borderRadius: '10px',
-                                fontSize: '8px',
-                                fontWeight: 700,
-                                color: '#fff',
-                                background: '#dc2626',
-                                border: '1px solid #b91c1c',
-                                cursor: 'pointer',
-                                fontFamily: 'inherit',
-                                width: '100%',
-                              }}
-                            >
-                              ⚡ บันทึกด่วน
-                            </button>
-
-                          </div>
-                        ) : !isGloballyCompleted ? (
-                          <div style={{ display: 'flex', gap: '3px', width: '100%' }}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!checkClinicalAuthOrPrompt()) return;
-                                openModal('assessment_form', {
-                                  entryId: entry.id,
-                                  sequence: entry.sequence,
-                                });
-                              }}
-                              style={{
-                                padding: '2px 6px',
-                                borderRadius: '10px',
-                                fontSize: '8px',
-                                fontWeight: 700,
-                                color: '#2563eb',
-                                background: '#eff6ff',
-                                border: '1px solid #bfdbfe',
-                                cursor: 'pointer',
-                                fontFamily: 'inherit',
-                                width: '100%',
-                              }}
-                            >
-                              บันทึก
-                            </button>
-
-                          </div>
-                        ) : (
-                          <span
-                            style={{
-                              padding: '2px 6px',
-                              borderRadius: '10px',
-                              fontSize: '8px',
-                              fontWeight: 700,
-                              background: '#f1f5f9',
-                              color: '#94a3b8',
-                              border: '1px solid #cbd5e1',
-                            }}
-                          >
-                            — ข้าม
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-          ) : (
-            <div style={{ padding: '16px 12px', textAlign: 'center', background: '#f8fafc' }}>
-              <div style={{ fontSize: '20px', marginBottom: '4px' }}>⏱️</div>
-              <div style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>
-                รอแพทย์ยืนยันภาวะ Sepsis ทางคลินิกเพื่อสร้างตาราง
-              </div>
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            <div style={{ minWidth: '530px' }}>
+              {/* Table Header */}
               <div
                 style={{
+                  display: 'grid',
+                  gridTemplateColumns: ASSESSMENT_GRID_TEMPLATE,
+                  gap: '4px',
+                  padding: '6px 8px',
+                  background: '#eff6ff',
+                  borderBottom: '1px solid #bfdbfe',
                   fontSize: '9.5px',
-                  color: '#64748b',
-                  marginTop: '2px',
-                  maxWidth: '320px',
-                  margin: '2px auto 8px',
+                  fontWeight: 700,
+                  color: '#2563eb',
+                  letterSpacing: '0.3px',
+                  textTransform: 'uppercase',
+                  alignItems: 'center',
                 }}
               >
-                เมื่อยืนยันแล้ว ระบบจะเริ่มนับเวลาและสร้างรอบประเมิน Q15 (4 ครั้งแรก) และ Q30 โดยอัตโนมัติ
+                <span style={{ textAlign: 'center' }}>รอบ</span>
+                <span style={{ textAlign: 'center' }}>เวลาบันทึก</span>
+                <span style={{ textAlign: 'center' }} title="Respiratory Rate (อัตราการหายใจ)">RR</span>
+                <span style={{ textAlign: 'center' }} title="SpO2 (ความอิ่มตัวออกซิเจน)">SpO₂</span>
+                <span style={{ textAlign: 'center' }} title="Temperature (อุณหภูมิร่างกาย)">Temp</span>
+                <span style={{ textAlign: 'center' }} title="Blood Pressure (ความดันโลหิต)">BP</span>
+                <span style={{ textAlign: 'center' }} title="Heart Rate (ชีพจร)">HR</span>
+                <span style={{ textAlign: 'center' }} title="Glasgow Coma Scale / AVPU">GCS/AVPU</span>
+                <span style={{ textAlign: 'center' }} title="NEWS Score รวม">NEWS</span>
+                <span style={{ textAlign: 'center' }}>สถานะ</span>
               </div>
 
-              {/* Preview Planned Rows (Placeholder so clinicians see the table structure) */}
-              <div
-                style={{
-                  border: '1px dashed #cbd5e1',
-                  borderRadius: '6px',
-                  background: '#fff',
-                  opacity: 0.7,
-                  marginTop: '8px',
-                  fontSize: '9.5px',
-                }}
-              >
-                {[
-                  { seq: 1, label: 'Q15 ครั้งที่ 1' },
-                  { seq: 2, label: 'Q15 ครั้งที่ 2' },
-                  { seq: 3, label: 'Q15 ครั้งที่ 3' },
-                  { seq: 4, label: 'Q15 ครั้งที่ 4' },
-                  { seq: 5, label: 'Q30 ครั้งที่ 1' },
-                ].map((item, idx) => (
+              {/* Table Body */}
+              {entries.length > 0 ? (
+                <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+                  {(() => {
+                    const firstUncompletedSeq =
+                      entries.find((e) => !e.isCompleted && !e.isCanceled)?.sequence ?? -1;
+                    const firstCanceledSeq = entries.find((e) => e.isCanceled)?.sequence ?? -1;
+
+                    return entries.map((entry) => {
+                      const isDone = entry.isCompleted;
+                      const isDue = !isDone && new Date() >= new Date(entry.scheduledTime);
+                      const recordedTimeStr = entry.completedAt
+                        ? new Date(entry.completedAt).toLocaleTimeString('th-TH', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : null;
+
+                      const effectiveNews = entry.newsResult || (entry.vitals ? calculateNEWS(entry.vitals) : null);
+                      const paramDetails = getParamDetails(entry.vitals, effectiveNews);
+
+                      return (
+                        <div
+                          key={entry.id}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: ASSESSMENT_GRID_TEMPLATE,
+                            gap: '4px',
+                            padding: '6px 8px',
+                            borderBottom: '1px solid #f1f5f9',
+                            alignItems: 'center',
+                            fontSize: '10px',
+                            ...(isDone
+                              ? { background: '#f0fdf440' }
+                              : isDue
+                                ? { background: '#fef2f250' }
+                                : {}),
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: '9.5px',
+                              color: '#64748b',
+                              fontWeight: 700,
+                              textAlign: 'center',
+                            }}
+                          >
+                            {entry.sequence}
+                          </span>
+                          <span style={{ textAlign: 'center' }}>
+                            {isDone && recordedTimeStr ? (
+                              <>
+                                <span style={{ fontSize: '10px', fontWeight: 600, color: '#1e293b', whiteSpace: 'nowrap' }}>
+                                  {recordedTimeStr} น.
+                                </span>
+                                <span style={{ fontSize: '8px', color: '#16a34a', display: 'block', fontWeight: 700 }}>
+                                  ✓ {entry.intervalType}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span style={{ fontSize: '10px', color: '#94a3b8' }}>—</span>
+                                <span style={{ fontSize: '8px', color: '#94a3b8', display: 'block' }}>
+                                  {entry.intervalType}
+                                </span>
+                              </>
+                            )}
+                          </span>
+
+                          {/* RR */}
+                          <span
+                            style={{
+                              textAlign: 'center',
+                              fontSize: '10px',
+                              fontWeight: paramDetails ? 700 : 400,
+                              color: paramDetails?.rr.color ?? '#94a3b8',
+                              cursor: paramDetails ? 'help' : 'default',
+                            }}
+                            title={paramDetails?.rr.tooltip}
+                          >
+                            {paramDetails ? paramDetails.rr.val : '—'}
+                          </span>
+
+                          {/* SpO2 */}
+                          <span
+                            style={{
+                              textAlign: 'center',
+                              fontSize: '10px',
+                              fontWeight: paramDetails ? 700 : 400,
+                              color: paramDetails?.spo2.color ?? '#94a3b8',
+                              cursor: paramDetails ? 'help' : 'default',
+                            }}
+                            title={paramDetails?.spo2.tooltip}
+                          >
+                            {paramDetails ? paramDetails.spo2.val : '—'}
+                          </span>
+
+                          {/* Temp */}
+                          <span
+                            style={{
+                              textAlign: 'center',
+                              fontSize: '10px',
+                              fontWeight: paramDetails ? 700 : 400,
+                              color: paramDetails?.temp.color ?? '#94a3b8',
+                              cursor: paramDetails ? 'help' : 'default',
+                            }}
+                            title={paramDetails?.temp.tooltip}
+                          >
+                            {paramDetails ? paramDetails.temp.val : '—'}
+                          </span>
+
+                          {/* BP */}
+                          <span
+                            style={{
+                              textAlign: 'center',
+                              fontSize: '9.5px',
+                              fontWeight: paramDetails ? 700 : 400,
+                              color: paramDetails?.bp.color ?? '#94a3b8',
+                              cursor: paramDetails ? 'help' : 'default',
+                              whiteSpace: 'nowrap',
+                            }}
+                            title={paramDetails?.bp.tooltip}
+                          >
+                            {paramDetails ? paramDetails.bp.val : '—'}
+                          </span>
+
+                          {/* HR */}
+                          <span
+                            style={{
+                              textAlign: 'center',
+                              fontSize: '10px',
+                              fontWeight: paramDetails ? 700 : 400,
+                              color: paramDetails?.hr.color ?? '#94a3b8',
+                              cursor: paramDetails ? 'help' : 'default',
+                            }}
+                            title={paramDetails?.hr.tooltip}
+                          >
+                            {paramDetails ? paramDetails.hr.val : '—'}
+                          </span>
+
+                          {/* GCS/AVPU */}
+                          <span
+                            style={{
+                              textAlign: 'center',
+                              fontSize: '9.5px',
+                              fontWeight: paramDetails ? 700 : 400,
+                              color: paramDetails?.gcsAvpu.color ?? '#94a3b8',
+                              cursor: paramDetails ? 'help' : 'default',
+                              whiteSpace: 'nowrap',
+                            }}
+                            title={paramDetails?.gcsAvpu.tooltip}
+                          >
+                            {paramDetails ? paramDetails.gcsAvpu.val : '—'}
+                          </span>
+
+                          {/* NEWS Score */}
+                          <span style={{ textAlign: 'center' }}>
+                            {effectiveNews ? (
+                              <span
+                                style={{
+                                  fontWeight: 800,
+                                  fontSize: '10.5px',
+                                  color:
+                                    effectiveNews.totalScore >= 7
+                                      ? '#dc2626'
+                                      : effectiveNews.totalScore >= 5
+                                        ? '#ea580c'
+                                        : '#16a34a',
+                                }}
+                                title={`NEWS Score รวม: ${effectiveNews.totalScore} (${effectiveNews.riskLevel})`}
+                              >
+                                {effectiveNews.totalScore}
+                              </span>
+                            ) : (
+                              <span style={{ color: '#94a3b8' }}>—</span>
+                            )}
+                          </span>
+
+                          {/* Status */}
+                          <span style={{ textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {entry.isCanceled ? (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  height: '22px',
+                                  padding: '0 8px',
+                                  borderRadius: '12px',
+                                  fontSize: '8.5px',
+                                  fontWeight: 700,
+                                  background:
+                                    entry.sequence === firstCanceledSeq ? '#dcfce7' : '#f1f5f9',
+                                  color:
+                                    entry.sequence === firstCanceledSeq ? '#16a34a' : '#64748b',
+                                  border: `1px solid ${entry.sequence === firstCanceledSeq ? '#16a34a' : '#cbd5e1'
+                                    }`,
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {entry.sequence === firstCanceledSeq ? '✅ เสร็จตรงนี้' : '— ยกเลิก'}
+                              </span>
+                            ) : isDone ? (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  height: '22px',
+                                  padding: '0 8px',
+                                  borderRadius: '12px',
+                                  fontSize: '8.5px',
+                                  fontWeight: 700,
+                                  background: '#dcfce7',
+                                  color: '#16a34a',
+                                  border: '1px solid #bbf7d0',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                ✓ บันทึกแล้ว
+                              </span>
+                            ) : !phase.isUnlocked ? (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  height: '22px',
+                                  padding: '0 8px',
+                                  borderRadius: '12px',
+                                  fontSize: '8.5px',
+                                  fontWeight: 700,
+                                  background: '#f1f5f9',
+                                  color: '#94a3b8',
+                                  border: '1px solid #cbd5e1',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                🔒 รอ Phase 3
+                              </span>
+                            ) : entry.sequence !== firstUncompletedSeq ? (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  height: '22px',
+                                  padding: '0 8px',
+                                  borderRadius: '12px',
+                                  fontSize: '8.5px',
+                                  fontWeight: 700,
+                                  background: '#f1f5f9',
+                                  color: '#94a3b8',
+                                  border: '1px solid #cbd5e1',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                🔒 รอครั้งก่อนหน้า
+                              </span>
+                            ) : isReadOnly ? (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  height: '22px',
+                                  padding: '0 8px',
+                                  borderRadius: '12px',
+                                  fontSize: '8.5px',
+                                  fontWeight: 700,
+                                  background: '#f1f5f9',
+                                  color: '#94a3b8',
+                                  border: '1px solid #cbd5e1',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                — ข้าม
+                              </span>
+                            ) : isDue && !isGloballyCompleted ? (
+                              <button
+                                type="button"
+                                className="animate-pulse-btn"
+                                onClick={() => {
+                                  if (!checkClinicalAuthOrPrompt()) return;
+                                  openModal('assessment_form', {
+                                    entryId: entry.id,
+                                    sequence: entry.sequence,
+                                  });
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  height: '22px',
+                                  padding: '0 10px',
+                                  borderRadius: '12px',
+                                  fontSize: '9.5px',
+                                  fontWeight: 700,
+                                  color: '#fff',
+                                  background: '#dc2626',
+                                  border: '1px solid #b91c1c',
+                                  cursor: 'pointer',
+                                  fontFamily: 'inherit',
+                                  whiteSpace: 'nowrap',
+                                  transition: 'all 0.15s ease',
+                                  boxShadow: '0 1px 2px rgba(220,38,38,0.2)',
+                                }}
+                              >
+                                ⚡ บันทึกด่วน
+                              </button>
+                            ) : !isGloballyCompleted ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!checkClinicalAuthOrPrompt()) return;
+                                  openModal('assessment_form', {
+                                    entryId: entry.id,
+                                    sequence: entry.sequence,
+                                  });
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  height: '22px',
+                                  padding: '0 14px',
+                                  borderRadius: '12px',
+                                  fontSize: '9.5px',
+                                  fontWeight: 700,
+                                  color: '#2563eb',
+                                  background: '#eff6ff',
+                                  border: '1px solid #bfdbfe',
+                                  cursor: 'pointer',
+                                  fontFamily: 'inherit',
+                                  whiteSpace: 'nowrap',
+                                  transition: 'all 0.15s ease',
+                                  boxShadow: '0 1px 2px rgba(37,99,235,0.06)',
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = '#2563eb';
+                                  e.currentTarget.style.color = '#fff';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = '#eff6ff';
+                                  e.currentTarget.style.color = '#2563eb';
+                                }}
+                              >
+                                บันทึก
+                              </button>
+                            ) : (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  height: '22px',
+                                  padding: '0 8px',
+                                  borderRadius: '12px',
+                                  fontSize: '8.5px',
+                                  fontWeight: 700,
+                                  background: '#f1f5f9',
+                                  color: '#94a3b8',
+                                  border: '1px solid #cbd5e1',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                — ข้าม
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              ) : (
+                <div style={{ padding: '16px 12px', textAlign: 'center', background: '#f8fafc' }}>
+                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>⏱️</div>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>
+                    รอแพทย์ยืนยันภาวะ Sepsis ทางคลินิกเพื่อสร้างตาราง
+                  </div>
                   <div
-                    key={item.seq}
                     style={{
-                      display: 'grid',
-                      gridTemplateColumns: '34px 1fr 44px 126px',
-                      gap: '4px',
-                      padding: '5px 8px',
-                      borderBottom: idx < 4 ? '1px dashed #e2e8f0' : 'none',
+                      fontSize: '9.5px',
                       color: '#64748b',
+                      marginTop: '2px',
+                      maxWidth: '320px',
+                      margin: '2px auto 8px',
                     }}
                   >
-                    <span style={{ textAlign: 'center', fontWeight: 700 }}>{item.seq}</span>
-                    <span style={{ textAlign: 'center' }}>
-                      <span style={{ fontSize: '10px', color: '#94a3b8' }}>—</span>
-                      <span style={{ fontSize: '8px', color: '#94a3b8', display: 'block' }}>{item.label}</span>
-                    </span>
-                    <span style={{ textAlign: 'center' }}>—</span>
-                    <span style={{ textAlign: 'center', color: '#94a3b8' }}>รอเริ่มตาราง</span>
+                    เมื่อยืนยันแล้ว ระบบจะเริ่มนับเวลาและสร้างรอบประเมิน Q15 (4 ครั้งแรก) และ Q30 โดยอัตโนมัติ
                   </div>
-                ))}
-              </div>
+
+                  {/* Preview Planned Rows (Placeholder so clinicians see the table structure) */}
+                  <div
+                    style={{
+                      border: '1px dashed #cbd5e1',
+                      borderRadius: '6px',
+                      background: '#fff',
+                      opacity: 0.7,
+                      marginTop: '8px',
+                      fontSize: '9.5px',
+                    }}
+                  >
+                    {[
+                      { seq: 1, label: 'Q15 ครั้งที่ 1' },
+                      { seq: 2, label: 'Q15 ครั้งที่ 2' },
+                      { seq: 3, label: 'Q15 ครั้งที่ 3' },
+                      { seq: 4, label: 'Q15 ครั้งที่ 4' },
+                      { seq: 5, label: 'Q30 ครั้งที่ 1' },
+                    ].map((item, idx) => (
+                      <div
+                        key={item.seq}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: ASSESSMENT_GRID_TEMPLATE,
+                          gap: '4px',
+                          padding: '5px 8px',
+                          borderBottom: idx < 4 ? '1px dashed #e2e8f0' : 'none',
+                          color: '#64748b',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <span style={{ textAlign: 'center', fontWeight: 700 }}>{item.seq}</span>
+                        <span style={{ textAlign: 'center' }}>
+                          <span style={{ fontSize: '10px', color: '#94a3b8' }}>—</span>
+                          <span style={{ fontSize: '8px', color: '#94a3b8', display: 'block' }}>{item.label}</span>
+                        </span>
+                        <span style={{ textAlign: 'center', color: '#cbd5e1' }}>—</span>
+                        <span style={{ textAlign: 'center', color: '#cbd5e1' }}>—</span>
+                        <span style={{ textAlign: 'center', color: '#cbd5e1' }}>—</span>
+                        <span style={{ textAlign: 'center', color: '#cbd5e1' }}>—</span>
+                        <span style={{ textAlign: 'center', color: '#cbd5e1' }}>—</span>
+                        <span style={{ textAlign: 'center', color: '#cbd5e1' }}>—</span>
+                        <span style={{ textAlign: 'center', color: '#cbd5e1' }}>—</span>
+                        <span style={{ textAlign: 'center', color: '#94a3b8' }}>รอเริ่มตาราง</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
+          </div>
 
           {/* Table Footer */}
           <div
@@ -988,9 +1213,8 @@ export default function ChecklistPanel() {
     selectedPatient,
   } = useRTSASStore();
 
-  // Check if patient is globally completed or historical
+  // Check if patient is historical
   const currentData = selectedPatient ? patientData[selectedPatient.id] : null;
-  const isGloballyCompleted = (currentData?.sepsisRuledOut ?? false) || (currentData?.treatmentCompleted ?? false);
   const isHistorical = isHistoricalPatient(selectedPatient, patientData);
 
   // Calculate overall progress

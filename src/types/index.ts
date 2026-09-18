@@ -74,6 +74,9 @@ export interface VitalSigns {
   /** Systolic blood pressure (mmHg) */
   systolicBP: number | null;
 
+  /** Diastolic blood pressure (mmHg) */
+  diastolicBP?: number | null;
+
   /** Heart rate (beats per minute) */
   heartRate: number | null;
 
