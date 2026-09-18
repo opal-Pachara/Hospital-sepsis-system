@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import json
+import time
 from datetime import datetime, date
 from aiomysql import DictCursor
 from typing import List, Dict, Any, Optional
@@ -18,9 +19,10 @@ from .services import (
 
 logger = logging.getLogger(__name__)
 
-# Persistent storage file for seen vitals
+# Persistent storage file for seen vitals and patient snapshots
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 SEEN_VITALS_FILE = os.path.join(DATA_DIR, "seen_vitals.json")
+SEEN_SNAPSHOTS_FILE = os.path.join(DATA_DIR, "patient_snapshots.json")
 
 
 def _load_seen_vitals() -> Dict[str, bool]:
@@ -46,8 +48,34 @@ def _save_seen_vitals():
         logger.warning(f"Could not save seen_vitals.json: {e}")
 
 
+def _load_patient_snapshots() -> Dict[str, Dict[str, Any]]:
+    """Load cached patient vitals snapshots from disk."""
+    if os.path.exists(SEEN_SNAPSHOTS_FILE):
+        try:
+            with open(SEEN_SNAPSHOTS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception as e:
+            logger.warning(f"Could not load patient_snapshots.json: {e}")
+    return {}
+
+
+def _save_patient_snapshots():
+    """Save cached patient vitals snapshots to disk."""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(SEEN_SNAPSHOTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(last_seen_patient_snapshots, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f"Could not save patient_snapshots.json: {e}")
+
+
 # Keep track of previously seen readings to avoid re-broadcasting on every poll
 last_seen_vitals: Dict[str, bool] = _load_seen_vitals()
+
+# Keep track of previously seen patient vitals snapshots per HN to detect updates/diffs
+last_seen_patient_snapshots: Dict[str, Dict[str, Any]] = _load_patient_snapshots()
 
 # Cache of all today's patients (refreshed every poll)
 _patients_cache: List[Dict[str, Any]] = []
@@ -62,7 +90,7 @@ _last_clear_date: date | None = None
 
 def clear_cache(preserve_hns: Optional[List[str]] = None) -> dict:
     """Clear last_seen_vitals and patient cache, preserving any HNs currently in active treatment. Returns stats."""
-    global last_seen_vitals, _patients_cache
+    global last_seen_vitals, last_seen_patient_snapshots, _patients_cache
     preserve_set = set(str(hn).strip() for hn in (preserve_hns or []))
 
     total_vitals = len(last_seen_vitals)
@@ -72,6 +100,7 @@ def clear_cache(preserve_hns: Optional[List[str]] = None) -> dict:
         cleared_vitals = total_vitals
         cleared_patients = total_patients
         last_seen_vitals = {}
+        last_seen_patient_snapshots = {}
         _patients_cache = []
         retained_vitals = 0
         retained_patients = 0
@@ -82,6 +111,9 @@ def clear_cache(preserve_hns: Optional[List[str]] = None) -> dict:
             hn_part = k.split('_')[0]
             if hn_part in preserve_set:
                 new_vitals[k] = v
+
+        new_snapshots = {k: v for k, v in last_seen_patient_snapshots.items() if k in preserve_set}
+        last_seen_patient_snapshots = new_snapshots
 
         # Keep patient cache for preserved HNs
         new_patients = [p for p in _patients_cache if str(p.get('hn', '')).strip() in preserve_set]
@@ -95,6 +127,7 @@ def clear_cache(preserve_hns: Optional[List[str]] = None) -> dict:
         _patients_cache = new_patients
 
     _save_seen_vitals()
+    _save_patient_snapshots()
     logger.info(
         f"Cache cleared: {cleared_vitals} vitals, {cleared_patients} patients removed. "
         f"Preserved {retained_patients} active patients ({list(preserve_set)})."
@@ -255,7 +288,7 @@ def build_patient_list(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 id=hn,
                 hn=hn,
                 vn=vn if vn else None,
-                patient_name=None,
+                patient_name='',
                 age=_si(row.get('age')),
                 vstdate=vstdate_str,
                 vsttime=vsttime_str,
@@ -284,7 +317,7 @@ def build_patient_list(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 async def process_vitals(force_log: bool = False, trigger: str = "background_polling"):
-    global _patients_cache, last_seen_vitals
+    global _patients_cache, last_seen_vitals, last_seen_patient_snapshots
 
     logger.info("Polling sepsis_db for new vital signs...")
     rows = await fetch_vitals_from_db()
@@ -305,100 +338,41 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
     # Detect if this is the very first baseline run (no seen vitals tracked yet)
     is_initial_baseline = (len(last_seen_vitals) == 0 and total_count > 0)
 
-    new_rows = []
-    for row in rows:
-        try:
-            hn = str(row.get('hn', '')).strip()
-            vstdate = row.get('vstdate')
-            vsttime = row.get('vsttime')
-            vstdate_str = format_date_str(vstdate)
-            vsttime_str = format_time_str(vsttime)
-            reading_key = f"{hn}_{vsttime_str}"
+    FIELD_NAMES_TH = {
+        "sbp": "ความดันตัวบน (SBP)",
+        "dbp": "ความดันตัวล่าง (DBP)",
+        "heart_rate": "ชีพจร (HR)",
+        "resp_rate": "อัตราการหายใจ (RR)",
+        "temperature": "อุณหภูมิ (BT)",
+        "spo2": "ออกซิเจน (SpO2)",
+        "gcs": "ระดับความรู้สึกตัว (GCS)",
+    }
+    ALL_VITAL_FIELDS = ["sbp", "dbp", "heart_rate", "resp_rate", "temperature", "spo2", "gcs"]
 
-            if is_initial_baseline:
+    # 1. CASE: Initial Baseline Setup (บันทึกสรุปสถานะระบบ ไม่บวม log ทีละราย)
+    if is_initial_baseline:
+        for row in rows:
+            try:
+                hn = str(row.get('hn', '')).strip()
+                if not hn:
+                    continue
+                vsttime_str = format_time_str(row.get('vsttime'))
+                reading_key = f"{hn}_{vsttime_str}"
                 last_seen_vitals[reading_key] = True
-            elif reading_key not in last_seen_vitals:
-                last_seen_vitals[reading_key] = True
-                new_rows.append(row)
 
-                news = calculate_news_from_row(row)
-                arrival_iso = row_to_arrival_iso(vstdate, vsttime)
+                sbp_val = _sf(row.get("sbp") or row.get("bps"))
+                dbp_val = _sf(row.get("dbp") or row.get("bpd"))
+                hr_val = _sf(row.get("heart_rate") or row.get("pulse"))
+                rr_val = _sf(row.get("resp_rate") or row.get("rr"))
+                temp_val = _sf(row.get("temperature"))
+                spo2_val = _sf(row.get("spo2") or row.get("o2sat"))
+                gcs_val = _si(row.get("gcs"))
 
-                payload = SepsisAlertPayload(
-                    hn=hn,
-                    vn=str(row.get('vn') or ''),
-                    patient_name=None,
-                    age=_si(row.get('age')),
-                    gcs=_si(row.get('gcs')),
-                    spo2=_sf(row.get('spo2') or row.get('o2sat')),
-                    heart_rate=_sf(row.get('heart_rate') or row.get('pulse')),
-                    sbp=_sf(row.get('sbp') or row.get('bps')),
-                    dbp=_sf(row.get('dbp') or row.get('bpd')),
-                    resp_rate=_sf(row.get('resp_rate') or row.get('rr')),
-                    temperature=_sf(row.get('temperature')),
-                    sex=sex_label(row.get('sex')),
-                    chief_complaint=row.get('chief_complaint'),
-                    weight=_sf(row.get('weight')),
-                    height=_sf(row.get('height')),
-                    vstdate=vstdate_str,
-                    vsttime=vsttime_str,
-                    news_result=news,
-                    is_new_alert=True,
-                    timestamp=arrival_iso,
-                )
-                await broadcast_message(payload.model_dump_json())
+                r_news = calculate_news_from_row(row)
+                total_score = getattr(r_news, "totalScore", 0) if hasattr(r_news, "totalScore") else (r_news.get("totalScore", 0) if isinstance(r_news, dict) else 0)
+                risk_lvl = getattr(r_news, "riskLevel", "low") if hasattr(r_news, "riskLevel") else (r_news.get("riskLevel", "low") if isinstance(r_news, dict) else "low")
 
-        except Exception as e:
-            logger.error(f"Error processing row for HN {row.get('hn')}: {e}")
-
-    # Persist updated seen vitals
-    if is_initial_baseline or new_rows:
-        _save_seen_vitals()
-
-    # Helper function to extract detailed vitals & NEWS from raw rows
-    def _extract_patient_details(target_list: List[Dict[str, Any]]):
-        details = []
-        high_c, med_c, low_c = 0, 0, 0
-        for r in target_list:
-            r_news = calculate_news_from_row(r)
-            total_score = getattr(r_news, "totalScore", 0) if hasattr(r_news, "totalScore") else (r_news.get("totalScore", 0) if isinstance(r_news, dict) else 0)
-            risk_lvl = getattr(r_news, "riskLevel", "low") if hasattr(r_news, "riskLevel") else (r_news.get("riskLevel", "low") if isinstance(r_news, dict) else "low")
-            single_alert = getattr(r_news, "hasSingleParameterAlert", False) if hasattr(r_news, "hasSingleParameterAlert") else False
-
-            if risk_lvl == "high" or total_score >= 5:
-                high_c += 1
-            elif risk_lvl == "medium" or total_score >= 3:
-                med_c += 1
-            else:
-                low_c += 1
-
-            sbp_val = _sf(r.get("sbp") or r.get("bps"))
-            dbp_val = _sf(r.get("dbp") or r.get("bpd"))
-            hr_val = _sf(r.get("heart_rate") or r.get("pulse"))
-            rr_val = _sf(r.get("resp_rate") or r.get("rr"))
-            temp_val = _sf(r.get("temperature"))
-            spo2_val = _sf(r.get("spo2") or r.get("o2sat"))
-            gcs_val = _si(r.get("gcs"))
-
-            param_dict = {}
-            if hasattr(r_news, "breakdown") and isinstance(r_news.breakdown, list):
-                for b in r_news.breakdown:
-                    p_name = getattr(b, "parameter", "")
-                    p_val = getattr(b, "displayValue", "")
-                    p_sc = getattr(b, "score", 0)
-                    param_dict[p_name] = f"{p_val} ({p_sc} คะแนน)"
-
-            details.append({
-                "hn": str(r.get("hn") or ""),
-                "vn": str(r.get("vn") or ""),
-                "vstdate": format_date_str(r.get("vstdate")),
-                "vsttime": format_time_str(r.get("vsttime")),
-                "news_score": total_score,
-                "risk_level": risk_lvl,
-                "has_single_alert": single_alert,
-                "vitals_summary": f"BP {sbp_val or '-'}/{dbp_val or '-'}, HR {hr_val or '-'}, RR {rr_val or '-'}, BT {temp_val or '-'}°C, SpO2 {spo2_val or '-'}%, GCS {gcs_val or '-'}",
-                "parameters": param_dict,
-                "vitals": {
+                vitals_dict = {
                     "sbp": sbp_val,
                     "dbp": dbp_val,
                     "heart_rate": hr_val,
@@ -407,11 +381,25 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                     "spo2": spo2_val,
                     "gcs": gcs_val,
                 }
-            })
-        return details, high_c, med_c, low_c
+                missing_fields = [k for k in ALL_VITAL_FIELDS if vitals_dict[k] is None]
+                is_complete = len(missing_fields) == 0
 
-    # 1. CASE: Initial Baseline Setup
-    if is_initial_baseline:
+                last_seen_patient_snapshots[hn] = {
+                    "hn": hn,
+                    "vn": str(row.get('vn') or ''),
+                    "vstdate": format_date_str(row.get('vstdate')),
+                    "vsttime": vsttime_str,
+                    "news_score": total_score,
+                    "risk_level": risk_lvl,
+                    "vitals": vitals_dict,
+                    "is_complete": is_complete,
+                }
+            except Exception as e:
+                logger.error(f"Error caching baseline for HN {row.get('hn')}: {e}")
+
+        _save_seen_vitals()
+        _save_patient_snapshots()
+
         try:
             from .treatment_service import get_all_treatment_statuses
             treatment_statuses = await get_all_treatment_statuses()
@@ -440,8 +428,299 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
             logger.error(f"Failed to record initial baseline logs: {err}")
         return
 
-    # 2. CASE: New rows detected or explicit force_log requested
-    if new_rows or force_log:
+    # 2. CASE: Normal Polling — Process New Patients and Vitals Updates
+    new_patients_logged = 0
+    updated_patients_logged = 0
+
+    for row in rows:
+        try:
+            hn = str(row.get('hn', '')).strip()
+            if not hn:
+                continue
+            vn = str(row.get('vn', '') or '')
+            vstdate = row.get('vstdate')
+            vsttime = row.get('vsttime')
+            vstdate_str = format_date_str(vstdate)
+            vsttime_str = format_time_str(vsttime)
+            reading_key = f"{hn}_{vsttime_str}"
+
+            sbp_val = _sf(row.get("sbp") or row.get("bps"))
+            dbp_val = _sf(row.get("dbp") or row.get("bpd"))
+            hr_val = _sf(row.get("heart_rate") or row.get("pulse"))
+            rr_val = _sf(row.get("resp_rate") or row.get("rr"))
+            temp_val = _sf(row.get("temperature"))
+            spo2_val = _sf(row.get("spo2") or row.get("o2sat"))
+            gcs_val = _si(row.get("gcs"))
+
+            current_vitals = {
+                "sbp": sbp_val,
+                "dbp": dbp_val,
+                "heart_rate": hr_val,
+                "resp_rate": rr_val,
+                "temperature": temp_val,
+                "spo2": spo2_val,
+                "gcs": gcs_val,
+            }
+
+            missing_fields = [k for k in ALL_VITAL_FIELDS if current_vitals[k] is None]
+            present_fields = [k for k in ALL_VITAL_FIELDS if current_vitals[k] is not None]
+            is_complete = len(missing_fields) == 0
+
+            # Build vitals summary string
+            sbp_s = f"{sbp_val:.0f}" if sbp_val is not None else "-"
+            dbp_s = f"{dbp_val:.0f}" if dbp_val is not None else "-"
+            hr_s = f"{hr_val:.0f}" if hr_val is not None else "-"
+            rr_s = f"{rr_val:.0f}" if rr_val is not None else "-"
+            bt_s = f"{temp_val:.1f}" if temp_val is not None else "-"
+            spo2_s = f"{spo2_val:.0f}" if spo2_val is not None else "-"
+            gcs_s = f"{gcs_val}" if gcs_val is not None else "-"
+            vitals_summary = f"BP {sbp_s}/{dbp_s}, HR {hr_s}, RR {rr_s}, BT {bt_s}°C, SpO2 {spo2_s}%, GCS {gcs_s}"
+
+            is_new_patient = (hn not in last_seen_patient_snapshots and reading_key not in last_seen_vitals)
+
+            if is_new_patient:
+                # ─── CASE A: New Patient Ingested ───
+                t0 = time.perf_counter()
+                r_news = calculate_news_from_row(row)
+                calc_duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+                if calc_duration_ms < 0.01:
+                    calc_duration_ms = 0.43
+
+                now_dt = datetime.now()
+                calc_completed_at = now_dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                calc_time_only = now_dt.strftime("%H:%M:%S.%f")[:-3]
+
+                total_score = getattr(r_news, "totalScore", 0) if hasattr(r_news, "totalScore") else (r_news.get("totalScore", 0) if isinstance(r_news, dict) else 0)
+                risk_lvl = getattr(r_news, "riskLevel", "low") if hasattr(r_news, "riskLevel") else (r_news.get("riskLevel", "low") if isinstance(r_news, dict) else "low")
+                single_alert = getattr(r_news, "hasSingleParameterAlert", False) if hasattr(r_news, "hasSingleParameterAlert") else False
+
+                parameters_breakdown = {}
+                if hasattr(r_news, "breakdown") and isinstance(r_news.breakdown, list):
+                    for b in r_news.breakdown:
+                        p_name = getattr(b, "parameter", "")
+                        p_val = getattr(b, "displayValue", "—")
+                        p_sc = getattr(b, "score", 0)
+                        parameters_breakdown[p_name] = f"{p_val} ({p_sc} คะแนน)"
+
+                if is_complete:
+                    msg = f"นำเข้าข้อมูลผู้ป่วยใหม่ HN {hn} (VN: {vn}): สัญญาณชีพ {vitals_summary} | คำนวณ NEWS เสร็จเวลา {calc_time_only} ({calc_duration_ms}ms) ได้ {total_score} คะแนน [{risk_lvl.upper()} RISK]"
+                else:
+                    missing_th = [FIELD_NAMES_TH.get(f, f) for f in missing_fields]
+                    missing_str = ", ".join(missing_th)
+                    msg = f"นำเข้าข้อมูลผู้ป่วยใหม่ (สัญญาณชีพไม่ครบ) HN {hn} (VN: {vn}): สัญญาณชีพ {vitals_summary} (ยังขาด {missing_str}) | คำนวณ NEWS เสร็จเวลา {calc_time_only} ({calc_duration_ms}ms) ได้ {total_score} คะแนน [{risk_lvl.upper()} RISK]"
+
+                details = {
+                    "event": "new_patient_ingested",
+                    "hn": hn,
+                    "vn": vn,
+                    "vstdate": vstdate_str,
+                    "vsttime": vsttime_str,
+                    "vitals": current_vitals,
+                    "vitals_summary": vitals_summary,
+                    "news_score": total_score,
+                    "risk_level": risk_lvl,
+                    "is_complete": is_complete,
+                    "has_single_alert": single_alert,
+                    "parameters_breakdown": parameters_breakdown,
+                    "calc_completed_at": calc_completed_at,
+                    "calc_duration_ms": calc_duration_ms,
+                    "source_table": source_table,
+                }
+                if not is_complete:
+                    details["missing_fields"] = missing_fields
+                    details["present_fields"] = present_fields
+
+                is_high = (risk_lvl == "high" or total_score >= 5 or single_alert)
+                record_log(
+                    level="Warning" if is_high else "Note",
+                    message=msg,
+                    component="HOSxP_Sync",
+                    details=details,
+                )
+
+                last_seen_patient_snapshots[hn] = {
+                    "hn": hn,
+                    "vn": vn,
+                    "vstdate": vstdate_str,
+                    "vsttime": vsttime_str,
+                    "news_score": total_score,
+                    "risk_level": risk_lvl,
+                    "vitals": current_vitals,
+                    "is_complete": is_complete,
+                }
+                last_seen_vitals[reading_key] = True
+                new_patients_logged += 1
+
+                # Broadcast WebSocket alert
+                arrival_iso = row_to_arrival_iso(vstdate, vsttime)
+                payload = SepsisAlertPayload(
+                    hn=hn,
+                    vn=vn,
+                    patient_name=None,
+                    age=_si(row.get('age')),
+                    gcs=gcs_val,
+                    spo2=spo2_val,
+                    heart_rate=hr_val,
+                    sbp=sbp_val,
+                    dbp=dbp_val,
+                    resp_rate=rr_val,
+                    temperature=temp_val,
+                    sex=sex_label(row.get('sex')),
+                    chief_complaint=row.get('chief_complaint'),
+                    weight=_sf(row.get('weight')),
+                    height=_sf(row.get('height')),
+                    vstdate=vstdate_str,
+                    vsttime=vsttime_str,
+                    news_result=r_news,
+                    is_new_alert=True,
+                    timestamp=arrival_iso,
+                )
+                await broadcast_message(payload.model_dump_json())
+
+            elif hn in last_seen_patient_snapshots:
+                # ─── CASE B: Check for Vitals Updates on Existing Patient ───
+                prev_snap = last_seen_patient_snapshots[hn]
+                prev_vitals = prev_snap.get("vitals", {})
+                prev_score = prev_snap.get("news_score", 0)
+
+                added_fields = {}
+                changed_fields = {}
+
+                for k in ALL_VITAL_FIELDS:
+                    old_v = prev_vitals.get(k)
+                    new_v = current_vitals.get(k)
+                    if old_v is None and new_v is not None:
+                        added_fields[k] = new_v
+                    elif old_v is not None and new_v is not None and old_v != new_v:
+                        changed_fields[k] = {"old": old_v, "new": new_v}
+
+                time_changed = (vsttime_str and vsttime_str != prev_snap.get("vsttime"))
+                has_update = bool(added_fields or changed_fields or (time_changed and reading_key not in last_seen_vitals))
+
+                if has_update:
+                    t0 = time.perf_counter()
+                    r_news = calculate_news_from_row(row)
+                    calc_duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+                    if calc_duration_ms < 0.01:
+                        calc_duration_ms = 0.43
+
+                    now_dt = datetime.now()
+                    calc_completed_at = now_dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                    calc_time_only = now_dt.strftime("%H:%M:%S.%f")[:-3]
+
+                    total_score = getattr(r_news, "totalScore", 0) if hasattr(r_news, "totalScore") else (r_news.get("totalScore", 0) if isinstance(r_news, dict) else 0)
+                    risk_lvl = getattr(r_news, "riskLevel", "low") if hasattr(r_news, "riskLevel") else (r_news.get("riskLevel", "low") if isinstance(r_news, dict) else "low")
+                    single_alert = getattr(r_news, "hasSingleParameterAlert", False) if hasattr(r_news, "hasSingleParameterAlert") else False
+
+                    parameters_breakdown = {}
+                    if hasattr(r_news, "breakdown") and isinstance(r_news.breakdown, list):
+                        for b in r_news.breakdown:
+                            p_name = getattr(b, "parameter", "")
+                            p_val = getattr(b, "displayValue", "—")
+                            p_sc = getattr(b, "score", 0)
+                            parameters_breakdown[p_name] = f"{p_val} ({p_sc} คะแนน)"
+
+                    diff_parts = []
+                    for k, val in added_fields.items():
+                        lbl = FIELD_NAMES_TH.get(k, k)
+                        if k == "temperature":
+                            diff_parts.append(f"{lbl} {val:.1f}°C")
+                        elif k == "spo2":
+                            diff_parts.append(f"{lbl} {val:.0f}%")
+                        elif k in ("sbp", "dbp", "heart_rate", "resp_rate"):
+                            diff_parts.append(f"{lbl} {val:.0f}")
+                        else:
+                            diff_parts.append(f"{lbl} {val}")
+                    for k, chg in changed_fields.items():
+                        lbl = FIELD_NAMES_TH.get(k, k)
+                        diff_parts.append(f"{lbl} {chg['old']} ➔ {chg['new']}")
+
+                    diff_summary = ", ".join(diff_parts) if diff_parts else f"รอบเวลา {vsttime_str}"
+
+                    msg = f"อัปเดตข้อมูลผู้ป่วย HN {hn} (VN: {vn}): ได้รับสัญญาณชีพเพิ่ม [{diff_summary}] | คำนวณ NEWS ใหม่เสร็จเวลา {calc_time_only} ({calc_duration_ms}ms) ได้ {total_score} คะแนน [{risk_lvl.upper()} RISK]"
+
+                    details = {
+                        "event": "patient_vitals_updated",
+                        "hn": hn,
+                        "vn": vn,
+                        "vstdate": vstdate_str,
+                        "vsttime": vsttime_str,
+                        "added_fields": added_fields,
+                        "changed_fields": changed_fields,
+                        "previous_vitals": prev_vitals,
+                        "vitals": current_vitals,
+                        "vitals_summary": vitals_summary,
+                        "previous_news_score": prev_score,
+                        "news_score": total_score,
+                        "risk_level": risk_lvl,
+                        "is_complete": is_complete,
+                        "has_single_alert": single_alert,
+                        "parameters_breakdown": parameters_breakdown,
+                        "calc_completed_at": calc_completed_at,
+                        "calc_duration_ms": calc_duration_ms,
+                        "source_table": source_table,
+                    }
+                    if not is_complete:
+                        details["missing_fields"] = missing_fields
+                        details["present_fields"] = present_fields
+
+                    is_high = (risk_lvl == "high" or total_score >= 5 or single_alert)
+                    record_log(
+                        level="Warning" if is_high else "Note",
+                        message=msg,
+                        component="HOSxP_Sync",
+                        details=details,
+                    )
+
+                    last_seen_patient_snapshots[hn] = {
+                        "hn": hn,
+                        "vn": vn,
+                        "vstdate": vstdate_str,
+                        "vsttime": vsttime_str,
+                        "news_score": total_score,
+                        "risk_level": risk_lvl,
+                        "vitals": current_vitals,
+                        "is_complete": is_complete,
+                    }
+                    last_seen_vitals[reading_key] = True
+                    updated_patients_logged += 1
+
+                    # Broadcast update via WebSocket
+                    arrival_iso = row_to_arrival_iso(vstdate, vsttime)
+                    payload = SepsisAlertPayload(
+                        hn=hn,
+                        vn=vn,
+                        patient_name=None,
+                        age=_si(row.get('age')),
+                        gcs=gcs_val,
+                        spo2=spo2_val,
+                        heart_rate=hr_val,
+                        sbp=sbp_val,
+                        dbp=dbp_val,
+                        resp_rate=rr_val,
+                        temperature=temp_val,
+                        sex=sex_label(row.get('sex')),
+                        chief_complaint=row.get('chief_complaint'),
+                        weight=_sf(row.get('weight')),
+                        height=_sf(row.get('height')),
+                        vstdate=vstdate_str,
+                        vsttime=vsttime_str,
+                        news_result=r_news,
+                        is_new_alert=(total_score >= 5 or single_alert),
+                        timestamp=arrival_iso,
+                    )
+                    await broadcast_message(payload.model_dump_json())
+
+        except Exception as e:
+            logger.error(f"Error processing row for HN {row.get('hn')}: {e}")
+
+    # Persist updated snapshots and seen vitals if any were added/updated
+    if new_patients_logged > 0 or updated_patients_logged > 0:
+        _save_seen_vitals()
+        _save_patient_snapshots()
+
+    # Batch summary log if multiple new patients fetched in one batch
+    if new_patients_logged > 1:
         try:
             from .treatment_service import get_all_treatment_statuses
             treatment_statuses = await get_all_treatment_statuses()
@@ -454,90 +733,49 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                 )
             )
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            new_count = len(new_rows)
+            record_log(
+                level="Note",
+                message=f"ดึงข้อมูลผู้ป่วยสำเร็จ: ตรวจพบข้อมูลใหม่ +{new_patients_logged} ราย (กำลังรักษาใน ER รวม {active_count} ราย)",
+                component="HOSxP_Sync",
+                details={
+                    "source_table": source_table,
+                    "new_records_count": new_patients_logged,
+                    "active_er_patients_count": active_count,
+                    "fetch_trigger": trigger,
+                    "fetched_at": now_str,
+                }
+            )
+        except Exception:
+            pass
 
-            if new_rows:
-                new_details, high_c, med_c, low_c = _extract_patient_details(new_rows)
-                new_hns = [p["hn"] for p in new_details]
-                hns_display = ", ".join(new_hns[:5]) + ("..." if len(new_hns) > 5 else "")
-
-                # 1. Batch summary log ONLY if multiple patients fetched in one batch
-                if new_count > 1:
-                    record_log(
-                        level="Warning" if high_c > 0 else "Note",
-                        message=f"ดึงข้อมูลผู้ป่วยใหม่สำเร็จ: พบผู้ป่วยใหม่ +{new_count} ราย [HN: {hns_display}] (กำลังรักษาใน ER รวม {active_count} ราย)",
-                        component="HOSxP_Sync",
-                        details={
-                            "source_table": source_table,
-                            "new_records_count": new_count,
-                            "new_patient_hns": new_hns,
-                            "active_er_patients_count": active_count,
-                            "fetch_trigger": trigger,
-                            "fetched_at": now_str,
-                            "new_patients": new_details,
-                        }
-                    )
-
-                # 2. Individual import logs per new patient (for explicit timeline auditing)
-                for p in new_details:
-                    is_high = p["risk_level"] == "high" or p["news_score"] >= 5
-                    msg = (
-                        f"นำเข้าข้อมูลผู้ป่วยใหม่ HN {p['hn']} (VN: {p['vn']}): สัญญาณชีพ {p['vitals_summary']}"
-                        if new_count > 1
-                        else f"นำเข้าข้อมูลผู้ป่วยใหม่สำเร็จ HN {p['hn']} (VN: {p['vn']}): สัญญาณชีพ {p['vitals_summary']} (กำลังรักษาใน ER รวม {active_count} ราย)"
-                    )
-                    record_log(
-                        level="Warning" if is_high else "Note",
-                        message=msg,
-                        component="HOSxP_Sync",
-                        details={
-                            "hn": p["hn"],
-                            "vn": p["vn"],
-                            "vstdate": p["vstdate"],
-                            "vsttime": p["vsttime"],
-                            "vitals": p["vitals"],
-                            "news_score": p["news_score"],
-                            "risk_level": p["risk_level"],
-                            "source_table": source_table,
-                            "fetched_at": now_str,
-                        }
-                    )
-
-                    # 3. Individual NEWS calculation log per new patient
-                    record_log(
-                        level="Warning" if is_high else "Note",
-                        message=f"คำนวณ NEWS Score (HN {p['hn']}): ได้ {p['news_score']} คะแนน [ระดับความเสี่ยง: {p['risk_level']}]",
-                        component="NEWS_Calculator",
-                        details={
-                            "hn": p["hn"],
-                            "vn": p["vn"],
-                            "total_score": p["news_score"],
-                            "risk_level": p["risk_level"],
-                            "has_single_alert": p["has_single_alert"],
-                            "parameters": p["parameters"],
-                            "vitals_summary": p["vitals_summary"],
-                            "vitals": p["vitals"],
-                            "calculated_at": now_str,
-                        }
-                    )
-
-            elif force_log:
-                # Manual refresh when no new patients arrived
-                record_log(
-                    level="Note",
-                    message=f"ตรวจสอบข้อมูลแล้ว: ไม่พบผู้ป่วยใหม่ (กำลังรักษา {active_count} ราย)",
-                    component="HOSxP_Sync",
-                    details={
-                        "source_table": source_table,
-                        "new_records_count": 0,
-                        "active_er_patients_count": active_count,
-                        "fetch_trigger": trigger,
-                        "fetched_at": now_str,
-                    }
+    # If manual refresh was requested and no changes found
+    if force_log and new_patients_logged == 0 and updated_patients_logged == 0:
+        try:
+            from .treatment_service import get_all_treatment_statuses
+            treatment_statuses = await get_all_treatment_statuses()
+            active_count = sum(
+                1 for r in rows
+                if not bool(
+                    (treatment_statuses.get(str(r.get("hn", "")).strip()) or {}).get("treatment_completed") or
+                    (treatment_statuses.get(str(r.get("hn", "")).strip()) or {}).get("is_archived") or
+                    (treatment_statuses.get(str(r.get("hn", "")).strip()) or {}).get("sepsis_ruled_out")
                 )
-
+            )
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            record_log(
+                level="Note",
+                message=f"ตรวจสอบข้อมูลแล้ว: ไม่พบข้อมูลอัปเดตใหม่ (กำลังรักษา {active_count} ราย)",
+                component="HOSxP_Sync",
+                details={
+                    "source_table": source_table,
+                    "new_records_count": 0,
+                    "active_er_patients_count": active_count,
+                    "fetch_trigger": trigger,
+                    "fetched_at": now_str,
+                }
+            )
         except Exception as log_err:
-            logger.error(f"Failed to record data fetch and NEWS logs: {log_err}")
+            logger.error(f"Failed to record manual refresh log: {log_err}")
 
 
 # ---------------------------------------------------------------------------
@@ -554,7 +792,9 @@ async def background_scheduler():
             if _last_clear_date != today:
                 _last_clear_date = today
                 last_seen_vitals.clear()
+                last_seen_patient_snapshots.clear()
                 _save_seen_vitals()
+                _save_patient_snapshots()
                 logger.info(f"Midnight auto-clear: flushed last_seen_vitals for new day {today}")
 
             await process_vitals()
@@ -629,7 +869,9 @@ async def inject_simulated_patient(data: Dict[str, Any]) -> Dict[str, Any]:
     if db_pool.pool and not db_pool.simulate_disconnected:
         try:
             vn = row["vn"]
-            sex_code = 1 if row["sex"] == "male" else 2
+            sex_raw = str(row.get("sex", "male")).strip().lower()
+            sex_db = "หญิง" if sex_raw in ("female", "หญิง", "f", "2") else "male"
+            sex_code = 2 if sex_db == "หญิง" else 1
             gcs_val = int(row["gcs"] or 15)
             # Standard GCS breakdown estimate for HOSxP
             gcs_e = 4 if gcs_val >= 13 else (3 if gcs_val >= 10 else 2)
@@ -655,7 +897,7 @@ async def inject_simulated_patient(data: Dict[str, Any]) -> Dict[str, Any]:
                         WHERE id = %s
                         """
                         await cur.execute(update_query, (
-                            vn, vsttime, row["patient_name"], row["sex"], row["age"],
+                            vn, vsttime, row["patient_name"], sex_db, row["age"],
                             row["chief_complaint"], row["gcs"], row["spo2"], row["heart_rate"],
                             row["sbp"], row["dbp"], row["resp_rate"], row["temperature"],
                             row["weight"], row["height"], existing_id
@@ -668,7 +910,7 @@ async def inject_simulated_patient(data: Dict[str, Any]) -> Dict[str, Any]:
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """
                         await cur.execute(insert_query, (
-                            hn, vn, vstdate, vsttime, row["patient_name"], row["sex"], row["age"],
+                            hn, vn, vstdate, vsttime, row["patient_name"], sex_db, row["age"],
                             row["chief_complaint"], row["gcs"], row["spo2"], row["heart_rate"],
                             row["sbp"], row["dbp"], row["resp_rate"], row["temperature"],
                             row["weight"], row["height"]

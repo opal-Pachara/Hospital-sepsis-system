@@ -277,18 +277,35 @@ export function useWebSocketAlerts() {
             console.log('[WebSocket] Received clear_treated for HNs:', raw.cleared_hns);
             useRTSASStore.getState().clearTreatedPatients(raw.cleared_hns);
           } else if (raw.action === 'archived') {
-            // Patient has been archived — remove from active list immediately
+            // Patient has been archived — update status in patient list
             const archivedHn = raw.hn || raw.data?.hn;
             if (archivedHn) {
-              console.log(`[WebSocket] Patient ${archivedHn} archived — removing from active list`);
+              console.log(`[WebSocket] Patient ${archivedHn} archived — synchronizing status`);
               const state = useRTSASStore.getState();
-              const updatedPatients = state.patients.filter((p) => p.id !== archivedHn && p.hn !== archivedHn);
+              // Update treatmentStatus in patients array without removing the patient or switching away
+              const updatedPatients = state.patients.map((p) =>
+                (p.id === archivedHn || p.hn === archivedHn)
+                  ? {
+                      ...p,
+                      treatmentStatus: {
+                        ...(p.treatmentStatus || {}),
+                        ...(raw.data || {}),
+                        hn: p.hn,
+                        is_archived: true,
+                        sepsis_ruled_out: raw.data?.sepsis_ruled_out ?? (p.treatmentStatus?.sepsis_ruled_out ?? true),
+                      } as TreatmentStatus,
+                    }
+                  : p
+              );
               setPatients(updatedPatients);
 
-              // If the archived patient was selected, deselect
-              if (state.selectedPatient?.id === archivedHn || state.selectedPatient?.hn === archivedHn) {
-                useRTSASStore.setState({ selectedPatient: updatedPatients[0] || null });
+              // Synchronize patient data in store so all fields update cleanly
+              if (raw.data) {
+                useRTSASStore.getState().syncServerTreatmentStatus(raw.data);
               }
+
+              // 🛑 CLINICAL REQUIREMENT: NEVER bounce to another patient when a patient is ruled out / archived!
+              // Keep the current patient view intact so clinicians can review and copy their Timeline.
             }
           } else if (raw.data) {
             useRTSASStore.getState().syncServerTreatmentStatus(raw.data);

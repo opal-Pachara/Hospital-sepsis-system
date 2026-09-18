@@ -94,4 +94,24 @@ describe('Treated Patients Daily Dashboard — Logic & PDPA Compliance', () => {
     expect(csvContent).not.toContain('HN100162');
     expect(csvContent).toContain('75%');
   });
+
+  it('restricts treated dashboard access strictly to authenticated doctors and nurses', () => {
+    const checkDashboardAccess = (isAuthenticated: boolean, role?: string): boolean => {
+      return Boolean(isAuthenticated && (role === 'doctor' || role === 'nurse'));
+    };
+
+    // Unauthenticated user -> blocked
+    expect(checkDashboardAccess(false, undefined)).toBe(false);
+    expect(checkDashboardAccess(false, 'doctor')).toBe(false);
+
+    // Authenticated IT Admin -> blocked from clinical dashboard
+    expect(checkDashboardAccess(true, 'it_admin')).toBe(false);
+
+    // Authenticated Doctor -> allowed
+    expect(checkDashboardAccess(true, 'doctor')).toBe(true);
+
+    // Authenticated Nurse -> allowed
+    expect(checkDashboardAccess(true, 'nurse')).toBe(true);
+  });
 });
+

@@ -39,6 +39,7 @@ export default function MultiAlertModal() {
 
       const newsScore = patient?.latestNewsScore ?? 0;
       const riskLevel = patient?.currentRiskLevel ?? 'low';
+      const arrivalIso = patient?.arrivalTime || nowIso;
       const arrivalTime = patient?.arrivalTime
         ? new Date(patient.arrivalTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
         : new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
@@ -46,16 +47,19 @@ export default function MultiAlertModal() {
       useRTSASStore.getState().addTimelineEvent(
         `🏥 ผู้ป่วยมาถึง ER เวลา ${arrivalTime} น.`,
         'blue',
-        'ระบบ'
+        'ระบบ',
+        undefined,
+        arrivalIso
       );
-      const isComplete = Boolean(patient?.latestNewsResult && patient.latestNewsResult.missingDataCount === 0);
-      if (isComplete) {
-        useRTSASStore.getState().addTimelineEvent(
-          `🧮 ระบบคำนวณ NEWS Score = ${newsScore} (${riskLevel === 'high' ? 'เสี่ยงสูง' : riskLevel === 'medium' ? 'เสี่ยงปานกลาง' : 'เสี่ยงต่ำ'})`,
-          newsScore >= 5 ? 'red' : 'orange',
-          'ระบบ RTSAS'
-        );
-      }
+
+      const calcIso = patient?.latestNewsResult?.calculatedAt || nowIso;
+      useRTSASStore.getState().addTimelineEvent(
+        `🧮 ระบบคำนวณ NEWS Score = ${newsScore} (${riskLevel === 'high' ? 'เสี่ยงสูง' : riskLevel === 'medium' ? 'เสี่ยงปานกลาง' : 'เสี่ยงต่ำ'})`,
+        newsScore >= 5 ? 'red' : 'orange',
+        'ระบบ RTSAS',
+        undefined,
+        calcIso
+      );
     }
 
     // Switch back

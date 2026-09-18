@@ -401,16 +401,41 @@ export function generateAssessmentSchedule(
   return entries;
 }
 
+/**
+ * Dynamically creates the next assessment schedule entry chained from the previous completion time.
+ * For sequence <= 4, interval is 15 minutes (Q15).
+ * For sequence >= 5, interval is 30 minutes (Q30).
+ */
+export function createNextAssessmentEntry(
+  sequence: number,
+  lastCompletedAt: string
+): AssessmentScheduleEntry {
+  const origin = new Date(lastCompletedAt);
+  const intervalMinutes = sequence <= 4 ? 15 : 30;
+  const intervalType = sequence <= 4 ? 'Q15' : 'Q30';
+  const scheduledTime = new Date(origin.getTime() + intervalMinutes * 60 * 1000);
+
+  return {
+    id: generateId(),
+    sequence,
+    intervalType,
+    scheduledTime: scheduledTime.toISOString(),
+    isCompleted: false,
+    completedAt: null,
+    vitals: null,
+    newsResult: null,
+    reminderTriggered: false,
+    lastReminderAt: null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Lightweight ID generator (avoids uuid dependency for now)
 // ---------------------------------------------------------------------------
 
 let _counter = 0;
 
-function generateId(): string {
+export function generateId(): string {
   _counter++;
   return `${Date.now()}-${_counter}-${Math.random().toString(36).substring(2, 9)}`;
 }
-
-// Re-export for external use
-export { generateId };

@@ -31,10 +31,11 @@ import {
   ErrorBanner,
   CountdownBanner,
   AlertSummaryBanner,
+  showToast,
 } from './components/common';
 
 // Pages
-import { AdminLayout, type AdminTab, TreatedDashboard } from './pages';
+import { AdminPage, AdminLayout, type AdminTab, TreatedDashboard } from './pages';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -200,12 +201,21 @@ function WorkflowPanel() {
 }
 
 export default function App() {
-  const { setAuthUser, isAuthenticated } = useRTSASStore();
+  const { setAuthUser, isAuthenticated, currentUser, logoutUser } = useRTSASStore();
   const initialRoute = parseUrlRoute();
   const [currentView, setCurrentView] = useState<AppView>(initialRoute.view);
   const [adminTab, setAdminTab] = useState<AdminTab>(initialRoute.adminTab);
 
   const navigate = useCallback((view: AppView, tab?: AdminTab) => {
+    if (view === 'treated_dashboard') {
+      const user = useRTSASStore.getState().currentUser;
+      const isAuth = useRTSASStore.getState().isAuthenticated;
+      const isDocNurse = isAuth && (user?.role === 'doctor' || user?.role === 'nurse');
+      if (!isDocNurse) {
+        showToast('เฉพาะแพทย์และพยาบาลเท่านั้นที่สามารถเข้าถึงระบบ Dashboard ได้ กรุณาเข้าสู่ระบบ', 'warning');
+        return;
+      }
+    }
     setCurrentView(view);
     if (view === 'admin') {
       const targetTab = tab || adminTab || 'status';
@@ -217,6 +227,24 @@ export default function App() {
       window.history.pushState({ view }, '', '/');
     }
   }, [adminTab]);
+
+  // IT Admin isolation: ensure IT Admin is always routed directly to admin panel
+  useEffect(() => {
+    if (isAuthenticated && currentUser?.role === 'it_admin' && currentView !== 'admin') {
+      setCurrentView('admin');
+      window.history.pushState({ view: 'admin' }, '', '/admin');
+    }
+  }, [isAuthenticated, currentUser?.role, currentView]);
+
+  // Restrict treated dashboard viewing to authenticated doctor or nurse
+  useEffect(() => {
+    const isDocNurse = isAuthenticated && (currentUser?.role === 'doctor' || currentUser?.role === 'nurse');
+    if (currentView === 'treated_dashboard' && !isDocNurse) {
+      setCurrentView('dashboard');
+      window.history.pushState({ view: 'dashboard' }, '', '/');
+      showToast('เฉพาะแพทย์และพยาบาลเท่านั้นที่สามารถเข้าถึงระบบ Dashboard ได้ กรุณาเข้าสู่ระบบ', 'warning');
+    }
+  }, [currentView, isAuthenticated, currentUser?.role]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -248,10 +276,16 @@ export default function App() {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((user) => setAuthUser(
-        { ...user, name: `${user.firstname} ${user.lastname}` },
-        token
-      ))
+      .then((user) => {
+        setAuthUser(
+          { ...user, name: `${user.firstname} ${user.lastname}` },
+          token
+        );
+        if (user.role === 'it_admin') {
+          setCurrentView('admin');
+          window.history.pushState({ view: 'admin' }, '', '/admin');
+        }
+      })
       .catch(() => localStorage.removeItem('rtsas_token'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -283,13 +317,11 @@ export default function App() {
   if (currentView === 'admin') {
     return (
       <>
-        <AdminLayout
-          initialTab={adminTab}
-          onNavigateClinical={() => navigate('dashboard')}
-          onNavigateTreatedDashboard={() => navigate('treated_dashboard')}
-          onTabChange={(tab) => {
-            setAdminTab(tab);
-            window.history.pushState({ view: 'admin', tab }, '', `/admin/${tab}`);
+        <AdminPage
+          onBack={() => {
+            logoutUser();
+            setCurrentView('dashboard');
+            window.history.pushState({ view: 'dashboard' }, '', '/');
           }}
         />
         <ToastContainer />
@@ -313,7 +345,7 @@ export default function App() {
         />
 
         {/* MAIN CONTENT — Workflow (center) + Detail (right) OR Treated Dashboard */}
-        {currentView === 'treated_dashboard' ? (
+        {currentView === 'treated_dashboard' && (isAuthenticated && (currentUser?.role === 'doctor' || currentUser?.role === 'nurse')) ? (
           <TreatedDashboard
             onBackToClinical={handleBackToClinical}
             onSelectPatientTimeline={handleSelectPatientTimeline}

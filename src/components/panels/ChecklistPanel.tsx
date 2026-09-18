@@ -657,7 +657,7 @@ function AssessmentScheduleSection({
             }}
           >
             <span style={{ textAlign: 'center' }}>รอบ</span>
-            <span style={{ textAlign: 'center' }}>เวลาเป้าหมาย</span>
+            <span style={{ textAlign: 'center' }}>เวลาที่บันทึก</span>
             <span style={{ textAlign: 'center' }}>NEWS</span>
             <span style={{ textAlign: 'center' }}>สถานะ</span>
           </div>
@@ -673,10 +673,12 @@ function AssessmentScheduleSection({
                 return entries.map((entry) => {
                   const isDone = entry.isCompleted;
                   const isDue = !isDone && new Date() >= new Date(entry.scheduledTime);
-                  const timeStr = new Date(entry.scheduledTime).toLocaleTimeString('th-TH', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  });
+                  const recordedTimeStr = entry.completedAt
+                    ? new Date(entry.completedAt).toLocaleTimeString('th-TH', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : null;
 
                   return (
                     <div
@@ -707,12 +709,23 @@ function AssessmentScheduleSection({
                         {entry.sequence}
                       </span>
                       <span style={{ textAlign: 'center' }}>
-                        <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#1e293b' }}>
-                          {timeStr} น.
-                        </span>
-                        <span style={{ fontSize: '8px', color: '#94a3b8', display: 'block' }}>
-                          {entry.intervalType}
-                        </span>
+                        {isDone && recordedTimeStr ? (
+                          <>
+                            <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#1e293b' }}>
+                              {recordedTimeStr} น.
+                            </span>
+                            <span style={{ fontSize: '8px', color: '#16a34a', display: 'block', fontWeight: 700 }}>
+                              ✓ {entry.intervalType}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>—</span>
+                            <span style={{ fontSize: '8px', color: '#94a3b8', display: 'block' }}>
+                              {entry.intervalType}
+                            </span>
+                          </>
+                        )}
                       </span>
                       <span style={{ textAlign: 'center' }}>
                         {entry.newsResult ? (
@@ -915,35 +928,33 @@ function AssessmentScheduleSection({
                   fontSize: '9.5px',
                 }}
               >
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '34px 1fr 44px 126px',
-                    gap: '4px',
-                    padding: '5px 8px',
-                    borderBottom: '1px dashed #e2e8f0',
-                    color: '#64748b',
-                  }}
-                >
-                  <span style={{ textAlign: 'center', fontWeight: 700 }}>1</span>
-                  <span style={{ textAlign: 'center' }}>+15 นาที (Q15 ครั้งที่ 1)</span>
-                  <span style={{ textAlign: 'center' }}>—</span>
-                  <span style={{ textAlign: 'center', color: '#94a3b8' }}>รอเริ่มตาราง</span>
-                </div>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '34px 1fr 44px 126px',
-                    gap: '4px',
-                    padding: '5px 8px',
-                    color: '#64748b',
-                  }}
-                >
-                  <span style={{ textAlign: 'center', fontWeight: 700 }}>2</span>
-                  <span style={{ textAlign: 'center' }}>+30 นาที (Q15 ครั้งที่ 2)</span>
-                  <span style={{ textAlign: 'center' }}>—</span>
-                  <span style={{ textAlign: 'center', color: '#94a3b8' }}>รอเริ่มตาราง</span>
-                </div>
+                {[
+                  { seq: 1, label: 'Q15 ครั้งที่ 1' },
+                  { seq: 2, label: 'Q15 ครั้งที่ 2' },
+                  { seq: 3, label: 'Q15 ครั้งที่ 3' },
+                  { seq: 4, label: 'Q15 ครั้งที่ 4' },
+                  { seq: 5, label: 'Q30 ครั้งที่ 1' },
+                ].map((item, idx) => (
+                  <div
+                    key={item.seq}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '34px 1fr 44px 126px',
+                      gap: '4px',
+                      padding: '5px 8px',
+                      borderBottom: idx < 4 ? '1px dashed #e2e8f0' : 'none',
+                      color: '#64748b',
+                    }}
+                  >
+                    <span style={{ textAlign: 'center', fontWeight: 700 }}>{item.seq}</span>
+                    <span style={{ textAlign: 'center' }}>
+                      <span style={{ fontSize: '10px', color: '#94a3b8' }}>—</span>
+                      <span style={{ fontSize: '8px', color: '#94a3b8', display: 'block' }}>{item.label}</span>
+                    </span>
+                    <span style={{ textAlign: 'center' }}>—</span>
+                    <span style={{ textAlign: 'center', color: '#94a3b8' }}>รอเริ่มตาราง</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -961,7 +972,7 @@ function AssessmentScheduleSection({
             }}
           >
             {entries.length > 0
-              ? 'ทุก 15 นาที (4 ครั้งแรก) → หลังจากนั้นทุก 30 นาที'
+              ? 'ทุก 15 นาที (4 ครั้งแรก: Q15) → หลังจากนั้นทุก 30 นาที (Q30)'
               : 'ตารางจะเริ่มนับเวลาทันทีเมื่อแพทย์ยืนยัน Sepsis ทางคลินิก'}
           </div>
         </div>

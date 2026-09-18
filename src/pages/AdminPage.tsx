@@ -39,6 +39,19 @@ interface CacheStats {
 interface DBStatus {
   status: string;
   pool_available: boolean;
+  latency_ms?: number | null;
+  host?: string;
+  port?: number;
+  database?: string;
+}
+
+interface SystemLogItem {
+  id: string | number;
+  timestamp: string;
+  level: string;
+  message: string;
+  component?: string;
+  details?: any;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,31 +242,106 @@ function ConfirmResetDialog({ onConfirm, onCancel, isLoading }: { onConfirm: () 
 }
 
 // ---------------------------------------------------------------------------
+// Confirm Clear Logs Dialog
+// ---------------------------------------------------------------------------
+
+function ConfirmClearLogsDialog({ onConfirm, onCancel, isLoading }: { onConfirm: () => void; onCancel: () => void; isLoading: boolean }) {
+  return (
+    <div
+      className="fixed inset-0 z-[300] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+    >
+      <div style={{
+        width: '420px', background: '#fff', borderRadius: '20px',
+        overflow: 'hidden', boxShadow: '0 25px 60px rgba(220,38,38,.25)',
+      }}>
+        <div style={{ height: '4px', background: 'linear-gradient(90deg,#ea580c,#dc2626)' }} />
+        <div style={{ padding: '24px' }}>
+          <div style={{
+            width: '56px', height: '56px', borderRadius: '16px',
+            background: 'linear-gradient(135deg,#ea580c,#c2410c)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '28px', margin: '0 auto 16px',
+            boxShadow: '0 8px 20px rgba(234,88,12,.35)',
+          }}>🗑️</div>
+          <div style={{ fontSize: '17px', fontWeight: 900, color: '#1e293b', textAlign: 'center', marginBottom: '8px' }}>
+            ยืนยันการล้าง System Logs ทั้งหมด?
+          </div>
+          <div style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', lineHeight: 1.6, marginBottom: '20px' }}>
+            ระบบจะล้างบันทึกเหตุการณ์และการทำงานของระบบ (Diagnostic Logs) ทั้งหมด<br />
+            รวมถึงประวัติการเชื่อมต่อและข้อผิดพลาดที่ผ่านมา<br />
+            <span style={{ color: '#dc2626', fontWeight: 700 }}>ข้อมูลบันทึกเก่าจะไม่สามารถกู้คืนได้!</span>
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              id="btn-confirm-clear-logs"
+              onClick={onConfirm}
+              disabled={isLoading}
+              style={{
+                flex: 2, padding: '13px', borderRadius: '12px',
+                fontSize: '13px', fontWeight: 800, cursor: isLoading ? 'not-allowed' : 'pointer',
+                fontFamily: 'inherit', color: '#fff', border: 'none',
+                background: isLoading ? '#94a3b8' : 'linear-gradient(135deg,#ea580c,#dc2626)',
+                transition: 'all 0.2s',
+              }}
+            >
+              {isLoading ? '⏳ กำลังล้าง Logs...' : '🗑️ ยืนยัน ล้าง Logs'}
+            </button>
+            <button
+              onClick={onCancel}
+              disabled={isLoading}
+              style={{
+                flex: 1, padding: '13px', borderRadius: '12px',
+                fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                fontFamily: 'inherit', color: '#64748b',
+                border: '1px solid #e2e8f0', background: '#f8fafc',
+              }}
+            >
+              ยกเลิก
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main AdminPage
 // ---------------------------------------------------------------------------
 
 interface AdminPageProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 const EMPTY_REGISTER = { firstname: '', lastname: '', username: '', password: '', role: 'nurse' as const };
 
 export default function AdminPage({ onBack }: AdminPageProps) {
-  const { currentUser, isAuthenticated, getPatientMemoryAudit, clearInactivePatientsMemory, clearTreatedPatients } = useRTSASStore();
+  const { currentUser, isAuthenticated, logoutUser, getPatientMemoryAudit, clearInactivePatientsMemory, clearTreatedPatients } = useRTSASStore();
   const memoryAudit = getPatientMemoryAudit();
 
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
   const [dbStatus, setDbStatus] = useState<DBStatus | null>(null);
+  const [logs, setLogs] = useState<SystemLogItem[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [isLoadingCache, setIsLoadingCache] = useState(true);
   const [isLoadingDB, setIsLoadingDB] = useState(true);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [showConfirmClear, setShowConfirmClear] = useState(false);
   const [showConfirmReset, setShowConfirmReset] = useState(false);
+  const [showConfirmClearLogs, setShowConfirmClearLogs] = useState(false);
   const [isClearingCache, setIsClearingCache] = useState(false);
   const [isResettingDashboard, setIsResettingDashboard] = useState(false);
+  const [isClearingLogs, setIsClearingLogs] = useState(false);
   const [deactivatingId, setDeactivatingId] = useState<number | null>(null);
   const [activeSection, setActiveSection] = useState<'status' | 'users' | 'tools'>('status');
+
+  // Logs controls & filters
+  const [logFilter, setLogFilter] = useState<'ALL' | 'ERROR' | 'Warning' | 'Note'>('ALL');
+  const [logSearchQuery, setLogSearchQuery] = useState('');
+  const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
+  const [lastLogsRefreshedAt, setLastLogsRefreshedAt] = useState<Date>(new Date());
 
   // Register form state
   const [showRegisterForm, setShowRegisterForm] = useState(false);
@@ -307,6 +395,79 @@ export default function AdminPage({ onBack }: AdminPageProps) {
       setIsLoadingDB(false);
     }
   }, []);
+
+  // Load Logs
+  const loadLogs = useCallback(async () => {
+    setIsLoadingLogs(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/system/logs?limit=100`);
+      if (res.ok) {
+        const data = await res.json();
+        setLogs(data.logs || []);
+        setLastLogsRefreshedAt(new Date());
+      }
+    } catch {
+      /* offline */
+    } finally {
+      setIsLoadingLogs(false);
+    }
+  }, []);
+
+  // Clear Logs
+  const handleClearLogs = async () => {
+    setIsClearingLogs(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/system/logs/clear`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        showToast(`✅ ล้าง System Logs สำเร็จ (${data.cleared_count ?? 0} รายการ)`, 'success');
+        await loadLogs();
+      } else {
+        showToast('ไม่สามารถล้าง Logs ได้', 'error');
+      }
+    } catch {
+      showToast('ไม่สามารถเชื่อมต่อกับ backend', 'error');
+    } finally {
+      setIsClearingLogs(false);
+      setShowConfirmClearLogs(false);
+    }
+  };
+
+  // Logout
+  const handleLogout = () => {
+    logoutUser();
+    showToast('ออกจากระบบเรียบร้อย', 'info');
+    onBack?.();
+  };
+
+  // Auto-refresh logs
+  useEffect(() => {
+    loadLogs();
+    if (!logsAutoRefresh) return;
+    const interval = setInterval(() => {
+      loadLogs();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [loadLogs, logsAutoRefresh]);
+
+  // Filter logs
+  const filteredLogs = useMemo(() => {
+    return logs.filter((l) => {
+      if (logFilter !== 'ALL') {
+        const lvl = l.level.toUpperCase();
+        if (logFilter === 'ERROR' && lvl !== 'ERROR') return false;
+        if (logFilter === 'Warning' && !lvl.includes('WARN')) return false;
+        if (logFilter === 'Note' && (lvl !== 'NOTE' && lvl !== 'INFO')) return false;
+      }
+      if (logSearchQuery.trim()) {
+        const q = logSearchQuery.toLowerCase();
+        const matchMsg = (l.message || '').toLowerCase().includes(q);
+        const matchComp = (l.component || '').toLowerCase().includes(q);
+        return matchMsg || matchComp;
+      }
+      return true;
+    });
+  }, [logs, logFilter, logSearchQuery]);
 
   useEffect(() => {
     let active = true;
@@ -478,12 +639,14 @@ export default function AdminPage({ onBack }: AdminPageProps) {
         background: '#f8fafc', fontFamily: 'inherit',
       }}>
         <div style={{ fontSize: '48px' }}>🔒</div>
-        <div style={{ fontSize: '18px', fontWeight: 700, color: '#64748b' }}>ต้องเข้าสู่ระบบในฐานะ IT Admin เท่านั้น</div>
-        <button onClick={onBack} style={{
+        <div style={{ fontSize: '18px', fontWeight: 700, color: '#1e293b' }}>ต้องเข้าสู่ระบบในฐานะ IT Admin เท่านั้น</div>
+        <div style={{ fontSize: '13px', color: '#64748b' }}>กรุณาเข้าสู่ระบบด้วยบัญชีเจ้าหน้าที่ IT เพื่อเข้าถึงศูนย์ควบคุมนี้</div>
+        <button onClick={handleLogout} style={{
           padding: '10px 24px', borderRadius: '10px', fontSize: '13px',
           fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
-          border: 'none', background: '#2563eb', color: '#fff',
-        }}>← กลับ Dashboard</button>
+          border: 'none', background: '#dc2626', color: '#fff',
+          boxShadow: '0 4px 14px rgba(220,38,38,.25)',
+        }}>🚪 ออกจากระบบ / เข้าสู่ระบบใหม่</button>
       </div>
     );
   }
@@ -512,6 +675,13 @@ export default function AdminPage({ onBack }: AdminPageProps) {
           isLoading={isResettingDashboard}
         />
       )}
+      {showConfirmClearLogs && (
+        <ConfirmClearLogsDialog
+          onConfirm={handleClearLogs}
+          onCancel={() => setShowConfirmClearLogs(false)}
+          isLoading={isClearingLogs}
+        />
+      )}
 
       {/* ─── Top Bar ─── */}
       <div style={{
@@ -523,19 +693,21 @@ export default function AdminPage({ onBack }: AdminPageProps) {
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, #6d28d9, #2563eb, #0891b2)' }} />
 
         <button
-          id="btn-admin-back"
-          onClick={onBack}
+          id="btn-admin-logout"
+          onClick={handleLogout}
           style={{
             padding: '8px 16px', borderRadius: '10px', fontSize: '12px', fontWeight: 700,
             cursor: 'pointer', fontFamily: 'inherit',
-            border: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b',
+            border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626',
             display: 'flex', alignItems: 'center', gap: '6px', transition: 'all 0.2s',
             marginTop: '3px',
           }}
-          onMouseOver={(e) => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.borderColor = '#cbd5e1'; }}
-          onMouseOut={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#e2e8f0'; }}
+          onMouseOver={(e) => { e.currentTarget.style.background = '#dc2626'; e.currentTarget.style.color = '#fff'; }}
+          onMouseOut={(e) => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = '#dc2626'; }}
+          title="ออกจากระบบ"
         >
-          ← กลับ Dashboard
+          <span>🚪</span>
+          <span>ออกจากระบบ</span>
         </button>
 
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '12px', padding: '16px 0' }}>
@@ -634,6 +806,211 @@ export default function AdminPage({ onBack }: AdminPageProps) {
                 </div>
               </div>
             )}
+
+            {/* ─── Real-Time System Diagnostics Logs Table ─── */}
+            <div style={{
+              marginTop: '20px', padding: '20px', borderRadius: '16px',
+              background: '#fff', border: '1px solid #e2e8f0',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+              display: 'flex', flexDirection: 'column', gap: '14px',
+            }}>
+              {/* Header Bar */}
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                flexWrap: 'wrap', gap: '10px', borderBottom: '1px solid #f1f5f9', paddingBottom: '14px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '18px' }}>📜</span>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#1e293b' }}>
+                      บันทึกเหตุการณ์และการตอบสนองของระบบ (Real-Time System Diagnostics Logs)
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                      อัปเดตล่าสุด: {lastLogsRefreshedAt.toLocaleTimeString('th-TH')} · ทั้งหมด {logs.length} รายการ
+                    </div>
+                  </div>
+                </div>
+
+                {/* Controls */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{
+                    display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px',
+                    fontWeight: 700, color: '#475569', cursor: 'pointer',
+                    background: '#f8fafc', padding: '6px 10px', borderRadius: '8px', border: '1px solid #e2e8f0',
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={logsAutoRefresh}
+                      onChange={(e) => setLogsAutoRefresh(e.target.checked)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span>Auto-refresh (3s)</span>
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={loadLogs}
+                    disabled={isLoadingLogs}
+                    style={{
+                      padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+                      cursor: isLoadingLogs ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+                      border: '1px solid #e2e8f0', background: '#f8fafc', color: '#475569',
+                      display: 'flex', alignItems: 'center', gap: '4px',
+                    }}
+                  >
+                    <span>🔄</span>
+                    <span>{isLoadingLogs ? 'กำลังโหลด...' : 'รีเฟรช'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="btn-clear-system-logs"
+                    onClick={() => setShowConfirmClearLogs(true)}
+                    style={{
+                      padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+                      cursor: 'pointer', fontFamily: 'inherit',
+                      border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626',
+                      display: 'flex', alignItems: 'center', gap: '4px',
+                    }}
+                  >
+                    <span>🗑️</span>
+                    <span>ล้าง Logs ทั้งหมด</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Filters & Search */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {(['ALL', 'ERROR', 'Warning', 'Note'] as const).map((filter) => {
+                    const count = filter === 'ALL'
+                      ? logs.length
+                      : logs.filter((l) => filter === 'ERROR'
+                          ? l.level.toUpperCase() === 'ERROR'
+                          : filter === 'Warning'
+                            ? l.level.toUpperCase().includes('WARN')
+                            : l.level.toUpperCase() === 'NOTE' || l.level.toUpperCase() === 'INFO'
+                        ).length;
+
+                    const isSelected = logFilter === filter;
+                    let activeBg = '#1e293b';
+                    let activeColor = '#fff';
+                    if (filter === 'ERROR') { activeBg = '#dc2626'; }
+                    else if (filter === 'Warning') { activeBg = '#d97706'; }
+                    else if (filter === 'Note') { activeBg = '#2563eb'; }
+
+                    return (
+                      <button
+                        key={filter}
+                        type="button"
+                        onClick={() => setLogFilter(filter)}
+                        style={{
+                          padding: '4px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+                          cursor: 'pointer', fontFamily: 'inherit', border: 'none',
+                          background: isSelected ? activeBg : '#f1f5f9',
+                          color: isSelected ? activeColor : '#64748b',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        {filter === 'ALL' && `ทั้งหมด (${count})`}
+                        {filter === 'ERROR' && `🔴 ERROR (${count})`}
+                        {filter === 'Warning' && `🟡 Warning (${count})`}
+                        {filter === 'Note' && `🟢 Note (${count})`}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    value={logSearchQuery}
+                    onChange={(e) => setLogSearchQuery(e.target.value)}
+                    placeholder="ค้นหาใน Logs..."
+                    style={{
+                      padding: '5px 10px', borderRadius: '8px', border: '1px solid #e2e8f0',
+                      fontSize: '11px', outline: 'none', background: '#f8fafc', width: '220px',
+                      fontFamily: 'inherit',
+                    }}
+                  />
+                  {logSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setLogSearchQuery('')}
+                      style={{
+                        position: 'absolute', right: '6px', top: '5px', border: 'none',
+                        background: 'transparent', cursor: 'pointer', fontSize: '11px', color: '#94a3b8',
+                      }}
+                    >✕</button>
+                  )}
+                </div>
+              </div>
+
+              {/* Logs Table */}
+              <div style={{
+                maxHeight: '400px', overflowY: 'auto', border: '1px solid #e2e8f0',
+                borderRadius: '10px', background: '#fafafa',
+              }}>
+                {filteredLogs.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '36px', color: '#94a3b8', fontSize: '12px' }}>
+                    ไม่มีข้อมูล Logs ที่ตรงกับเงื่อนไข
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'left' }}>
+                    <thead style={{ position: 'sticky', top: 0, background: '#f1f5f9', borderBottom: '1px solid #e2e8f0', zIndex: 1 }}>
+                      <tr style={{ color: '#64748b', fontWeight: 700 }}>
+                        <th style={{ padding: '8px 12px' }}>เวลา (Timestamp)</th>
+                        <th style={{ padding: '8px 12px' }}>ระดับ</th>
+                        <th style={{ padding: '8px 12px' }}>โมดูล</th>
+                        <th style={{ padding: '8px 12px' }}>รายละเอียดเหตุการณ์</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredLogs.map((log, idx) => {
+                        const isErr = log.level.toUpperCase() === 'ERROR';
+                        const isWarn = log.level.toUpperCase().includes('WARN');
+                        return (
+                          <tr
+                            key={log.id ?? idx}
+                            style={{
+                              borderBottom: '1px solid #f1f5f9',
+                              background: isErr ? '#fef2f2' : idx % 2 === 0 ? '#fff' : '#fafafa',
+                            }}
+                          >
+                            <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#64748b', whiteSpace: 'nowrap' }}>
+                              {log.timestamp}
+                            </td>
+                            <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
+                              <span style={{
+                                fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '6px',
+                                background: isErr ? '#fee2e2' : isWarn ? '#fef3c7' : '#dbeafe',
+                                color: isErr ? '#b91c1c' : isWarn ? '#b45309' : '#1d4ed8',
+                                border: isErr ? '1px solid #fecaca' : isWarn ? '1px solid #fde68a' : '1px solid #bfdbfe',
+                              }}>
+                                {log.level}
+                              </span>
+                            </td>
+                            <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontWeight: 700, color: '#334155', whiteSpace: 'nowrap' }}>
+                              <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#f1f5f9', border: '1px solid #e2e8f0', fontSize: '10px' }}>
+                                {log.component || 'System'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '8px 12px', color: '#1e293b' }}>
+                              <div>{log.message}</div>
+                              {log.details && Object.keys(log.details).length > 0 && (
+                                <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b', marginTop: '2px' }}>
+                                  {JSON.stringify(log.details)}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

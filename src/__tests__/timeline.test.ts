@@ -171,7 +171,7 @@ describe('getTimelineText formatting for HIS', () => {
     expect(hisText).toContain('ขั้นตอนที่ 1: ✓ Triage Assessment Completed [ผู้ปฏิบัติ: ]');
     expect(hisText).toContain('ขั้นตอนที่ 2: ✓ ER Admission Registered [ผู้ปฏิบัติ: ]');
     expect(hisText).toContain('ขั้นตอนที่ 3: ✓ เจาะเลือดเพาะเชื้อ ครั้งที่ 1 — แขนซ้าย [ผู้ปฏิบัติ: ]');
-    expect(hisText).toContain('ขั้นตอนที่ 4: ⏭ ข้าม: ยาปฏิชีวนะทางหลอดเลือดดำ ตัวที่ 2 (ถ้ามี) [ผู้ปฏิบัติ: ]');
+    expect(hisText).toContain('ขั้นตอนที่ 4 (ข้าม): ⏭ ข้าม: ยาปฏิชีวนะทางหลอดเลือดดำ ตัวที่ 2 (ถ้ามี) [ผู้ปฏิบัติ: ]');
     expect(hisText).not.toContain('พย.สุกัญญา');
     expect(hisText).toContain('รวมดำเนินการทั้งหมด: 4 ขั้นตอน');
   });
@@ -217,5 +217,65 @@ describe('getTimelineText formatting for HIS', () => {
     expect(hisText).toContain('ขั้นตอนที่ 1: ✓ แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด (เวลาที่ยืนยันทางคลินิก: 14:54 น.) [ผู้ปฏิบัติ: ]');
     expect(hisText).not.toContain('Somchaiomchai Jaidee');
   });
+
+  it('keeps current patient selected on ruleOutSepsis, activates timeline tab, and isolates checklist from other patients', () => {
+    const store = useRTSASStore.getState();
+    
+    // Set up two patients
+    const patientA: any = {
+      id: 'patient_A',
+      hn: '111111111',
+      fullName: 'นาย ก',
+      currentRiskLevel: 'high',
+      hasSepsisAlert: true,
+      latestNewsScore: 6,
+      arrivalTime: '2026-09-18T10:00:00',
+    };
+    const patientB: any = {
+      id: 'patient_B',
+      hn: '222222222',
+      fullName: 'นาย ข',
+      currentRiskLevel: 'high',
+      hasSepsisAlert: true,
+      latestNewsScore: 5,
+      arrivalTime: '2026-09-18T10:30:00',
+    };
+
+    store.setPatients([patientA, patientB]);
+    store.selectPatient('patient_A');
+
+    // Complete Phase 1 on Patient A
+    store.completeChecklistItem('triage', 'พยาบาล');
+    store.completeChecklistItem('nurse_reassess', 'พยาบาล');
+    store.completeChecklistItem('initial_report', 'พยาบาล');
+
+    // Doctor rules out Sepsis on Patient A
+    store.ruleOutSepsis('นพ.สมหมาย');
+
+    const stateAfterRuleOut = useRTSASStore.getState();
+    // 1. MUST remain on Patient A (never bounce to Patient B)
+    expect(stateAfterRuleOut.selectedPatient?.id).toBe('patient_A');
+    expect(stateAfterRuleOut.sepsisRuledOut).toBe(true);
+    // 2. MUST switch activeTab to timeline
+    expect(stateAfterRuleOut.ui.activeTab).toBe('timeline');
+    // 3. Timeline MUST contain Rule Out event
+    expect(stateAfterRuleOut.timeline.some((e) => e.actionText.includes('Rule Out'))).toBe(true);
+
+    // Now manually switch to Patient B
+    store.selectPatient('patient_B');
+    const statePatientB = useRTSASStore.getState();
+
+    // 4. Patient B MUST be clean: NOT ruled out, Phase 1 NOT completed, Phase 2 locked
+    expect(statePatientB.selectedPatient?.id).toBe('patient_B');
+    expect(statePatientB.sepsisRuledOut).toBe(false);
+    
+    const phase1Items = statePatientB.checklist.find((p) => p.phase === 'initial_response')?.items || [];
+    const allPending = phase1Items.every((item) => item.status === 'pending');
+    expect(allPending).toBe(true);
+
+    const phase2Unlocked = statePatientB.checklist.find((p) => p.phase === 'doctor_confirmation')?.isUnlocked;
+    expect(phase2Unlocked).toBe(false);
+  });
 });
+
 

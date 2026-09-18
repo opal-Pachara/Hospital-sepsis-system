@@ -470,13 +470,30 @@ async def get_patient_timeline_route(hn: str):
         vstdate = str(visit.get("vstdate", ""))
         vsttime = format_time_str(visit.get("vsttime"))[:5] if visit.get("vsttime") else "08:00"
         arrival_iso = f"{vstdate}T{vsttime}:00"
-        cc = visit.get("chief_complaint") or "ไม่ระบุอาการ"
         events.append({
-            "id": f"triage_{hn}",
+            "id": f"visit_{hn}",
             "timestamp": arrival_iso,
-            "actionText": f"📥 ผู้ป่วยเข้ารับบริการที่ห้องฉุกเฉิน (ER) — อาการสำคัญ: {cc}",
+            "actionText": f"🏥 ผู้ป่วยมาถึง ER เวลา {vsttime} น.",
             "color": "blue",
-            "actor": "พยาบาลคัดกรอง ER",
+            "actor": "ระบบ",
+        })
+
+        # Calculate NEWS score from visit vitals
+        from .services import calculate_news_score
+        sbp = visit.get("sbp")
+        dbp = visit.get("dbp")
+        hr = visit.get("heart_rate")
+        rr = visit.get("resp_rate")
+        temp = visit.get("temperature")
+        spo2 = visit.get("spo2")
+        news_score, risk_level = calculate_news_score(rr, spo2, temp, sbp, hr)
+        risk_text = "เสี่ยงสูง" if risk_level == "high" or news_score >= 5 else "เสี่ยงปานกลาง" if risk_level == "medium" else "เสี่ยงต่ำ"
+        events.append({
+            "id": f"news_{hn}",
+            "timestamp": arrival_iso,
+            "actionText": f"🧮 ระบบคำนวณ NEWS Score = {news_score} ({risk_text})",
+            "color": "red" if news_score >= 5 else "orange" if news_score >= 1 else "green",
+            "actor": "ระบบ RTSAS",
         })
 
     if t_status:

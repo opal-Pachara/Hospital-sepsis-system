@@ -26,6 +26,7 @@ import type {
 import {
   calculateNEWS,
   generateAssessmentSchedule,
+  createNextAssessmentEntry,
   generateId,
 } from '../utils/newsCalculator';
 import { maskHN } from '../utils/hnMask';
@@ -122,10 +123,78 @@ export function isTreatmentTimelineEvent(event: TimelineEvent): boolean {
   // 5. Clinical treatment events:
   // - Checklist items completed (✓ ...)
   // - Checklist items skipped (⏭ ข้าม: ...)
-  // - Clinical assessments completed (📊 Assessment #...)
+  // - Clinical assessments completed (📊 Assessment #... or ประเมินสัญญาณชีพ...)
   // - Sepsis ruled out (🟢 แพทย์ไม่ยืนยัน...)
   // - Treatment completed (✅ สิ้นสุดการรักษา...)
   return true;
+}
+
+/**
+ * Helper to ensure that Step 1 (Visit time) and Step 2 (ระบบคำนวณ NEWS)
+ * are always present in the patient's treatment timeline, regardless of alert triggers
+ * or NEWS score (including low risk / normal patients like 3968 with NEWS = 0).
+ */
+export function ensureInitialTimelineEvents(
+  patient: Patient | null | undefined,
+  existingEvents: TimelineEvent[] = []
+): TimelineEvent[] {
+  if (!patient) return existingEvents;
+
+  const currentEvents = existingEvents.filter(isTreatmentTimelineEvent);
+
+  const hasVisit = currentEvents.some(
+    (e) => (e.actionText || '').startsWith('🏥') || (e.actionText || '').includes('ผู้ป่วยมาถึง ER') || (e.actionText || '').includes('เข้ารับบริการ')
+  );
+  const hasNews = currentEvents.some(
+    (e) => (e.actionText || '').startsWith('🧮') || (e.actionText || '').includes('คำนวณ NEWS')
+  );
+
+  if (hasVisit && hasNews) {
+    return existingEvents;
+  }
+
+  const eventsToAdd: TimelineEvent[] = [];
+  const arrivalIso = patient.arrivalTime || new Date().toISOString();
+  const arrivalTimeStr = patient.arrivalTime
+    ? new Date(patient.arrivalTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+    : new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+
+  if (!hasVisit) {
+    eventsToAdd.push({
+      id: `visit_${patient.id || patient.hn}`,
+      timestamp: arrivalIso,
+      actionText: `🏥 ผู้ป่วยมาถึง ER เวลา ${arrivalTimeStr} น.`,
+      color: 'blue',
+      actor: 'ระบบ',
+    });
+  }
+
+  if (!hasNews) {
+    const score = patient.latestNewsResult?.totalScore ?? patient.latestNewsScore ?? 0;
+    const riskLevel = patient.latestNewsResult?.riskLevel ?? patient.currentRiskLevel ?? 'low';
+    const riskText =
+      riskLevel === 'high' || score >= 5
+        ? 'เสี่ยงสูง'
+        : riskLevel === 'medium' || score >= 3
+        ? 'เสี่ยงปานกลาง'
+        : 'เสี่ยงต่ำ';
+
+    let calcIso = patient.latestNewsResult?.calculatedAt;
+    if (!calcIso) {
+      const arrMs = new Date(arrivalIso).getTime();
+      calcIso = !isNaN(arrMs) ? new Date(arrMs + 1000).toISOString() : arrivalIso;
+    }
+
+    eventsToAdd.push({
+      id: `news_${patient.id || patient.hn}`,
+      timestamp: calcIso,
+      actionText: `🧮 ระบบคำนวณ NEWS Score = ${score} (${riskText})`,
+      color: score >= 5 ? 'red' : score >= 1 ? 'orange' : 'green',
+      actor: 'ระบบ RTSAS',
+    });
+  }
+
+  return [...eventsToAdd, ...existingEvents];
 }
 
 /**
@@ -427,7 +496,8 @@ export interface RTSASState {
     actionText: string,
     color: TimelineEventColor,
     actor: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    customTimestamp?: string
   ) => void;
   clearTimeline: () => void;
   getTimelineText: () => string;
@@ -445,6 +515,7 @@ export interface RTSASState {
     completedBy: string
   ) => void;
   triggerReminder: (entryId: string) => void;
+  snoozeReminder: (entryId: string) => void;
 
   // --- UI Actions ---
   setActiveTab: (tab: ActiveTab) => void;
@@ -689,8 +760,8 @@ export const useRTSASStore = create<RTSASState>()(
           }
         }
 
+        dataToLoad.timeline = ensureInitialTimelineEvents(patient, dataToLoad.timeline);
         newPatientDataMap[patientId] = dataToLoad;
-
 
         set({
           selectedPatient: patient,
@@ -913,9 +984,9 @@ export const useRTSASStore = create<RTSASState>()(
           if (itemId === 'doctor_confirm') {
             if (customConfirmTime) {
               const timeStr = new Date(customConfirmTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-              eventText = `✓ แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด (เวลาที่ยืนยันทางคลินิก: ${timeStr} น.)`;
+              eventText = `✓ แพทย์เวรยืนยันติดเชื้อ (เวลาที่ยืนยันทางคลินิก: ${timeStr} น.)`;
             } else {
-              eventText = `✓ แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด`;
+              eventText = `✓ แพทย์เวรยืนยันติดเชื้อ`;
             }
           } else if (inputValue) {
             eventText += ` — ${inputValue}`;
@@ -1084,6 +1155,7 @@ export const useRTSASStore = create<RTSASState>()(
             ...state.patientData,
             [patientId]: {
               ...currentData,
+              checklist: state.checklist || currentData.checklist || createDefaultChecklist(),
               sepsisRuledOut: true,
               ruledOutAt: now,
               ruledOutBy: actor,
@@ -1092,16 +1164,20 @@ export const useRTSASStore = create<RTSASState>()(
             },
           };
 
+          // Ensure Step 1 (Visit time) and Step 2 (ระบบคำนวณ NEWS) are recorded before Rule Out
+          const guaranteedTimeline = ensureInitialTimelineEvents(state.selectedPatient, state.timeline || []);
+
           // Add timeline event
           const event: TimelineEvent = {
             id: generateId(),
             timestamp: now,
-            actionText: `🟢 แพทย์ไม่ยืนยันภาวะติดเชื้อในกระแสเลือด — จบกระบวนการสำหรับผู้ป่วยรายนี้`,
+            actionText: `🟢 แพทย์ไม่ยืนยันภาวะติดเชื้อในกระแสเลือด (Rule Out) — จบกระบวนการสำหรับผู้ป่วยรายนี้`,
             color: 'green',
             actor,
           };
 
-          const updatedTimeline = [...(state.timeline || []), event];
+          const updatedTimeline = [...guaranteedTimeline, event];
+          updatedPatientData[patientId].timeline = updatedTimeline;
 
           // Update patient treatmentStatus in patients list so sidebar immediately moves patient out of active queue
           const updatedPatients = state.patients.map((p) =>
@@ -1132,6 +1208,10 @@ export const useRTSASStore = create<RTSASState>()(
             countdownTimer: updatedPatientData[patientId].countdownTimer,
             assessmentSchedule: updatedPatientData[patientId].assessmentSchedule,
             timeline: updatedTimeline,
+            ui: {
+              ...state.ui,
+              activeTab: 'timeline',
+            },
           };
         });
 
@@ -1252,10 +1332,10 @@ export const useRTSASStore = create<RTSASState>()(
       // TIMELINE ACTIONS
       // ===========================================================================
 
-      addTimelineEvent: (actionText, color, actor, metadata) => {
+      addTimelineEvent: (actionText, color, actor, metadata, customTimestamp) => {
         const event: TimelineEvent = {
           id: generateId(),
-          timestamp: new Date().toISOString(),
+          timestamp: customTimestamp || new Date().toISOString(),
           actionText,
           color,
           actor,
@@ -1268,7 +1348,13 @@ export const useRTSASStore = create<RTSASState>()(
         }
 
         set((state) => {
-          const newTimeline = [...(state.timeline || []).filter(isTreatmentTimelineEvent), event];
+          const currentEvents = (state.timeline || []).filter(isTreatmentTimelineEvent);
+          let baseEvents = currentEvents;
+          const isInitial = (event.actionText || '').startsWith('🏥') || (event.actionText || '').startsWith('🧮');
+          if (!isInitial && state.selectedPatient) {
+            baseEvents = ensureInitialTimelineEvents(state.selectedPatient, currentEvents);
+          }
+          const newTimeline = [...baseEvents, event];
           return {
             timeline: newTimeline,
             patientData: state.selectedPatient ? {
@@ -1294,8 +1380,14 @@ export const useRTSASStore = create<RTSASState>()(
       })),
 
       getTimelineText: () => {
-        const { timeline, selectedPatient, isAuthenticated } = get();
-        const treatmentEvents = (timeline || []).filter(isTreatmentTimelineEvent);
+        const { timeline, selectedPatient, isAuthenticated, patientData } = get();
+        const data = selectedPatient ? patientData[selectedPatient.id] : null;
+        const rawTimeline = (timeline && timeline.length > 0) ? timeline : (data?.timeline || []);
+        const guaranteedTimeline = ensureInitialTimelineEvents(selectedPatient, rawTimeline);
+        const treatmentEvents = guaranteedTimeline.filter(isTreatmentTimelineEvent);
+        // Sort chronologically
+        treatmentEvents.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
         // EC Privacy: Use masked HN in copied text unless authenticated
         const displayHN = selectedPatient
           ? (isAuthenticated ? selectedPatient.hn : maskHN(selectedPatient.hn))
@@ -1319,15 +1411,17 @@ export const useRTSASStore = create<RTSASState>()(
             .replace(/\s*\(โดย\s+[^)]+\)/gi, '')
             .replace(/\s*\[ผู้ปฏิบัติ:\s*[^\]]*\]/gi, '')
             .trim();
-          if (cleanAction.includes('แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด')) {
+          if (cleanAction.includes('แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด') || cleanAction.includes('แพทย์เวรยืนยัน')) {
             const match = cleanAction.match(/^(.*?\([^)]*น\.\))/);
             if (match) {
               cleanAction = match[1];
             } else {
-              cleanAction = '✓ แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด';
+              cleanAction = '✓ แพทย์เวรยืนยันติดเชื้อ';
             }
           }
-          return `[${time}] ขั้นตอนที่ ${index + 1}: ${cleanAction} [ผู้ปฏิบัติ: ]`;
+          const isSkipped = cleanAction.startsWith('⏭ ข้าม');
+          const stepLabel = isSkipped ? `ขั้นตอนที่ ${index + 1} (ข้าม)` : `ขั้นตอนที่ ${index + 1}`;
+          return `[${time}] ${stepLabel}: ${cleanAction} [ผู้ปฏิบัติ: ]`;
         });
 
         const footer = '\n' + separator + `รวมดำเนินการทั้งหมด: ${treatmentEvents.length} ขั้นตอน`;
@@ -1394,19 +1488,46 @@ export const useRTSASStore = create<RTSASState>()(
           }));
           const finalChecklist = updatePhaseUnlocking(updatedChecklist);
 
-          if (pId) {
-            updatedPatientData[pId] = {
-              ...(updatedPatientData[pId] || {}),
-              countdownTimer: newTimer,
-              checklist: finalChecklist,
-            };
-          }
-          if (pHn && pHn !== pId) {
-            updatedPatientData[pHn] = {
-              ...(updatedPatientData[pHn] || {}),
-              countdownTimer: newTimer,
-              checklist: finalChecklist,
-            };
+          // Ensure initial timeline events (Step 1: Visit time & Step 2: ระบบคำนวณ NEWS)
+          const targetPt = targetPatient || state.selectedPatient;
+          let activeTimeline = state.timeline;
+          if (targetPt) {
+            const existingTl = (pId && updatedPatientData[pId]?.timeline) || activeTimeline || [];
+            const guaranteedTl = ensureInitialTimelineEvents(targetPt, existingTl);
+            if (pId) {
+              updatedPatientData[pId] = {
+                ...(updatedPatientData[pId] || {}),
+                countdownTimer: newTimer,
+                checklist: finalChecklist,
+                timeline: guaranteedTl,
+              };
+            }
+            if (pHn && pHn !== pId) {
+              updatedPatientData[pHn] = {
+                ...(updatedPatientData[pHn] || {}),
+                countdownTimer: newTimer,
+                checklist: finalChecklist,
+                timeline: guaranteedTl,
+              };
+            }
+            if (state.selectedPatient?.id === pId || !state.selectedPatient) {
+              activeTimeline = guaranteedTl;
+            }
+          } else {
+            if (pId) {
+              updatedPatientData[pId] = {
+                ...(updatedPatientData[pId] || {}),
+                countdownTimer: newTimer,
+                checklist: finalChecklist,
+              };
+            }
+            if (pHn && pHn !== pId) {
+              updatedPatientData[pHn] = {
+                ...(updatedPatientData[pHn] || {}),
+                countdownTimer: newTimer,
+                checklist: finalChecklist,
+              };
+            }
           }
 
           const updatedPatients = state.patients.map((p) =>
@@ -1427,6 +1548,7 @@ export const useRTSASStore = create<RTSASState>()(
             countdownTimer: (state.selectedPatient?.id === pId || !state.selectedPatient) ? newTimer : state.countdownTimer,
             patientData: updatedPatientData,
             patients: updatedPatients,
+            timeline: activeTimeline,
           };
         });
       },
@@ -1577,19 +1699,48 @@ export const useRTSASStore = create<RTSASState>()(
         set((state) => {
           if (!state.assessmentSchedule) return state;
 
+          const currentEntry = state.assessmentSchedule.entries.find((e) => e.id === entryId);
+          const currentSeq = currentEntry?.sequence ?? 1;
+          const nextSeq = currentSeq + 1;
+
+          // 1. Mark current entry completed
+          let updatedEntries = state.assessmentSchedule.entries.map((entry) =>
+            entry.id === entryId
+              ? {
+                ...entry,
+                isCompleted: true,
+                completedAt: now,
+                vitals,
+                newsResult,
+              }
+              : entry
+          );
+
+          // 2. Schedule next round chained from completedAt (15m for rounds 2-4, 30m for rounds 5+)
+          const intervalMinutes = nextSeq <= 4 ? 15 : 30;
+          const nextScheduledTime = new Date(Date.now() + intervalMinutes * 60 * 1000).toISOString();
+
+          const nextEntryExists = updatedEntries.some((e) => e.sequence === nextSeq);
+          if (nextEntryExists) {
+            updatedEntries = updatedEntries.map((entry) =>
+              entry.sequence === nextSeq
+                ? {
+                    ...entry,
+                    scheduledTime: nextScheduledTime,
+                    reminderTriggered: false,
+                    lastReminderAt: null,
+                  }
+                : entry
+            );
+          } else {
+            // Next entry doesn't exist yet! Create it dynamically!
+            const nextEntry = createNextAssessmentEntry(nextSeq, now);
+            updatedEntries.push(nextEntry);
+          }
+
           const newSchedule = {
             ...state.assessmentSchedule,
-            entries: state.assessmentSchedule.entries.map((entry) =>
-              entry.id === entryId
-                ? {
-                  ...entry,
-                  isCompleted: true,
-                  completedAt: now,
-                  vitals,
-                  newsResult,
-                }
-                : entry
-            ),
+            entries: updatedEntries,
           };
 
           return {
@@ -1610,7 +1761,7 @@ export const useRTSASStore = create<RTSASState>()(
         );
 
         get().addTimelineEvent(
-          `📊 Assessment #${entry?.sequence ?? '?'} completed — NEWS: ${newsResult.totalScore}`,
+          `ประเมินสัญญาณชีพ ครั้งที่ ${entry?.sequence ?? '?'} (NEWS: ${newsResult.totalScore} คะแนน)`,
           newsResult.totalScore >= 5 ? 'red' : 'green',
           completedBy,
           { vitals, newsScore: newsResult.totalScore }
@@ -1629,6 +1780,8 @@ export const useRTSASStore = create<RTSASState>()(
           return;
         }
 
+        const now = new Date().toISOString();
+
         set((state) => {
           if (!state.assessmentSchedule) return state;
 
@@ -1636,7 +1789,7 @@ export const useRTSASStore = create<RTSASState>()(
             ...state.assessmentSchedule,
             entries: state.assessmentSchedule.entries.map((entry) =>
               entry.id === entryId
-                ? { ...entry, reminderTriggered: true }
+                ? { ...entry, reminderTriggered: true, lastReminderAt: now }
                 : entry
             ),
           };
@@ -1661,6 +1814,33 @@ export const useRTSASStore = create<RTSASState>()(
           entryId,
           sequence: entry?.sequence,
           scheduledTime: entry?.scheduledTime,
+        });
+      },
+
+      snoozeReminder: (entryId) => {
+        const now = new Date().toISOString();
+        set((state) => {
+          if (!state.assessmentSchedule) return state;
+
+          const newSchedule = {
+            ...state.assessmentSchedule,
+            entries: state.assessmentSchedule.entries.map((entry) =>
+              entry.id === entryId
+                ? { ...entry, lastReminderAt: now }
+                : entry
+            ),
+          };
+
+          return {
+            assessmentSchedule: newSchedule,
+            patientData: state.selectedPatient ? {
+              ...state.patientData,
+              [state.selectedPatient.id]: {
+                ...(state.patientData[state.selectedPatient.id] || {}),
+                assessmentSchedule: newSchedule,
+              }
+            } : state.patientData
+          };
         });
       },
 

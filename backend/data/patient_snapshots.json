@@ -1,9 +1,11 @@
 {
-  "000777091": {
-    "hn": "000777091",
-    "vn": "690916145043",
-    "vstdate": "2026-09-16",
-    "vsttime": "14:50:43",
+  "000624347": {
+    "hn": "000624347",
+    "vn": "690918140958",
+    "vstdate": "2026-09-18",
+    "vsttime": "14:09:58",
+    "news_score": 16,
+    "risk_level": "high",
     "vitals": {
       "sbp": 86.0,
       "dbp": 52.0,
@@ -13,28 +15,15 @@
       "spo2": 89.0,
       "gcs": 13
     },
-    "vitals_summary": "BP 86/52, HR 126, RR 26, BT 39.4°C, SpO2 89%, GCS 13",
-    "news_score": 16,
-    "risk_level": "high",
-    "is_complete": true,
-    "missing_parameters": [],
-    "has_single_alert": true,
-    "parameters": {
-      "respiratoryRate": "26 bpm (3 คะแนน)",
-      "spO2": "89% (3 คะแนน)",
-      "temperature": "39.4°C (2 คะแนน)",
-      "systolicBP": "86 mmHg (3 คะแนน)",
-      "heartRate": "126 bpm (2 คะแนน)",
-      "avpu": "13 (3 คะแนน)"
-    },
-    "calculated_at": "2026-09-16 21:22:15.983",
-    "duration_ms": 0.35
+    "is_complete": true
   },
-  "000841561": {
-    "hn": "000841561",
-    "vn": "690916145045",
-    "vstdate": "2026-09-16",
-    "vsttime": "14:50:43",
+  "000412363": {
+    "hn": "000412363",
+    "vn": "690918140953",
+    "vstdate": "2026-09-18",
+    "vsttime": "14:09:53",
+    "news_score": 16,
+    "risk_level": "high",
     "vitals": {
       "sbp": 86.0,
       "dbp": 52.0,
@@ -44,52 +33,6 @@
       "spo2": 89.0,
       "gcs": 13
     },
-    "vitals_summary": "BP 86/52, HR 126, RR 26, BT 39.4°C, SpO2 89%, GCS 13",
-    "news_score": 16,
-    "risk_level": "high",
-    "is_complete": true,
-    "missing_parameters": [],
-    "has_single_alert": true,
-    "parameters": {
-      "respiratoryRate": "26 bpm (3 คะแนน)",
-      "spO2": "89% (3 คะแนน)",
-      "temperature": "39.4°C (2 คะแนน)",
-      "systolicBP": "86 mmHg (3 คะแนน)",
-      "heartRate": "126 bpm (2 คะแนน)",
-      "avpu": "13 (3 คะแนน)"
-    },
-    "calculated_at": "2026-09-16 21:22:16.003",
-    "duration_ms": 0.11
-  },
-  "000559689": {
-    "hn": "000559689",
-    "vn": "690916212151",
-    "vstdate": "2026-09-16",
-    "vsttime": "14:50:43",
-    "vitals": {
-      "sbp": 86.0,
-      "dbp": 52.0,
-      "heart_rate": 126.0,
-      "resp_rate": 26.0,
-      "temperature": 39.4,
-      "spo2": 89.0,
-      "gcs": 13
-    },
-    "vitals_summary": "BP 86/52, HR 126, RR 26, BT 39.4°C, SpO2 89%, GCS 13",
-    "news_score": 16,
-    "risk_level": "high",
-    "is_complete": true,
-    "missing_parameters": [],
-    "has_single_alert": true,
-    "parameters": {
-      "respiratoryRate": "26 bpm (3 คะแนน)",
-      "spO2": "89% (3 คะแนน)",
-      "temperature": "39.4°C (2 คะแนน)",
-      "systolicBP": "86 mmHg (3 คะแนน)",
-      "heartRate": "126 bpm (2 คะแนน)",
-      "avpu": "13 (3 คะแนน)"
-    },
-    "calculated_at": "2026-09-16 21:22:16.006",
-    "duration_ms": 0.43
+    "is_complete": true
   }
 }

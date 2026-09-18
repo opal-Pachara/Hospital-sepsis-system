@@ -2,7 +2,7 @@ import { useRTSASStore } from '../../store/useRTSASStore';
 import { maskHN } from '../../utils/hnMask';
 
 export default function ReminderModal() {
-  const { ui, closeModal, openModal, selectedPatient } = useRTSASStore();
+  const { ui, closeModal, openModal, snoozeReminder, selectedPatient } = useRTSASStore();
 
   if (ui.modal.activeModal !== 'reminder') return null;
 
@@ -24,6 +24,13 @@ export default function ReminderModal() {
       entryId: data.entryId,
       sequence: data.sequence,
     });
+  };
+
+  const handlePostponeOrClose = () => {
+    if (data?.entryId) {
+      snoozeReminder(data.entryId);
+    }
+    closeModal();
   };
 
   return (
@@ -83,7 +90,7 @@ export default function ReminderModal() {
           </div>
           <button
             id="btn-reminder-close"
-            onClick={closeModal}
+            onClick={handlePostponeOrClose}
             title="ปิดหน้าต่าง"
             style={{
               width: '34px', height: '34px', borderRadius: '10px',
@@ -165,7 +172,7 @@ export default function ReminderModal() {
             </button>
             <button
               id="btn-reminder-postpone"
-              onClick={closeModal}
+              onClick={handlePostponeOrClose}
               style={{
                 flex: 1, padding: '13px', borderRadius: '14px',
                 fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',

@@ -469,39 +469,6 @@ export default memo(function TreatedDashboard({
 
         {/* Right: Actions (CSV Export & Return to Live Monitoring) */}
         <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            id="btn-export-dashboard-csv"
-            onClick={handleExportCSV}
-            style={{
-              padding: '6px 14px',
-              borderRadius: '8px',
-              fontSize: '11px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              border: '1px solid #bbf7d0',
-              background: '#f0fdf4',
-              color: '#15803d',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-              transition: 'all 0.15s',
-            }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.background = '#dcfce7';
-              e.currentTarget.style.borderColor = '#86efac';
-            }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.background = '#f0fdf4';
-              e.currentTarget.style.borderColor = '#bbf7d0';
-            }}
-            title="ดาวน์โหลดไฟล์ CSV สำหรับเปิดใน Microsoft Excel"
-          >
-            <span>📥</span>
-            <span>ส่งออกรายงาน CSV</span>
-          </button>
 
           {onBackToClinical && (
             <button
@@ -533,7 +500,7 @@ export default memo(function TreatedDashboard({
               title="กลับสู่หน้าติดตามผู้ป่วยสด (Bedside Monitoring)"
             >
               <span>🔙</span>
-              <span>ติดตามผู้ป่วยสด</span>
+              <span>ติดตามผู้ป่วยกำลังรักษา</span>
             </button>
           )}
         </div>

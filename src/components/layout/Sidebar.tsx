@@ -279,7 +279,8 @@ export interface SidebarProps {
 }
 
 export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavigateClinical }: SidebarProps = {}) {
-  const { patients, selectedPatient, patientData } = useRTSASStore();
+  const { patients, selectedPatient, patientData, isAuthenticated, currentUser } = useRTSASStore();
+  const isDoctorOrNurse = isAuthenticated && (currentUser?.role === 'doctor' || currentUser?.role === 'nurse');
   const [filter, setFilter] = useState<'all' | 'alert' | 'completed'>('all');
   const [lastRefresh, setLastRefresh] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -451,15 +452,21 @@ export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavig
           className="transition-all"
           id="btn-filter-completed"
           onClick={() => {
+            if (!isDoctorOrNurse) {
+              showToast('เฉพาะแพทย์และพยาบาลเท่านั้นที่สามารถเข้าถึง Dashboard ได้ กรุณาเข้าสู่ระบบ', 'warning');
+              return;
+            }
             setFilter('completed');
             onNavigateTreatedDashboard?.();
           }}
+          title={!isDoctorOrNurse ? 'เฉพาะแพทย์และพยาบาลเท่านั้นที่สามารถดู Dashboard ได้' : 'Dashborad ผู้ป่วยรักษาแล้ว'}
           style={{
             padding: '3px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 600,
-            cursor: 'pointer', fontFamily: 'inherit',
+            cursor: isDoctorOrNurse ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
             border: `1px solid #16a34a`,
             background: filter === 'completed' ? '#16a34a' : 'transparent',
             color: filter === 'completed' ? '#fff' : '#16a34a',
+            opacity: isDoctorOrNurse ? 1 : 0.7,
           }}
         >
           ✅ Dashborad ผู้ปว่ยรักษาแล้ว 
@@ -479,17 +486,25 @@ export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavig
                 <button
                   type="button"
                   id="btn-sidebar-empty-open-dashboard"
-                  onClick={onNavigateTreatedDashboard}
+                  onClick={() => {
+                    if (!isDoctorOrNurse) {
+                      showToast('เฉพาะแพทย์และพยาบาลเท่านั้นที่สามารถเข้าถึง Dashboard ได้ กรุณาเข้าสู่ระบบ', 'warning');
+                      return;
+                    }
+                    onNavigateTreatedDashboard();
+                  }}
+                  title={!isDoctorOrNurse ? 'เฉพาะแพทย์และพยาบาลเท่านั้นที่สามารถดู Dashboard ได้' : undefined}
                   style={{
                     marginTop: '12px',
                     padding: '5px 12px',
                     borderRadius: '6px',
                     fontSize: '11px',
                     fontWeight: 700,
-                    cursor: 'pointer',
+                    cursor: isDoctorOrNurse ? 'pointer' : 'not-allowed',
                     border: '1px solid #86efac',
                     background: '#f0fdf4',
                     color: '#15803d',
+                    opacity: isDoctorOrNurse ? 1 : 0.7,
                   }}
                 >
                   📊 เปิดดู Dashboard สรุปรายวัน
@@ -514,14 +529,21 @@ export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavig
                   <button
                     type="button"
                     id="btn-sidebar-open-dashboard"
-                    onClick={onNavigateTreatedDashboard}
+                    onClick={() => {
+                      if (!isDoctorOrNurse) {
+                        showToast('เฉพาะแพทย์และพยาบาลเท่านั้นที่สามารถเข้าถึง Dashboard ได้ กรุณาเข้าสู่ระบบ', 'warning');
+                        return;
+                      }
+                      onNavigateTreatedDashboard();
+                    }}
+                    title={!isDoctorOrNurse ? 'เฉพาะแพทย์และพยาบาลเท่านั้นที่สามารถดู Dashboard ได้' : undefined}
                     style={{
                       width: '100%',
                       padding: '5px 8px',
                       borderRadius: '6px',
                       fontSize: '11px',
                       fontWeight: 700,
-                      cursor: 'pointer',
+                      cursor: isDoctorOrNurse ? 'pointer' : 'not-allowed',
                       border: '1px solid #86efac',
                       background: '#fff',
                       color: '#15803d',
@@ -530,6 +552,7 @@ export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavig
                       justifyContent: 'center',
                       gap: '5px',
                       boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                      opacity: isDoctorOrNurse ? 1 : 0.7,
                     }}
                   >
                     <span>📊</span>

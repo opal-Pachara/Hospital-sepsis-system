@@ -333,6 +333,9 @@ export interface AssessmentScheduleEntry {
 
   /** Whether a reminder has been triggered */
   reminderTriggered: boolean;
+
+  /** Timestamp when reminder was last triggered or snoozed */
+  lastReminderAt?: string | null;
 }
 
 /**

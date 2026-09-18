@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useRTSASStore, isTreatmentTimelineEvent } from '../../store/useRTSASStore';
+import { useRTSASStore, isTreatmentTimelineEvent, ensureInitialTimelineEvents } from '../../store/useRTSASStore';
 import type { TimelineEvent, TimelineEventColor } from '../../types';
 import { showToast } from '../common/Toast';
 import { maskHN } from '../../utils/hnMask';
@@ -202,8 +202,21 @@ function TreatmentTimeSummary() {
     },
   ];
 
-  // Add completed time if available
-  if (completedTime) {
+  // Rule out time if applicable
+  const ruledOutTime =
+    ts?.sepsis_ruled_out || data?.sepsisRuledOut
+      ? data?.ruledOutAt || findEventTime((t) => t.includes('แพทย์ไม่ยืนยัน') || t.includes('Rule Out'))
+      : null;
+
+  if (ruledOutTime) {
+    rows.push({
+      label: 'แพทย์ไม่ยืนยัน (Rule Out)',
+      icon: '🟢',
+      time: formatThaiTime(ruledOutTime),
+      color: '#16a34a',
+      step: 99,
+    });
+  } else if (completedTime) {
     rows.push({
       label: 'รักษาเสร็จสิ้น',
       icon: '✅',
@@ -273,24 +286,8 @@ export default function TimelinePanel() {
   const { timeline, selectedPatient, patientData, isAuthenticated } = useRTSASStore();
   const data = selectedPatient ? patientData[selectedPatient.id] : null;
   const rawTimeline = (timeline && timeline.length > 0) ? timeline : (data?.timeline || []);
-
-  const nr = selectedPatient?.latestNewsResult;
-  const isNewsComplete = Boolean(
-    nr &&
-    nr.missingDataCount === 0 &&
-    nr.calculatedAt &&
-    nr.riskLevel !== 'incomplete'
-  );
-
-  const treatmentEvents = rawTimeline
-    .filter(isTreatmentTimelineEvent)
-    .filter((ev) => {
-      // If NEWS is incomplete, do NOT show premature 🧮 calculation events
-      if ((ev.actionText || '').startsWith('🧮') && !isNewsComplete) {
-        return false;
-      }
-      return true;
-    });
+  const guaranteedTimeline = ensureInitialTimelineEvents(selectedPatient, rawTimeline);
+  const treatmentEvents = guaranteedTimeline.filter(isTreatmentTimelineEvent);
 
   // Sort events chronologically so visit time is always <= calculation time
   treatmentEvents.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
@@ -320,16 +317,18 @@ export default function TimelinePanel() {
         .replace(/\s*\(โดย\s+[^)]+\)/gi, '')
         .replace(/\s*\[ผู้ปฏิบัติ:\s*[^\]]*\]/gi, '')
         .trim();
-      if (cleanAction.includes('แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด')) {
+      if (cleanAction.includes('แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด') || cleanAction.includes('แพทย์เวรยืนยัน')) {
         const match = cleanAction.match(/^(.*?\([^)]*น\.\))/);
         if (match) {
           cleanAction = match[1];
         } else {
-          cleanAction = '✓ แพทย์ยืนยันภาวะติดเชื้อในกระแสเลือด';
+          cleanAction = '✓ แพทย์เวรยืนยันติดเชื้อ';
         }
       }
+      const isSkipped = cleanAction.startsWith('⏭ ข้าม');
+      const stepLabel = isSkipped ? `ขั้นตอนที่ ${index + 1} (ข้าม)` : `ขั้นตอนที่ ${index + 1}`;
       const actorStr = ' [ผู้ปฏิบัติ: ]';
-      return `[${time}] ขั้นตอนที่ ${index + 1}: ${cleanAction}${actorStr}`;
+      return `[${time}] ${stepLabel}: ${cleanAction}${actorStr}`;
     });
 
     const footer = '\n' + separator + `รวมดำเนินการทั้งหมด: ${treatmentEvents.length} ขั้นตอน`;
