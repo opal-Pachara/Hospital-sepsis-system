@@ -312,6 +312,7 @@ async def clear_logs_route():
 
 class InjectPatientRequest(BaseModel):
     hn: str
+    vn: Optional[str] = None
     patient_name: Optional[str] = None
     sex: Optional[str] = "male"
     age: Optional[int] = 55
@@ -336,11 +337,59 @@ async def inject_patient_route(payload: InjectPatientRequest):
     try:
         data = payload.model_dump()
         patient_item = await inject_simulated_patient(data)
+
+        # Extract present vital sign parameters
+        news_res = patient_item.get("news_result") or {}
+        score = news_res.get("totalScore", 0)
+        risk_lvl = news_res.get("riskLevel", "low")
+        vn_val = payload.vn or patient_item.get("vn") or "-"
+
+        param_labels = {
+            "sbp": "BP", "heart_rate": "HR", "resp_rate": "RR",
+            "temperature": "Temp", "spo2": "SpO2", "gcs": "GCS"
+        }
+        present_params = []
+        for k, lbl in param_labels.items():
+            val = getattr(payload, k, None)
+            if val is not None:
+                if k == "temperature":
+                    present_params.append(f"{lbl} {val:.1f}°C")
+                elif k == "spo2":
+                    present_params.append(f"{lbl} {val:.0f}%")
+                elif k == "sbp":
+                    dbp = getattr(payload, "dbp", None)
+                    dbp_str = f"/{dbp:.0f}" if dbp is not None else ""
+                    present_params.append(f"{lbl} {val:.0f}{dbp_str} mmHg")
+                elif k == "heart_rate":
+                    present_params.append(f"{lbl} {val:.0f} bpm")
+                elif k == "resp_rate":
+                    present_params.append(f"{lbl} {val:.0f}/min")
+                else:
+                    present_params.append(f"{lbl} {val}")
+
+        params_str = ", ".join(present_params) if present_params else "ไม่มีสัญญาณชีพ"
+
         record_log(
-            "Note",
-            f"Admin Patient Entry: Inserted patient HN {payload.hn} into MySQL database (NEWS {patient_item.get('news_result', {}).get('totalScore', 0)})",
+            "Warning" if score >= 5 else "Note",
+            f"Admin Patient Entry: เพิ่มข้อมูลผู้ป่วย HN {payload.hn} (VN: {vn_val}) เข้าสู่ระบบ — พารามิเตอร์: [{params_str}] (NEWS {score} คะแนน [{risk_lvl.upper()} RISK])",
             component="Admin_DB_Insert",
-            details={"hn": payload.hn, "news": patient_item.get("news_result", {}).get("totalScore", 0)}
+            details={
+                "hn": payload.hn,
+                "vn": vn_val,
+                "new_records_count": 1,
+                "parameters": present_params,
+                "news_score": score,
+                "risk_level": risk_lvl,
+                "vitals": {
+                    "sbp": payload.sbp,
+                    "dbp": payload.dbp,
+                    "heart_rate": payload.heart_rate,
+                    "resp_rate": payload.resp_rate,
+                    "temperature": payload.temperature,
+                    "spo2": payload.spo2,
+                    "gcs": payload.gcs,
+                }
+            }
         )
         return {"success": True, "patient": patient_item}
     except Exception as e:

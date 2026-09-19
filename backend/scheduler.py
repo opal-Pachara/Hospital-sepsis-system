@@ -25,6 +25,9 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 SEEN_VITALS_FILE = os.path.join(DATA_DIR, "seen_vitals.json")
 SEEN_SNAPSHOTS_FILE = os.path.join(DATA_DIR, "patient_snapshots.json")
 
+# Track HOSxP server disconnect state and downtime
+_hosxp_disconnected_at: Optional[datetime] = None
+
 
 def _load_seen_vitals() -> Dict[str, bool]:
     """Load seen vital keys from disk so reload/restart remembers already processed patients."""
@@ -217,6 +220,7 @@ async def fetch_vitals_from_db() -> List[Dict[str, Any]]:
     If ENABLE_DATE_FALLBACK is False (Production): strictly queries CURDATE().
     If ENABLE_DATE_FALLBACK is True (Dev/Staging): falls back to MAX(vstdate).
     """
+    global _hosxp_disconnected_at
     enable_fallback = getattr(settings, "ENABLE_DATE_FALLBACK", False)
     query_visits = QUERY_PATIENT_VISITS_FALLBACK if enable_fallback else QUERY_PATIENT_VISITS_TODAY
     query_opd = QUERY_OPDSCREEN_FALLBACK if enable_fallback else QUERY_OPDSCREEN_TODAY
@@ -224,6 +228,36 @@ async def fetch_vitals_from_db() -> List[Dict[str, Any]]:
     try:
         async with db_pool.get_connection() as conn:
             async with conn.cursor(DictCursor) as cursor:
+                # Check if we just reconnected from a previous disconnection
+                if _hosxp_disconnected_at is not None:
+                    reconnected_at = datetime.now()
+                    downtime_sec = max(1, round((reconnected_at - _hosxp_disconnected_at).total_seconds()))
+                    if downtime_sec >= 60:
+                        mins = downtime_sec // 60
+                        secs = downtime_sec % 60
+                        duration_str = f"{mins} นาที {secs} วินาที" if secs > 0 else f"{mins} นาที"
+                    else:
+                        duration_str = f"{downtime_sec} วินาที"
+
+                    try:
+                        from .log_service import record_log
+                        record_log(
+                            "Note",
+                            f"HOSxP Server Reconnected: เชื่อมต่อฐานข้อมูล HOSxP สำเร็จอีกครั้ง (หยุดทำงานไป {duration_str} ตั้งแต่ {_hosxp_disconnected_at.strftime('%H:%M:%S')} ถึง {reconnected_at.strftime('%H:%M:%S')})",
+                            component="HOSxP_DB",
+                            details={
+                                "status": "CONNECTED",
+                                "host": settings.DB_HOST,
+                                "port": settings.DB_PORT,
+                                "downtime_seconds": downtime_sec,
+                                "disconnected_at": _hosxp_disconnected_at.strftime("%Y-%m-%d %H:%M:%S"),
+                                "reconnected_at": reconnected_at.strftime("%Y-%m-%d %H:%M:%S"),
+                            }
+                        )
+                    except Exception as log_err:
+                        logger.error(f"Failed to record HOSxP reconnect log: {log_err}")
+                    _hosxp_disconnected_at = None
+
                 # Try patient_visits first
                 await cursor.execute(query_visits)
                 rows = await cursor.fetchall()
@@ -253,12 +287,28 @@ async def fetch_vitals_from_db() -> List[Dict[str, Any]]:
         logger.error(f"Failed to fetch vitals: {e}")
         try:
             from .log_service import record_log
-            record_log(
-                "ERROR",
-                f"Scheduler polling failed: {str(e)[:120]}",
-                component="Scheduler",
-                details={"error": str(e), "action": "retry_in_10s"}
-            )
+            if _hosxp_disconnected_at is None:
+                _hosxp_disconnected_at = datetime.now()
+                record_log(
+                    "ERROR",
+                    f"CRITICAL: ไม่สามารถเชื่อมต่อฐานข้อมูล HOSxP MySQL ได้ ({settings.DB_HOST}:{settings.DB_PORT}): {str(e)[:120]}",
+                    component="HOSxP_DB",
+                    details={
+                        "error": str(e),
+                        "host": settings.DB_HOST,
+                        "port": settings.DB_PORT,
+                        "status": "DISCONNECTED",
+                        "disconnected_at": _hosxp_disconnected_at.strftime("%Y-%m-%d %H:%M:%S"),
+                        "action": "retry_in_10s"
+                    }
+                )
+            else:
+                record_log(
+                    "ERROR",
+                    f"Scheduler polling failed: {str(e)[:120]}",
+                    component="Scheduler",
+                    details={"error": str(e), "action": "retry_in_10s"}
+                )
         except Exception:
             pass
         return []
@@ -443,6 +493,17 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
         logger.warning(f"Could not load treatment statuses: {te}")
         treatment_statuses = {}
 
+    batch_patient_updates = []
+    param_short_labels = {
+        "sbp": "SBP",
+        "dbp": "DBP",
+        "heart_rate": "HR",
+        "resp_rate": "RR",
+        "temperature": "Temp",
+        "spo2": "SpO2",
+        "gcs": "GCS",
+    }
+
     for row in rows:
         try:
             hn = str(row.get('hn', '')).strip()
@@ -572,6 +633,25 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                 }
                 last_seen_vitals[reading_key] = True
                 new_patients_logged += 1
+
+                hn_display = hn if hn.upper().startswith("HN") else f"HN {hn}"
+                present_short = [param_short_labels.get(f, f) for f in present_fields]
+                missing_th = [FIELD_NAMES_TH.get(f, f) for f in missing_fields]
+                if is_complete:
+                    summary_text = f"{hn_display}: ผู้ป่วยใหม่ (ครบ: {', '.join(present_short)})"
+                else:
+                    summary_text = f"{hn_display}: ผู้ป่วยใหม่ (มี: {', '.join(present_short)} | ขาด: {', '.join(missing_th)})"
+
+                batch_patient_updates.append({
+                    "hn": hn,
+                    "vn": vn,
+                    "type": "new",
+                    "parameters": present_short,
+                    "missing_parameters": missing_th,
+                    "vitals": current_vitals,
+                    "summary": summary_text,
+                    "news_score": total_score,
+                })
 
                 # Broadcast WebSocket alert
                 arrival_iso = row_to_arrival_iso(vstdate, vsttime)
@@ -711,6 +791,36 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                     last_seen_vitals[reading_key] = True
                     updated_patients_logged += 1
 
+                    hn_display = hn if hn.upper().startswith("HN") else f"HN {hn}"
+                    added_short = [param_short_labels.get(k, k) for k in added_fields.keys()]
+                    changed_short = [param_short_labels.get(k, k) for k in changed_fields.keys()]
+                    all_updated = added_short + changed_short
+                    missing_th = [FIELD_NAMES_TH.get(f, f) for f in missing_fields]
+
+                    if added_short and changed_short:
+                        upd_summary = f"{hn_display}: เพิ่ม [{', '.join(added_short)}] และเปลี่ยน [{', '.join(changed_short)}]"
+                    elif added_short:
+                        upd_summary = f"{hn_display}: เพิ่ม [{', '.join(added_short)}]"
+                        if missing_fields:
+                            upd_summary += f" (ยังขาด {', '.join(missing_th)})"
+                    elif changed_short:
+                        upd_summary = f"{hn_display}: อัปเดต [{diff_summary}]"
+                    else:
+                        upd_summary = f"{hn_display}: รอบ {vsttime_str}"
+
+                    batch_patient_updates.append({
+                        "hn": hn,
+                        "vn": vn,
+                        "type": "updated",
+                        "parameters": all_updated,
+                        "added_parameters": added_short,
+                        "changed_parameters": changed_short,
+                        "missing_parameters": missing_th,
+                        "vitals": current_vitals,
+                        "summary": upd_summary,
+                        "news_score": total_score,
+                    })
+
                     # Broadcast update via WebSocket
                     arrival_iso = row_to_arrival_iso(vstdate, vsttime)
                     payload = SepsisAlertPayload(
@@ -745,8 +855,9 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
         _save_seen_vitals()
         _save_patient_snapshots()
 
-    # Batch summary log if multiple new patients fetched in one batch
-    if new_patients_logged > 1:
+    # Batch summary log if any new or updated patients fetched in one batch
+    total_batch_updates = len(batch_patient_updates)
+    if total_batch_updates > 0:
         try:
             from .treatment_service import get_all_treatment_statuses
             treatment_statuses = await get_all_treatment_statuses()
@@ -759,16 +870,25 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                 )
             )
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            short_summaries = [p["summary"] for p in batch_patient_updates[:4]]
+            if len(batch_patient_updates) > 4:
+                short_summaries.append(f"+อีก {len(batch_patient_updates) - 4} ราย")
+            patients_summary_str = " | ".join(short_summaries) if short_summaries else f"+{new_patients_logged} ราย"
+
             record_log(
-                level="Note",
-                message=f"ดึงข้อมูลผู้ป่วยสำเร็จ: ตรวจพบข้อมูลใหม่ +{new_patients_logged} ราย (กำลังรักษาใน ER รวม {active_count} ราย)",
+                level="Warning" if any(p.get("news_score", 0) >= 5 for p in batch_patient_updates) else "Note",
+                message=f"ดึงข้อมูลจาก HOSxP สำเร็จ: ตรวจพบข้อมูลใหม่/อัปเดต {total_batch_updates} รายการ [{patients_summary_str}] (กำลังรักษาใน ER รวม {active_count} ราย)",
                 component="HOSxP_Sync",
                 details={
                     "source_table": source_table,
                     "new_records_count": new_patients_logged,
+                    "updated_records_count": updated_patients_logged,
+                    "total_updates_count": total_batch_updates,
                     "active_er_patients_count": active_count,
                     "fetch_trigger": trigger,
                     "fetched_at": now_str,
+                    "patients_breakdown": batch_patient_updates,
                 }
             )
         except Exception:

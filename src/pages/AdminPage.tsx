@@ -13,6 +13,7 @@ import { useRTSASStore, type PatientMemoryAudit } from '../store/useRTSASStore';
 import { maskHN } from '../utils/hnMask';
 import { showToast } from '../components/common/Toast';
 import { extractErrorMessage } from '../utils/errorUtils';
+import SystemLogsModal from '../components/modals/SystemLogsModal';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -242,6 +243,331 @@ function ConfirmResetDialog({ onConfirm, onCancel, isLoading }: { onConfirm: () 
 }
 
 // ---------------------------------------------------------------------------
+// Reset Password Modal
+// ---------------------------------------------------------------------------
+
+interface ResetPasswordModalProps {
+  user: UserRecord | null;
+  onClose: () => void;
+  onSuccess: () => void;
+  authHeaders: Record<string, string>;
+}
+
+function ResetPasswordModal({ user, onClose, onSuccess, authHeaders }: ResetPasswordModalProps) {
+  const [newPassword, setNewPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  if (!user) return null;
+
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%&*';
+    let result = '';
+    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lower = 'abcdefghijkmnpqrstuvwxyz';
+    const digits = '23456789';
+    const specials = '!@#$%&*';
+    result += upper.charAt(Math.floor(Math.random() * upper.length));
+    result += lower.charAt(Math.floor(Math.random() * lower.length));
+    result += digits.charAt(Math.floor(Math.random() * digits.length));
+    result += specials.charAt(Math.floor(Math.random() * specials.length));
+    for (let i = 0; i < 6; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setNewPassword(result);
+  };
+
+  const handleCopy = () => {
+    if (!newPassword) return;
+    navigator.clipboard.writeText(newPassword);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      showToast('รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร', 'error');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/users/${user.id}/reset-password`, {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({ password: newPassword }),
+      });
+
+      if (res.ok) {
+        showToast(`✅ รีเซ็ตรหัสผ่าน @${user.username} สำเร็จ`, 'success');
+        onSuccess();
+        onClose();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(extractErrorMessage(err.detail, 'ไม่สามารถรีเซ็ตรหัสผ่านได้'), 'error');
+      }
+    } catch {
+      showToast('ไม่สามารถเชื่อมต่อกับ backend', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const badge = roleBadge(user.role);
+
+  return (
+    <div
+      className="fixed inset-0 z-[350] flex items-center justify-center"
+      style={{ background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget && !isLoading) onClose(); }}
+    >
+      <div style={{
+        width: '460px', maxWidth: '92vw', background: '#fff', borderRadius: '20px',
+        overflow: 'hidden', boxShadow: '0 25px 60px rgba(0,0,0,0.25)',
+      }}>
+        <div style={{ height: '4px', background: 'linear-gradient(90deg,#2563eb,#06b6d4)' }} />
+        <div style={{ padding: '24px' }}>
+          {/* Title & Icon */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+            <div style={{
+              width: '44px', height: '44px', borderRadius: '12px',
+              background: 'linear-gradient(135deg, #2563eb, #06b6d4)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '22px', boxShadow: '0 4px 12px rgba(37,99,235,0.25)',
+            }}>🔑</div>
+            <div>
+              <div style={{ fontSize: '16px', fontWeight: 900, color: '#1e293b' }}>
+                รีเซ็ตรหัสผ่านผู้ใช้งาน
+              </div>
+              <div style={{ fontSize: '12px', color: '#64748b' }}>
+                กำหนดรหัสผ่านใหม่สำหรับกรณีผู้ใช้ลืมรหัสผ่าน
+              </div>
+            </div>
+          </div>
+
+          {/* User Info Card */}
+          <div style={{
+            background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0',
+            padding: '12px 16px', marginBottom: '18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>
+                {user.firstname} {user.lastname}
+              </div>
+              <div style={{ fontSize: '12px', color: '#64748b', fontFamily: 'monospace' }}>
+                @{user.username}
+              </div>
+            </div>
+            <span style={{
+              fontSize: '10px', fontWeight: 700, padding: '3px 8px',
+              borderRadius: '8px', background: badge.bg,
+              color: badge.color, border: `1px solid ${badge.border}`,
+            }}>
+              {badge.label}
+            </span>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155' }}>
+                  รหัสผ่านใหม่ * (≥6 ตัวอักษร)
+                </label>
+                <button
+                  type="button"
+                  onClick={generateRandomPassword}
+                  style={{
+                    background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe',
+                    borderRadius: '6px', padding: '2px 8px', fontSize: '11px', fontWeight: 700,
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
+                  }}
+                >
+                  🎲 สุ่มรหัสผ่าน
+                </button>
+              </div>
+
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="กรอกหรือกดสุ่มรหัสผ่านใหม่..."
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  style={{
+                    width: '100%', padding: '10px 75px 10px 12px',
+                    borderRadius: '10px', border: '1px solid #cbd5e1',
+                    fontSize: '13px', fontFamily: 'monospace',
+                    boxSizing: 'border-box', outline: 'none',
+                  }}
+                  autoFocus
+                />
+                <div style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', display: 'flex', gap: '4px' }}>
+                  {newPassword && (
+                    <button
+                      type="button"
+                      onClick={handleCopy}
+                      title="คัดลอกรหัสผ่าน"
+                      style={{
+                        background: copied ? '#16a34a' : '#f1f5f9', color: copied ? '#fff' : '#475569',
+                        border: 'none', borderRadius: '6px', padding: '4px 6px',
+                        fontSize: '11px', cursor: 'pointer',
+                      }}
+                    >
+                      {copied ? '✓' : '📋'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    title={showPassword ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
+                    style={{
+                      background: '#f1f5f9', color: '#475569',
+                      border: 'none', borderRadius: '6px', padding: '4px 6px',
+                      fontSize: '11px', cursor: 'pointer',
+                    }}
+                  >
+                    {showPassword ? '👁️' : '🔒'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+              <button
+                type="submit"
+                disabled={isLoading || newPassword.length < 6}
+                style={{
+                  flex: 2, padding: '12px', borderRadius: '12px',
+                  fontSize: '13px', fontWeight: 800,
+                  cursor: isLoading || newPassword.length < 6 ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit', color: '#fff', border: 'none',
+                  background: isLoading || newPassword.length < 6 ? '#94a3b8' : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                  boxShadow: isLoading || newPassword.length < 6 ? 'none' : '0 4px 14px rgba(37,99,235,0.3)',
+                  transition: 'all 0.2s',
+                }}
+              >
+                {isLoading ? '⏳ กำลังบันทึก...' : '✅ บันทึกรหัสผ่านใหม่'}
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isLoading}
+                style={{
+                  flex: 1, padding: '12px', borderRadius: '12px',
+                  fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                  fontFamily: 'inherit', color: '#64748b',
+                  border: '1px solid #e2e8f0', background: '#f8fafc',
+                }}
+              >
+                ยกเลิก
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Delete User Dialog
+// ---------------------------------------------------------------------------
+
+interface DeleteUserDialogProps {
+  user: UserRecord | null;
+  onClose: () => void;
+  onConfirm: () => void;
+  isLoading: boolean;
+}
+
+function DeleteUserDialog({ user, onClose, onConfirm, isLoading }: DeleteUserDialogProps) {
+  if (!user) return null;
+  const badge = roleBadge(user.role);
+
+  return (
+    <div
+      className="fixed inset-0 z-[350] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget && !isLoading) onClose(); }}
+    >
+      <div style={{
+        width: '440px', maxWidth: '92vw', background: '#fff', borderRadius: '20px',
+        overflow: 'hidden', boxShadow: '0 25px 60px rgba(220,38,38,.25)',
+      }}>
+        <div style={{ height: '4px', background: 'linear-gradient(90deg,#dc2626,#b91c1c)' }} />
+        <div style={{ padding: '24px' }}>
+          <div style={{
+            width: '56px', height: '56px', borderRadius: '16px',
+            background: 'linear-gradient(135deg,#dc2626,#b91c1c)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '28px', margin: '0 auto 16px',
+            boxShadow: '0 8px 20px rgba(220,38,38,.35)',
+          }}>🗑️</div>
+          <div style={{ fontSize: '17px', fontWeight: 900, color: '#1e293b', textAlign: 'center', marginBottom: '8px' }}>
+            ยืนยันการลบผู้ใช้งาน?
+          </div>
+          <div style={{
+            background: '#fef2f2', borderRadius: '12px', border: '1px solid #fecaca',
+            padding: '12px 16px', marginBottom: '16px',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: '#991b1b' }}>
+                {user.firstname} {user.lastname}
+              </span>
+              <span style={{
+                fontSize: '10px', fontWeight: 700, padding: '2px 8px',
+                borderRadius: '8px', background: badge.bg,
+                color: badge.color, border: `1px solid ${badge.border}`,
+              }}>
+                {badge.label}
+              </span>
+            </div>
+            <div style={{ fontSize: '12px', color: '#b91c1c', fontFamily: 'monospace' }}>
+              Username: @{user.username}
+            </div>
+          </div>
+          <div style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', lineHeight: 1.6, marginBottom: '20px' }}>
+            การกระทำนี้จะลบบัญชีผู้ใช้นี้ออกจากฐานข้อมูลระบบอย่างถาวร<br />
+            <span style={{ color: '#dc2626', fontWeight: 700 }}>ไม่สามารถกู้คืนข้อมูลบัญชีนี้ได้อีกต่อไป!</span>
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              onClick={onConfirm}
+              disabled={isLoading}
+              style={{
+                flex: 2, padding: '13px', borderRadius: '12px',
+                fontSize: '13px', fontWeight: 800, cursor: isLoading ? 'not-allowed' : 'pointer',
+                fontFamily: 'inherit', color: '#fff', border: 'none',
+                background: isLoading ? '#94a3b8' : 'linear-gradient(135deg,#dc2626,#b91c1c)',
+                boxShadow: isLoading ? 'none' : '0 4px 14px rgba(220,38,38,.3)',
+                transition: 'all 0.2s',
+              }}
+            >
+              {isLoading ? '⏳ กำลังลบผู้ใช้...' : '🗑️ ยืนยันลบผู้ใช้งาน'}
+            </button>
+            <button
+              onClick={onClose}
+              disabled={isLoading}
+              style={{
+                flex: 1, padding: '13px', borderRadius: '12px',
+                fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                fontFamily: 'inherit', color: '#64748b',
+                border: '1px solid #e2e8f0', background: '#f8fafc',
+              }}
+            >
+              ยกเลิก
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Confirm Clear Logs Dialog
 // ---------------------------------------------------------------------------
 
@@ -306,6 +632,168 @@ function ConfirmClearLogsDialog({ onConfirm, onCancel, isLoading }: { onConfirm:
   );
 }
 
+function formatJsonSyntax(jsonStr: string) {
+  return jsonStr.replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+    (match) => {
+      let color = '#cbd5e1';
+      if (/^"/.test(match)) {
+        if (/:$/.test(match)) {
+          color = '#38bdf8'; // Key: bright sky blue
+        } else {
+          color = '#86efac'; // String: soft emerald green
+        }
+      } else if (/true|false/.test(match)) {
+        color = '#c084fc'; // Boolean: purple
+      } else if (/null/.test(match)) {
+        color = '#f87171'; // Null: red
+      } else {
+        color = '#facc15'; // Number: warm yellow
+      }
+      return `<span style="color: ${color};">${match}</span>`;
+    }
+  );
+}
+
+interface LogDetailModalProps {
+  log: SystemLogItem | null;
+  onClose: () => void;
+}
+
+function LogDetailModal({ log, onClose }: LogDetailModalProps) {
+  const [copied, setCopied] = useState(false);
+  if (!log) return null;
+
+  const jsonStr = JSON.stringify(log.details || {}, null, 2);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(jsonStr);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const isErr = log.level.toUpperCase() === 'ERROR';
+  const isWarn = log.level.toUpperCase().includes('WARN');
+
+  return (
+    <div
+      className="fixed inset-0 z-[350] flex items-center justify-center"
+      style={{ background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{
+        width: '700px', maxWidth: '92vw', maxHeight: '85vh',
+        background: '#ffffff', borderRadius: '16px', overflow: 'hidden',
+        boxShadow: '0 25px 60px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column',
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '16px 20px', borderBottom: '1px solid #e2e8f0',
+          background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '20px' }}>📜</span>
+            <div>
+              <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b' }}>
+                รายละเอียด Log #{log.id}
+              </div>
+              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                {log.timestamp} · โมดูล: <strong style={{ color: '#0284c7' }}>{log.component || 'System'}</strong>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{
+              fontSize: '11px', fontWeight: 800, padding: '3px 8px', borderRadius: '6px',
+              background: isErr ? '#fee2e2' : isWarn ? '#fef3c7' : '#dbeafe',
+              color: isErr ? '#b91c1c' : isWarn ? '#b45309' : '#1d4ed8',
+              border: isErr ? '1px solid #fecaca' : isWarn ? '1px solid #fde68a' : '1px solid #bfdbfe',
+            }}>
+              {log.level}
+            </span>
+            <button
+              onClick={onClose}
+              style={{
+                border: 'none', background: 'transparent', cursor: 'pointer',
+                fontSize: '18px', color: '#94a3b8', padding: '4px 8px', borderRadius: '6px',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1 }}>
+          {/* Message */}
+          <div style={{
+            background: isErr ? '#fef2f2' : '#f8fafc', border: `1px solid ${isErr ? '#fecaca' : '#e2e8f0'}`,
+            borderRadius: '10px', padding: '12px 14px', marginBottom: '14px',
+          }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', marginBottom: '4px' }}>
+              ข้อความแจ้งเตือน (Log Message)
+            </div>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: isErr ? '#991b1b' : '#1e293b', lineHeight: 1.5 }}>
+              {log.message}
+            </div>
+          </div>
+
+          {/* JSON Details */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>{'{ }'}</span>
+                <span>ข้อมูลโครงสร้าง JSON (details_json)</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleCopy}
+                style={{
+                  background: copied ? '#16a34a' : '#0284c7',
+                  color: '#fff', border: 'none', borderRadius: '6px',
+                  padding: '4px 10px', fontSize: '11px', fontWeight: 700,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <span>{copied ? '✓' : '📋'}</span>
+                <span>{copied ? 'คัดลอกเรียบร้อย!' : 'คัดลอก JSON'}</span>
+              </button>
+            </div>
+
+            <pre
+              style={{
+                margin: 0, padding: '12px 16px', background: '#0f172a',
+                borderRadius: '10px', fontSize: '11px', lineHeight: 1.6,
+                fontFamily: 'SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                overflowX: 'auto', maxHeight: '350px',
+              }}
+              dangerouslySetInnerHTML={{ __html: formatJsonSyntax(jsonStr) }}
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: '12px 20px', borderTop: '1px solid #e2e8f0', background: '#f8fafc',
+          display: 'flex', justifyContent: 'flex-end',
+        }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: '8px 18px', borderRadius: '8px', fontSize: '12px', fontWeight: 700,
+              background: '#e2e8f0', color: '#334155', border: 'none', cursor: 'pointer',
+            }}
+          >
+            ปิด
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main AdminPage
 // ---------------------------------------------------------------------------
@@ -333,8 +821,9 @@ export default function AdminPage({ onBack }: AdminPageProps) {
   const [showConfirmClearLogs, setShowConfirmClearLogs] = useState(false);
   const [isClearingCache, setIsClearingCache] = useState(false);
   const [isResettingDashboard, setIsResettingDashboard] = useState(false);
-  const [isClearingLogs, setIsClearingLogs] = useState(false);
-  const [deactivatingId, setDeactivatingId] = useState<number | null>(null);
+  const [resetPasswordUser, setResetPasswordUser] = useState<UserRecord | null>(null);
+  const [deleteTargetUser, setDeleteTargetUser] = useState<UserRecord | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
   const [activeSection, setActiveSection] = useState<'status' | 'users' | 'tools'>('status');
 
   // Logs controls & filters
@@ -342,6 +831,21 @@ export default function AdminPage({ onBack }: AdminPageProps) {
   const [logSearchQuery, setLogSearchQuery] = useState('');
   const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
   const [lastLogsRefreshedAt, setLastLogsRefreshedAt] = useState<Date>(new Date());
+  const [expandedLogIds, setExpandedLogIds] = useState<Set<string | number>>(new Set());
+  const [selectedLogForModal, setSelectedLogForModal] = useState<SystemLogItem | null>(null);
+  const [showSystemLogsModal, setShowSystemLogsModal] = useState(false);
+
+  const toggleExpandLog = (id: string | number) => {
+    setExpandedLogIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   // Register form state
   const [showRegisterForm, setShowRegisterForm] = useState(false);
@@ -509,26 +1013,27 @@ export default function AdminPage({ onBack }: AdminPageProps) {
     };
   }, [token, authHeaders]);
 
-  // Deactivate user
-  const handleDeactivate = async (userId: number, username: string) => {
-    if (!token) return;
-    setDeactivatingId(userId);
+  // Delete user
+  const handleDeleteUser = async () => {
+    if (!token || !deleteTargetUser) return;
+    setIsDeletingUser(true);
     try {
-      const res = await fetch(`${API_BASE}/auth/users/${userId}/deactivate`, {
-        method: 'PUT',
+      const res = await fetch(`${API_BASE}/auth/users/${deleteTargetUser.id}`, {
+        method: 'DELETE',
         headers: authHeaders,
       });
       if (res.ok) {
-        showToast(`✅ ระงับบัญชี @${username} แล้ว`, 'success');
+        showToast(`✅ ลบบัญชี @${deleteTargetUser.username} สำเร็จ`, 'success');
+        setDeleteTargetUser(null);
         loadUsers();
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(extractErrorMessage(err.detail, 'ไม่สามารถระงับบัญชีได้'), 'error');
+        showToast(extractErrorMessage(err.detail, 'ไม่สามารถลบผู้ใช้งานได้'), 'error');
       }
     } catch {
       showToast('ไม่สามารถเชื่อมต่อกับ backend', 'error');
     } finally {
-      setDeactivatingId(null);
+      setIsDeletingUser(false);
     }
   };
 
@@ -653,8 +1158,7 @@ export default function AdminPage({ onBack }: AdminPageProps) {
 
   const nav = [
     { id: 'status', icon: '📡', label: 'สถานะระบบ' },
-    { id: 'users', icon: '👥', label: 'จัดการผู้ใช้' },
-    { id: 'tools', icon: '🔧', label: 'เครื่องมือระบบ' },
+    { id: 'users', icon: '👥', label: 'จัดการผู้ใช้' }
   ] as const;
 
   return (
@@ -680,6 +1184,34 @@ export default function AdminPage({ onBack }: AdminPageProps) {
           onConfirm={handleClearLogs}
           onCancel={() => setShowConfirmClearLogs(false)}
           isLoading={isClearingLogs}
+        />
+      )}
+      {showSystemLogsModal && (
+        <SystemLogsModal
+          isOpen={showSystemLogsModal}
+          onClose={() => setShowSystemLogsModal(false)}
+        />
+      )}
+      {selectedLogForModal && (
+        <LogDetailModal
+          log={selectedLogForModal}
+          onClose={() => setSelectedLogForModal(null)}
+        />
+      )}
+      {resetPasswordUser && (
+        <ResetPasswordModal
+          user={resetPasswordUser}
+          onClose={() => setResetPasswordUser(null)}
+          onSuccess={loadUsers}
+          authHeaders={authHeaders}
+        />
+      )}
+      {deleteTargetUser && (
+        <DeleteUserDialog
+          user={deleteTargetUser}
+          onClose={() => setDeleteTargetUser(null)}
+          onConfirm={handleDeleteUser}
+          isLoading={isDeletingUser}
         />
       )}
 
@@ -849,6 +1381,22 @@ export default function AdminPage({ onBack }: AdminPageProps) {
 
                   <button
                     type="button"
+                    onClick={() => setShowSystemLogsModal(true)}
+                    style={{
+                      padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+                      cursor: 'pointer', fontFamily: 'inherit',
+                      border: '1px solid #0284c7', background: 'linear-gradient(135deg, #0284c7, #0369a1)',
+                      color: '#ffffff', display: 'flex', alignItems: 'center', gap: '5px',
+                      boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)',
+                    }}
+                    title="เปิดหน้าต่าง Real-Time System Diagnostics Logs เต็มจอ"
+                  >
+                    <span>🖥️</span>
+                    <span>หน้าต่าง Logs เต็มจอ</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={loadLogs}
                     disabled={isLoadingLogs}
                     style={{
@@ -996,10 +1544,92 @@ export default function AdminPage({ onBack }: AdminPageProps) {
                               </span>
                             </td>
                             <td style={{ padding: '8px 12px', color: '#1e293b' }}>
-                              <div>{log.message}</div>
+                              <div style={{ fontWeight: 500, lineHeight: 1.4 }}>{log.message}</div>
                               {log.details && Object.keys(log.details).length > 0 && (
-                                <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b', marginTop: '2px' }}>
-                                  {JSON.stringify(log.details)}
+                                <div style={{ marginTop: '6px' }}>
+                                  {/* Action bar for details */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                    {/* Pills for patient breakdown */}
+                                    {log.details.patients_breakdown && Array.isArray(log.details.patients_breakdown) && log.details.patients_breakdown.slice(0, 3).map((p: any, pIdx: number) => {
+                                      const hnStr = p.hn ? (String(p.hn).startsWith('HN') ? p.hn : `HN ${p.hn}`) : '';
+                                      const params = p.parameters ? (Array.isArray(p.parameters) ? p.parameters.join(', ') : p.parameters) : '';
+                                      if (!hnStr) return null;
+                                      return (
+                                        <span
+                                          key={pIdx}
+                                          style={{
+                                            background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd',
+                                            padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 600,
+                                          }}
+                                        >
+                                          {hnStr} {params ? `• [${params}]` : ''}
+                                        </span>
+                                      );
+                                    })}
+
+                                    {/* Toggle Inline Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleExpandLog(log.id ?? idx)}
+                                      style={{
+                                        background: expandedLogIds.has(log.id ?? idx) ? '#0284c7' : '#f1f5f9',
+                                        color: expandedLogIds.has(log.id ?? idx) ? '#ffffff' : '#0369a1',
+                                        border: '1px solid #bae6fd',
+                                        borderRadius: '6px',
+                                        padding: '2px 8px',
+                                        fontSize: '10px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        transition: 'all 0.15s',
+                                      }}
+                                    >
+                                      <span>{'{ }'}</span>
+                                      <span>{expandedLogIds.has(log.id ?? idx) ? 'ซ่อน JSON' : 'ดู JSON'}</span>
+                                    </button>
+
+                                    {/* Open Modal Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedLogForModal(log)}
+                                      style={{
+                                        background: '#f8fafc',
+                                        color: '#475569',
+                                        border: '1px solid #cbd5e1',
+                                        borderRadius: '6px',
+                                        padding: '2px 8px',
+                                        fontSize: '10px',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '3px',
+                                      }}
+                                      title="เปิดดูในหน้าต่างป๊อปอัป"
+                                    >
+                                      <span>🔍</span>
+                                      <span>ขยายดู</span>
+                                    </button>
+                                  </div>
+
+                                  {/* Inline Expanded JSON */}
+                                  {expandedLogIds.has(log.id ?? idx) && (
+                                    <div style={{
+                                      marginTop: '6px', padding: '10px 14px', background: '#0f172a',
+                                      borderRadius: '8px', border: '1px solid #334155',
+                                      overflowX: 'auto', maxHeight: '250px',
+                                    }}>
+                                      <pre
+                                        style={{
+                                          margin: 0, fontSize: '11px', lineHeight: 1.5,
+                                          fontFamily: 'SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                                        }}
+                                        dangerouslySetInnerHTML={{ __html: formatJsonSyntax(JSON.stringify(log.details, null, 2)) }}
+                                      />
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </td>
@@ -1136,7 +1766,7 @@ export default function AdminPage({ onBack }: AdminPageProps) {
             ) : (
               <div style={{ background: '#fff', borderRadius: '14px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                 <div style={{
-                  display: 'grid', gridTemplateColumns: '1fr 1fr 100px 80px 80px',
+                  display: 'grid', gridTemplateColumns: '1.2fr 1fr 100px 170px',
                   padding: '12px 20px', background: '#f8fafc',
                   borderBottom: '1px solid #e2e8f0',
                   fontSize: '10px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em',
@@ -1144,8 +1774,7 @@ export default function AdminPage({ onBack }: AdminPageProps) {
                   <span>ชื่อ-สกุล</span>
                   <span>Username</span>
                   <span>ตำแหน่ง</span>
-                  <span>สถานะ</span>
-                  <span>จัดการ</span>
+                  <span style={{ textAlign: 'right' }}>จัดการ</span>
                 </div>
                 {users.map((user, i) => {
                   const badge = roleBadge(user.role);
@@ -1154,10 +1783,9 @@ export default function AdminPage({ onBack }: AdminPageProps) {
                     <div
                       key={user.id}
                       style={{
-                        display: 'grid', gridTemplateColumns: '1fr 1fr 100px 80px 80px',
+                        display: 'grid', gridTemplateColumns: '1.2fr 1fr 100px 170px',
                         padding: '14px 20px', alignItems: 'center',
                         borderBottom: i < users.length - 1 ? '1px solid #f1f5f9' : 'none',
-                        background: !user.is_active ? '#fefce8' : 'transparent',
                         transition: 'background 0.15s',
                       }}
                     >
@@ -1182,36 +1810,42 @@ export default function AdminPage({ onBack }: AdminPageProps) {
                           {badge.label}
                         </span>
                       </div>
-                      <div>
-                        <span style={{
-                          fontSize: '10px', fontWeight: 700, padding: '3px 8px',
-                          borderRadius: '8px',
-                          background: user.is_active ? '#f0fdf4' : '#fef2f2',
-                          color: user.is_active ? '#16a34a' : '#dc2626',
-                          border: user.is_active ? '1px solid #bbf7d0' : '1px solid #fecaca',
-                        }}>
-                          {user.is_active ? '● ใช้งาน' : '✕ ระงับ'}
-                        </span>
-                      </div>
-                      <div>
-                        {user.is_active && !isSelf ? (
+                      <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                        <button
+                          onClick={() => setResetPasswordUser(user)}
+                          style={{
+                            padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+                            cursor: 'pointer', fontFamily: 'inherit',
+                            border: '1px solid #bfdbfe', background: '#eff6ff', color: '#1e40af',
+                            display: 'flex', alignItems: 'center', gap: '4px', transition: 'all 0.15s',
+                          }}
+                          title="รีเซ็ตรหัสผ่านใหม่"
+                          onMouseOver={(e) => { e.currentTarget.style.background = '#2563eb'; e.currentTarget.style.color = '#fff'; }}
+                          onMouseOut={(e) => { e.currentTarget.style.background = '#eff6ff'; e.currentTarget.style.color = '#1e40af'; }}
+                        >
+                          <span>🔑</span>
+                          <span>รีเซ็ต</span>
+                        </button>
+                        {!isSelf ? (
                           <button
-                            onClick={() => handleDeactivate(user.id, user.username)}
-                            disabled={deactivatingId === user.id}
+                            onClick={() => setDeleteTargetUser(user)}
                             style={{
-                              padding: '5px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: 700,
-                              cursor: deactivatingId === user.id ? 'not-allowed' : 'pointer',
-                              fontFamily: 'inherit',
+                              padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+                              cursor: 'pointer', fontFamily: 'inherit',
                               border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626',
-                              transition: 'all 0.15s',
+                              display: 'flex', alignItems: 'center', gap: '4px', transition: 'all 0.15s',
                             }}
+                            title="ลบผู้ใช้นี้ออกจากระบบอย่างถาวร"
                             onMouseOver={(e) => { e.currentTarget.style.background = '#dc2626'; e.currentTarget.style.color = '#fff'; }}
                             onMouseOut={(e) => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = '#dc2626'; }}
                           >
-                            {deactivatingId === user.id ? '⏳' : '✕ ระงับ'}
+                            <span>🗑️</span>
+                            <span>ลบ</span>
                           </button>
                         ) : (
-                          <span style={{ fontSize: '10px', color: '#cbd5e1' }}>—</span>
+                          <span style={{ fontSize: '11px', color: '#94a3b8', padding: '6px 8px', fontStyle: 'italic' }}>
+                            (คุณ)
+                          </span>
                         )}
                       </div>
                     </div>

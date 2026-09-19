@@ -172,6 +172,174 @@ class TestPatientLogging(unittest.TestCase):
         self.assertIn("อัปเดตข้อมูลผู้ป่วย HN 9099", update_logs[0]["message"])
         self.assertIn("ได้รับสัญญาณชีพเพิ่ม", update_logs[0]["message"])
 
+    def test_hosxp_disconnect_and_reconnect_downtime_tracking(self):
+        """Verify HOSxP database disconnection logs ERROR and subsequent reconnection logs Note with downtime."""
+        recorded_logs = []
+
+        def mock_record_log(level, message, component, details):
+            recorded_logs.append({
+                "level": level,
+                "message": message,
+                "component": component,
+                "details": details,
+            })
+
+        # Ensure clean state
+        scheduler._hosxp_disconnected_at = None
+
+        with patch("backend.log_service.record_log", side_effect=mock_record_log), \
+             patch("backend.database.db_pool.get_connection", side_effect=Exception("Connection refused (192.168.1.100:3306)")):
+            rows = asyncio.run(scheduler.fetch_vitals_from_db())
+            self.assertEqual(rows, [])
+
+        # Verify ERROR log was recorded under HOSxP_DB
+        err_logs = [l for l in recorded_logs if l["component"] == "HOSxP_DB" and l["level"] == "ERROR"]
+        self.assertEqual(len(err_logs), 1)
+        self.assertIn("ไม่สามารถเชื่อมต่อฐานข้อมูล HOSxP MySQL ได้", err_logs[0]["message"])
+        self.assertEqual(err_logs[0]["details"]["status"], "DISCONNECTED")
+        self.assertIn("disconnected_at", err_logs[0]["details"])
+        self.assertIsNotNone(scheduler._hosxp_disconnected_at)
+
+        # Now simulate reconnection
+        recorded_logs.clear()
+
+        mock_conn = AsyncMock()
+        mock_cursor = AsyncMock()
+        mock_cursor.fetchall.return_value = [{"hn": "123", "vstdate": "2026-09-19", "vsttime": "12:00:00"}]
+        
+        # Proper async context manager for conn.cursor(...)
+        mock_cursor_ctx = AsyncMock()
+        mock_cursor_ctx.__aenter__.return_value = mock_cursor
+        mock_cursor_ctx.__aexit__.return_value = None
+        mock_conn.cursor = unittest.mock.MagicMock(return_value=mock_cursor_ctx)
+
+        mock_conn_ctx = AsyncMock()
+        mock_conn_ctx.__aenter__.return_value = mock_conn
+        mock_conn_ctx.__aexit__.return_value = None
+
+        with patch("backend.log_service.record_log", side_effect=mock_record_log), \
+             patch("backend.database.db_pool.get_connection", return_value=mock_conn_ctx):
+            rows = asyncio.run(scheduler.fetch_vitals_from_db())
+            self.assertEqual(len(rows), 1)
+
+        # Verify Reconnected Note log was recorded with downtime details
+        rec_logs = [l for l in recorded_logs if l["component"] == "HOSxP_DB" and l["level"] == "Note"]
+        self.assertEqual(len(rec_logs), 1)
+        self.assertIn("HOSxP Server Reconnected", rec_logs[0]["message"])
+        self.assertIn("หยุดทำงานไป", rec_logs[0]["message"])
+        self.assertEqual(rec_logs[0]["details"]["status"], "CONNECTED")
+        self.assertIn("downtime_seconds", rec_logs[0]["details"])
+        self.assertIn("reconnected_at", rec_logs[0]["details"])
+        self.assertIsNone(scheduler._hosxp_disconnected_at)
+
+    def test_batch_log_patient_and_parameter_breakdown(self):
+        """Verify batch log summarizes multiple new/updated patients and their parameters."""
+        recorded_logs = []
+
+        def mock_record_log(level, message, component, details):
+            recorded_logs.append({
+                "level": level,
+                "message": message,
+                "component": component,
+                "details": details,
+            })
+
+        patient1 = {
+            "hn": "HN101",
+            "vn": "VN101",
+            "vstdate": "2026-09-19",
+            "vsttime": "12:00:00",
+            "sbp": 110, "dbp": 70, "heart_rate": 80, "resp_rate": 18,
+            "temperature": 37.0, "spo2": 98, "gcs": 15,
+            "_source_table": "patient_visits"
+        }
+        patient2 = {
+            "hn": "HN102",
+            "vn": "VN102",
+            "vstdate": "2026-09-19",
+            "vsttime": "12:01:00",
+            "sbp": 88, "dbp": 50, "heart_rate": 120, "resp_rate": 26,
+            "temperature": 39.0, "spo2": 90, "gcs": 14,
+            "_source_table": "patient_visits"
+        }
+
+        # Baseline set
+        scheduler.last_seen_vitals["HN_EXISTING_10:00:00"] = True
+        scheduler.last_seen_patient_snapshots["HN_EXISTING"] = {"hn": "HN_EXISTING"}
+
+        with patch("backend.scheduler.fetch_vitals_from_db", new=AsyncMock(return_value=[patient1, patient2])), \
+             patch("backend.log_service.record_log", side_effect=mock_record_log), \
+             patch("backend.main.broadcast_message", new=AsyncMock()):
+            asyncio.run(scheduler.process_vitals())
+
+        # Find batch summary log
+        batch_logs = [l for l in recorded_logs if l["component"] == "HOSxP_Sync" and "ตรวจพบข้อมูลใหม่" in l["message"]]
+        self.assertEqual(len(batch_logs), 1)
+        b_log = batch_logs[0]
+
+        # Verify message contains patient summaries
+        self.assertIn("HN101", b_log["message"])
+        self.assertIn("HN102", b_log["message"])
+        self.assertIn("details", b_log)
+        self.assertIn("patients_breakdown", b_log["details"])
+        self.assertEqual(len(b_log["details"]["patients_breakdown"]), 2)
+        self.assertEqual(b_log["details"]["patients_breakdown"][0]["hn"], "HN101")
+        self.assertEqual(b_log["details"]["patients_breakdown"][1]["hn"], "HN102")
+
+    def test_treatment_completion_and_dashboard_archival_logs(self):
+        """Verify complete_treatment and archive_treated_patient record Clinical_Treatment and Dashboard_Archive logs."""
+        import backend.treatment_service as ts
+        recorded_logs = []
+
+        def mock_record_log(level, message, component, details):
+            recorded_logs.append({
+                "level": level,
+                "message": message,
+                "component": component,
+                "details": details,
+            })
+
+        mock_visit = {
+            "hn": "HN555",
+            "vn": "VN555",
+            "vstdate": "2026-09-19",
+            "vsttime": "10:00:00",
+            "sex": 1, "age": 55, "chief_complaint": "ไข้สูง",
+            "sbp": 90, "dbp": 60, "heart_rate": 110, "resp_rate": 24,
+            "temperature": 39.0, "spo2": 92, "gcs": 15
+        }
+
+        mock_conn = AsyncMock()
+        mock_cursor = AsyncMock()
+        mock_cursor.fetchone.return_value = mock_visit
+        mock_cursor_ctx = AsyncMock()
+        mock_cursor_ctx.__aenter__.return_value = mock_cursor
+        mock_cursor_ctx.__aexit__.return_value = None
+        mock_conn.cursor = unittest.mock.MagicMock(return_value=mock_cursor_ctx)
+
+        mock_conn_ctx = AsyncMock()
+        mock_conn_ctx.__aenter__.return_value = mock_conn
+        mock_conn_ctx.__aexit__.return_value = None
+
+        with patch("backend.log_service.record_log", side_effect=mock_record_log), \
+             patch("backend.database.db_pool.get_connection", return_value=mock_conn_ctx), \
+             patch("backend.database.dashboard_pool.get_connection", return_value=mock_conn_ctx), \
+             patch("backend.treatment_service.get_treatment_status", new=AsyncMock(return_value={"hn": "HN555", "treatment_completed": True})):
+            asyncio.run(ts.complete_treatment("HN555", completed_by="พยาบาลวิชาชีพ"))
+
+        # Verify Stage 1: Clinical_Treatment log
+        clin_logs = [l for l in recorded_logs if l["component"] == "Clinical_Treatment"]
+        self.assertEqual(len(clin_logs), 1)
+        self.assertIn("HN 555", clin_logs[0]["message"])
+        self.assertIn("พยาบาลวิชาชีพ", clin_logs[0]["details"]["completed_by"])
+
+        # Verify Stage 2: Dashboard_Archive log
+        arch_logs = [l for l in recorded_logs if l["component"] == "Dashboard_Archive"]
+        self.assertEqual(len(arch_logs), 1)
+        self.assertIn("treated_patient_archive", arch_logs[0]["message"])
+        self.assertEqual(arch_logs[0]["details"]["hn"], "HN555")
+        self.assertEqual(arch_logs[0]["details"]["archive_table"], "treated_patient_archive")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -126,3 +126,39 @@ def login_user(req: LoginRequest, db: Session) -> TokenResponse:
         )
     token = create_access_token(user)
     return TokenResponse(access_token=token, user=UserOut.model_validate(user))
+
+
+# ── User Management (IT Admin) ───────────────────────────────────────────
+
+def reset_user_password(user_id: int, new_password: str, db: Session) -> User:
+    """IT Admin resets a user's password."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ไม่พบผู้ใช้งานในระบบ")
+    user.password_hash = hash_password(new_password)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def delete_user(user_id: int, current_admin: User, db: Session) -> None:
+    """IT Admin permanently deletes a user, with safeguards."""
+    if current_admin.id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ไม่สามารถลบบัญชีตัวเองได้",
+        )
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ไม่พบผู้ใช้งานในระบบ")
+
+    if user.role == UserRole.it_admin:
+        admin_count = db.query(User).filter(User.role == UserRole.it_admin).count()
+        if admin_count <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ไม่สามารถลบ IT Admin บัญชีสุดท้ายของระบบได้",
+            )
+
+    db.delete(user)
+    db.commit()

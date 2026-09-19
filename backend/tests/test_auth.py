@@ -1,10 +1,27 @@
 import unittest
+from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.database_auth import SessionLocal
 from backend.auth.models import User
 
 class TestAuthEndpoints(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.patchers = [
+            patch("backend.main.db_pool.connect", new_callable=AsyncMock),
+            patch("backend.main.dashboard_pool.connect", new_callable=AsyncMock),
+            patch("backend.scheduler.background_scheduler", new_callable=AsyncMock),
+            patch("backend.treatment_service.init_treatment_table", new_callable=AsyncMock),
+        ]
+        for p in cls.patchers:
+            p.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        for p in cls.patchers:
+            p.stop()
+
     def setUp(self):
         self.client_ctx = TestClient(app)
         self.client = self.client_ctx.__enter__()
@@ -83,6 +100,88 @@ class TestAuthEndpoints(unittest.TestCase):
         admin_res = self.client.get("/auth/users", headers={"Authorization": f"Bearer {admin_tok}"})
         self.assertEqual(admin_res.status_code, 200)
         self.assertIsInstance(admin_res.json(), list)
+
+    def test_admin_reset_password(self):
+        # Register nurse
+        reg_res = self.client.post("/auth/register", json={
+            "firstname": "Nurse",
+            "lastname": "Reset",
+            "role": "nurse",
+            "username": "test_nurse_reset",
+            "password": "OldPassword123"
+        })
+        nurse_id = reg_res.json()["id"]
+
+        # Register admin
+        self.client.post("/auth/register", json={
+            "firstname": "Admin",
+            "lastname": "Reset",
+            "role": "it_admin",
+            "username": "test_admin_reset",
+            "password": "AdminPassword123"
+        })
+        admin_tok = self.client.post("/auth/login", json={"username": "test_admin_reset", "password": "AdminPassword123"}).json()["access_token"]
+
+        # 1. Reset password with short password (< 6 chars) -> 422
+        bad_reset = self.client.put(
+            f"/auth/users/{nurse_id}/reset-password",
+            json={"password": "123"},
+            headers={"Authorization": f"Bearer {admin_tok}"}
+        )
+        self.assertEqual(bad_reset.status_code, 422)
+
+        # 2. Reset password successfully
+        reset_res = self.client.put(
+            f"/auth/users/{nurse_id}/reset-password",
+            json={"password": "NewSecurePassword456!"},
+            headers={"Authorization": f"Bearer {admin_tok}"}
+        )
+        self.assertEqual(reset_res.status_code, 200)
+
+        # 3. Old password fails
+        old_login = self.client.post("/auth/login", json={"username": "test_nurse_reset", "password": "OldPassword123"})
+        self.assertEqual(old_login.status_code, 401)
+
+        # 4. New password succeeds
+        new_login = self.client.post("/auth/login", json={"username": "test_nurse_reset", "password": "NewSecurePassword456!"})
+        self.assertEqual(new_login.status_code, 200)
+
+    def test_admin_delete_user(self):
+        # Register nurse
+        nurse_res = self.client.post("/auth/register", json={
+            "firstname": "Nurse",
+            "lastname": "Del",
+            "role": "nurse",
+            "username": "test_nurse_del",
+            "password": "Password123"
+        })
+        nurse_id = nurse_res.json()["id"]
+
+        # Register admin
+        admin_res = self.client.post("/auth/register", json={
+            "firstname": "Admin",
+            "lastname": "Del",
+            "role": "it_admin",
+            "username": "test_admin_del",
+            "password": "AdminPassword123"
+        })
+        admin_id = admin_res.json()["id"]
+        admin_tok = self.client.post("/auth/login", json={"username": "test_admin_del", "password": "AdminPassword123"}).json()["access_token"]
+
+        # 1. Admin attempts to delete self -> 400
+        self_del = self.client.delete(f"/auth/users/{admin_id}", headers={"Authorization": f"Bearer {admin_tok}"})
+        self.assertEqual(self_del.status_code, 400)
+        self.assertIn("ไม่สามารถลบบัญชีตัวเองได้", self_del.json()["detail"])
+
+        # 2. Admin deletes nurse -> 200
+        del_res = self.client.delete(f"/auth/users/{nurse_id}", headers={"Authorization": f"Bearer {admin_tok}"})
+        self.assertEqual(del_res.status_code, 200)
+        self.assertEqual(del_res.json()["user_id"], nurse_id)
+
+        # 3. Deleted nurse cannot login -> 401
+        login_res = self.client.post("/auth/login", json={"username": "test_nurse_del", "password": "Password123"})
+        self.assertEqual(login_res.status_code, 401)
+
 
 if __name__ == '__main__':
     unittest.main()

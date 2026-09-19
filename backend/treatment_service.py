@@ -303,6 +303,24 @@ async def complete_treatment(hn: str, completed_by: str = "Nurse/System", timeli
         logger.info(f"Marked treatment completed centrally for HN {hn} by {completed_by}")
         status = await get_treatment_status(hn)
 
+        # Record Stage 1: Clinical treatment completed
+        try:
+            from .log_service import record_log
+            hn_clean = str(hn)[2:].strip() if str(hn).upper().startswith("HN") else str(hn).strip()
+            hn_display = f"HN {hn_clean}"
+            record_log(
+                "Note",
+                f"บันทึกสิ้นสุดการรักษา (Complete 1-Hour Sepsis Bundle): ผู้ป่วย {hn_display} โดย {completed_by}",
+                component="Clinical_Treatment",
+                details={
+                    "hn": hn,
+                    "completed_by": completed_by,
+                    "completed_at": now_str,
+                }
+            )
+        except Exception as log_err:
+            logger.error(f"Failed to record complete treatment log: {log_err}")
+
         # Auto-archive: move to treated_patient_archive and remove from active tables
         try:
             await archive_treated_patient(hn, outcome_label="✅ Sepsis Bundle สำเร็จ", timeline_json=timeline_json)
@@ -336,6 +354,23 @@ async def rule_out_sepsis(hn: str) -> Dict[str, Any]:
                 await cur.execute(query, (hn,))
         logger.info(f"Marked sepsis ruled out centrally for HN {hn}")
         status = await get_treatment_status(hn)
+
+        # Record Stage 1: Sepsis ruled out
+        try:
+            from .log_service import record_log
+            hn_clean = str(hn)[2:].strip() if str(hn).upper().startswith("HN") else str(hn).strip()
+            hn_display = f"HN {hn_clean}"
+            record_log(
+                "Note",
+                f"บันทึกผลการตรวจซ้ำไม่พบ Sepsis (Rule Out): ผู้ป่วย {hn_display}",
+                component="Clinical_Treatment",
+                details={
+                    "hn": hn,
+                    "ruled_out_at": datetime.now().isoformat(),
+                }
+            )
+        except Exception as log_err:
+            logger.error(f"Failed to record rule out sepsis log: {log_err}")
 
         # Auto-archive: move to treated_patient_archive and remove from active tables
         try:
@@ -458,6 +493,59 @@ async def archive_treated_patient(hn: str, outcome_label: str = "", timeline_jso
 
                 # 6. Remove from patient_treatment_status (rtsas_dashboard only)
                 await cur.execute("DELETE FROM patient_treatment_status WHERE hn = %s;", (hn,))
+
+        # Calculate stay duration if arrival_date & arrival_time_str exist
+        stay_duration_str = "—"
+        stay_minutes = None
+        if arrival_date and arrival_time_str:
+            try:
+                arrival_dt = datetime.fromisoformat(f"{arrival_date}T{arrival_time_str}:00")
+                diff = datetime.now() - arrival_dt
+                stay_minutes = max(1, round(diff.total_seconds() / 60))
+                if stay_minutes >= 60:
+                    stay_duration_str = f"{stay_minutes // 60} ชม. {stay_minutes % 60} นาที"
+                else:
+                    stay_duration_str = f"{stay_minutes} นาที"
+            except Exception:
+                pass
+
+        # Count completed checklist items if checklist_json exists
+        steps_count = 0
+        if archive_data.get("checklist_json"):
+            try:
+                cl = json.loads(archive_data["checklist_json"])
+                for phase in cl:
+                    for item in phase.get("items", []):
+                        if item.get("status") == "completed":
+                            steps_count += 1
+            except Exception:
+                pass
+
+        steps_info = f" | ดำเนินการไป {steps_count} ขั้นตอน" if steps_count > 0 else ""
+
+        # Record Stage 2: Patient archived to Dashboard
+        try:
+            from .log_service import record_log
+            hn_clean = str(hn)[2:].strip() if str(hn).upper().startswith("HN") else str(hn).strip()
+            hn_display = f"HN {hn_clean}"
+            record_log(
+                "Note",
+                f"ย้ายข้อมูลผู้ป่วย {hn_display} ลง Dashboard (treated_patient_archive) สำเร็จ — ผลลัพธ์: {outcome_label} | ระยะเวลาใน ER: {stay_duration_str}{steps_info}",
+                component="Dashboard_Archive",
+                details={
+                    "hn": hn,
+                    "vn": archive_data.get("vn"),
+                    "outcome_label": outcome_label,
+                    "arrival_date": str(arrival_date),
+                    "arrival_time": arrival_time_str,
+                    "stay_duration_minutes": stay_minutes,
+                    "completed_steps_count": steps_count,
+                    "archive_table": "treated_patient_archive",
+                    "archived_at": datetime.now().isoformat(),
+                }
+            )
+        except Exception as log_err:
+            logger.error(f"Failed to record archive log: {log_err}")
 
         logger.info(f"Archived treated patient HN {hn} (outcome: {outcome_label}) to rtsas_dashboard")
         return archive_data

@@ -24,7 +24,13 @@ export function UserManagement() {
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [deactivatingId, setDeactivatingId] = useState<number | null>(null);
+  const [resetUser, setResetUser] = useState<UserRecord | null>(null);
+  const [deleteUserTarget, setDeleteUserTarget] = useState<UserRecord | null>(null);
+  const [resetPasswordVal, setResetPasswordVal] = useState<string>('');
+  const [showResetPassword, setShowResetPassword] = useState<boolean>(false);
+  const [isResetting, setIsResetting] = useState<boolean>(false);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [copiedReset, setCopiedReset] = useState<boolean>(false);
 
   // Add User Form State
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
@@ -65,25 +71,74 @@ export function UserManagement() {
     loadUsers();
   }, [loadUsers]);
 
-  const handleDeactivate = async (userId: number, username: string) => {
-    setDeactivatingId(userId);
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetUser) return;
+    if (resetPasswordVal.length < 6) {
+      showToast('รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร', 'error');
+      return;
+    }
+    setIsResetting(true);
     try {
-      const res = await fetch(`/auth/users/${userId}/deactivate`, {
+      const res = await fetch(`/auth/users/${resetUser.id}/reset-password`, {
         method: 'PUT',
         headers: authHeaders,
+        body: JSON.stringify({ password: resetPasswordVal }),
       });
       if (res.ok) {
-        showToast(`✅ ระงับการใช้งาน @${username} แล้ว`, 'success');
+        showToast(`✅ รีเซ็ตรหัสผ่าน @${resetUser.username} สำเร็จ`, 'success');
+        setResetUser(null);
+        setResetPasswordVal('');
         loadUsers();
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(extractErrorMessage(err.detail, 'ไม่สามารถระงับบัญชีได้'), 'error');
+        showToast(extractErrorMessage(err.detail, 'ไม่สามารถรีเซ็ตรหัสผ่านได้'), 'error');
       }
     } catch {
       showToast('ไม่สามารถเชื่อมต่อกับ backend', 'error');
     } finally {
-      setDeactivatingId(null);
+      setIsResetting(false);
     }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deleteUserTarget) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/auth/users/${deleteUserTarget.id}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      if (res.ok) {
+        showToast(`✅ ลบบัญชี @${deleteUserTarget.username} สำเร็จ`, 'success');
+        setDeleteUserTarget(null);
+        loadUsers();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(extractErrorMessage(err.detail, 'ไม่สามารถลบผู้ใช้งานได้'), 'error');
+      }
+    } catch {
+      showToast('ไม่สามารถเชื่อมต่อกับ backend', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%&*';
+    let result = '';
+    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lower = 'abcdefghijkmnpqrstuvwxyz';
+    const digits = '23456789';
+    const specials = '!@#$%&*';
+    result += upper.charAt(Math.floor(Math.random() * upper.length));
+    result += lower.charAt(Math.floor(Math.random() * lower.length));
+    result += digits.charAt(Math.floor(Math.random() * digits.length));
+    result += specials.charAt(Math.floor(Math.random() * specials.length));
+    for (let i = 0; i < 6; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setResetPasswordVal(result);
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -199,7 +254,6 @@ export function UserManagement() {
                   <th className="pb-3 pl-2">ชื่อผู้ใช้ (Username)</th>
                   <th className="pb-3">ชื่อ - สกุล</th>
                   <th className="pb-3">บทบาท (Role)</th>
-                  <th className="pb-3">สถานะ</th>
                   <th className="pb-3">วันที่สร้าง</th>
                   <th className="pb-3 text-right pr-2">การดำเนินการ</th>
                 </tr>
@@ -233,29 +287,37 @@ export function UserManagement() {
                           {badge.label}
                         </span>
                       </td>
-                      <td className="py-3">
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            u.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
-                          }`}
-                        >
-                          {u.is_active ? 'เปิดใช้งาน' : 'ระงับการใช้งาน'}
-                        </span>
-                      </td>
                       <td className="py-3 text-slate-400 text-[11px] font-mono">
                         {u.created_at ? new Date(u.created_at).toLocaleDateString('th-TH') : '-'}
                       </td>
                       <td className="py-3 text-right pr-2">
-                        {!isCurrent && u.is_active && (
+                        <div className="flex items-center justify-end gap-1.5">
                           <button
                             type="button"
-                            onClick={() => handleDeactivate(u.id, u.username)}
-                            disabled={deactivatingId === u.id}
-                            className="px-2.5 py-1 text-[11px] font-bold rounded-lg text-red-600 hover:bg-red-50 border border-red-200 cursor-pointer transition-colors"
+                            onClick={() => {
+                              setResetUser(u);
+                              setResetPasswordVal('');
+                            }}
+                            className="px-2.5 py-1 text-[11px] font-bold rounded-lg text-blue-600 hover:bg-blue-50 border border-blue-200 cursor-pointer transition-colors"
+                            title="รีเซ็ตรหัสผ่าน"
                           >
-                            {deactivatingId === u.id ? '⏳...' : 'ระงับสิทธิ์'}
+                            🔑 รีเซ็ต
                           </button>
-                        )}
+                          {!isCurrent ? (
+                            <button
+                              type="button"
+                              onClick={() => setDeleteUserTarget(u)}
+                              className="px-2.5 py-1 text-[11px] font-bold rounded-lg text-red-600 hover:bg-red-50 border border-red-200 cursor-pointer transition-colors"
+                              title="ลบผู้ใช้งาน"
+                            >
+                              🗑️ ลบ
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-slate-300 px-2 py-1 italic">
+                              (คุณ)
+                            </span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -373,6 +435,175 @@ export function UserManagement() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* ─── Reset Password Modal ─── */}
+      {resetUser && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center animate-fade-in"
+          style={{ background: 'rgba(10, 10, 20, 0.65)', backdropFilter: 'blur(6px)' }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isResetting) setResetUser(null);
+          }}
+        >
+          <div className="bg-white rounded-2xl w-[460px] max-w-[90vw] overflow-hidden shadow-2xl border border-slate-200 animate-slideUp">
+            <div className="h-1.5 bg-gradient-to-r from-blue-600 to-indigo-600" />
+            <form onSubmit={handleResetPassword} className="p-6 flex flex-col gap-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <span className="text-base font-black text-slate-800 flex items-center gap-2">
+                  <span>🔑</span> รีเซ็ตรหัสผ่านผู้ใช้งาน
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setResetUser(null)}
+                  disabled={isResetting}
+                  className="text-slate-400 hover:text-slate-600 text-lg cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-bold text-slate-800">{resetUser.firstname} {resetUser.lastname}</div>
+                  <div className="text-xs font-mono text-slate-500">@{resetUser.username}</div>
+                </div>
+                <span
+                  style={{
+                    background: roleBadge(resetUser.role).bg,
+                    color: roleBadge(resetUser.role).color,
+                    border: `1px solid ${roleBadge(resetUser.role).border}`,
+                  }}
+                  className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                >
+                  {roleBadge(resetUser.role).label}
+                </span>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-600">
+                    รหัสผ่านใหม่ <span className="text-red-500">*</span> (≥6 ตัวอักษร)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={generateRandomPassword}
+                    className="text-[11px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-md border border-blue-200 cursor-pointer"
+                  >
+                    🎲 สุ่มรหัสผ่าน
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showResetPassword ? 'text' : 'password'}
+                    required
+                    value={resetPasswordVal}
+                    onChange={(e) => setResetPasswordVal(e.target.value)}
+                    placeholder="กรอกหรือกดสุ่มรหัสผ่านใหม่..."
+                    className="w-full text-xs font-mono px-3 py-2 pr-20 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none"
+                    autoFocus
+                  />
+                  <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    {resetPasswordVal && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(resetPasswordVal);
+                          setCopiedReset(true);
+                          setTimeout(() => setCopiedReset(false), 2000);
+                        }}
+                        className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 cursor-pointer"
+                        title="คัดลอกรหัสผ่าน"
+                      >
+                        {copiedReset ? '✓' : '📋'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword((v) => !v)}
+                      className="text-xs px-1.5 py-0.5 text-slate-500 hover:text-slate-700 cursor-pointer"
+                    >
+                      {showResetPassword ? '👁️' : '🔒'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-2 pt-3 border-t border-slate-100 flex justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setResetUser(null)}
+                  disabled={isResetting}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  disabled={isResetting || resetPasswordVal.length < 6}
+                  className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 cursor-pointer shadow-md shadow-blue-500/25 disabled:opacity-50"
+                >
+                  {isResetting ? 'กำลังบันทึก...' : '✅ บันทึกรหัสผ่านใหม่'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Delete User Dialog ─── */}
+      {deleteUserTarget && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center animate-fade-in"
+          style={{ background: 'rgba(10, 10, 20, 0.65)', backdropFilter: 'blur(6px)' }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isDeleting) setDeleteUserTarget(null);
+          }}
+        >
+          <div className="bg-white rounded-2xl w-[420px] max-w-[90vw] overflow-hidden shadow-2xl border border-slate-200 animate-slideUp">
+            <div className="h-1.5 bg-gradient-to-r from-red-600 to-rose-600" />
+            <div className="p-6 flex flex-col gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center text-2xl mx-auto shadow-md shadow-red-500/10">
+                🗑️
+              </div>
+              <div className="text-center">
+                <div className="text-base font-black text-slate-800">ยืนยันการลบผู้ใช้งาน?</div>
+                <div className="text-xs text-slate-500 mt-1">
+                  การกระทำนี้จะลบบัญชีผู้ใช้นี้ออกจากฐานข้อมูลระบบอย่างถาวร
+                </div>
+              </div>
+
+              <div className="bg-red-50 rounded-xl p-3 border border-red-100">
+                <div className="text-xs font-bold text-red-900">
+                  {deleteUserTarget.firstname} {deleteUserTarget.lastname}
+                </div>
+                <div className="text-xs font-mono text-red-700">@{deleteUserTarget.username}</div>
+              </div>
+
+              <div className="text-xs text-red-600 font-bold text-center">
+                ⚠️ ข้อมูลบัญชีนี้จะไม่สามารถกู้คืนได้อีกต่อไป!
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setDeleteUserTarget(null)}
+                  disabled={isDeleting}
+                  className="flex-1 py-2 rounded-xl text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteUser}
+                  disabled={isDeleting}
+                  className="flex-1 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 cursor-pointer shadow-md shadow-red-500/25 disabled:opacity-50"
+                >
+                  {isDeleting ? 'กำลังลบ...' : '🗑️ ยืนยันลบ'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

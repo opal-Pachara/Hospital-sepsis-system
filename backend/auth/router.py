@@ -15,8 +15,15 @@ from sqlalchemy.orm import Session
 
 from ..database_auth import get_db
 from .models import User, UserRole
-from .schemas import RegisterRequest, LoginRequest, TokenResponse, UserOut
-from .service import register_user, login_user, get_current_user, require_role
+from .schemas import RegisterRequest, LoginRequest, TokenResponse, UserOut, ResetPasswordRequest
+from .service import (
+    register_user,
+    login_user,
+    get_current_user,
+    require_role,
+    reset_user_password,
+    delete_user,
+)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -50,20 +57,24 @@ def list_users(
     return [UserOut.model_validate(u) for u in users]
 
 
-@router.put("/users/{user_id}/deactivate", response_model=UserOut)
-def deactivate_user(
+@router.put("/users/{user_id}/reset-password", response_model=UserOut)
+def reset_password(
+    user_id: int,
+    req: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(UserRole.it_admin)),
+):
+    """รีเซ็ตรหัสผ่านผู้ใช้ — เฉพาะ IT Admin"""
+    user = reset_user_password(user_id, req.password, db)
+    return UserOut.model_validate(user)
+
+
+@router.delete("/users/{user_id}")
+def remove_user(
     user_id: int,
     db: Session = Depends(get_db),
     admin: User = Depends(require_role(UserRole.it_admin)),
 ):
-    """ระงับบัญชี user — เฉพาะ IT Admin"""
-    from fastapi import HTTPException
-    if admin.id == user_id:
-        raise HTTPException(status_code=400, detail="ไม่สามารถระงับบัญชีตัวเองได้")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="ไม่พบ user")
-    user.is_active = False
-    db.commit()
-    db.refresh(user)
-    return UserOut.model_validate(user)
+    """ลบผู้ใช้งานอย่างถาวร — เฉพาะ IT Admin"""
+    delete_user(user_id, admin, db)
+    return {"detail": "ลบผู้ใช้งานสำเร็จ", "user_id": user_id}

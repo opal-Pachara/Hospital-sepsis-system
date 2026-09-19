@@ -1787,8 +1787,19 @@ export const useRTSASStore = create<RTSASState>()(
 
         const score = newsResult.totalScore;
         let eventColor: TimelineEventColor = 'green';
+        let riskLabel = '🟢 ปกติ — NEWS = 0';
+        if (score >= 7) {
+          eventColor = 'red';
+          riskLabel = '🔴 สูง — ต้องการการดูแลเร่งด่วน';
+        } else if (score >= 5) {
+          eventColor = 'yellow';
+          riskLabel = '🟡 ปานกลาง — ติดตามใกล้ชิด';
+        } else if (score >= 1) {
+          eventColor = 'green';
+          riskLabel = '🟢 ต่ำ-ปานกลาง';
+        }
 
-        const actionText = `🩺 ประเมินสัญญาณชีพ (ครั้งที่ ${seq}) — BP ${sbpStr}/${dbpStr} mmHg, HR ${hrStr} bpm, RR ${rrStr}/min, SpO2 ${spo2Str}%, Temp ${tempStr}°C, GCS ${gcsVal} (${avpuVal}) (NEWS: ${score} คะแนน)`;
+        const actionText = `🩺 ประเมินสัญญาณชีพ (ครั้งที่ ${seq}) — BP ${sbpStr}/${dbpStr} mmHg, HR ${hrStr} bpm, RR ${rrStr}/min, SpO2 ${spo2Str}%, Temp ${tempStr}°C, GCS ${gcsVal} (${avpuVal}) (NEWS: ${score} คะแนน - ${riskLabel})`;
 
         get().addTimelineEvent(
           actionText,

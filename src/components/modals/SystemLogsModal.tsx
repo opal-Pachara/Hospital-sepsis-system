@@ -27,6 +27,143 @@ interface SystemLogsModalProps {
   onClose: () => void;
 }
 
+function JsonSyntaxViewer({ data }: { data: Record<string, any> }) {
+  const [isExpanded, setIsExpanded] = useState(true);
+  const [isCopied, setIsCopied] = useState(false);
+
+  const jsonStr = JSON.stringify(data, null, 2);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(jsonStr);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  const formatJson = (json: string) => {
+    return json.replace(
+      /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+      (match) => {
+        let color = '#cbd5e1';
+        if (/^"/.test(match)) {
+          if (/:$/.test(match)) {
+            color = '#38bdf8'; // Key: bright sky blue
+          } else {
+            color = '#86efac'; // String: soft emerald green
+          }
+        } else if (/true|false/.test(match)) {
+          color = '#c084fc'; // Boolean: purple
+        } else if (/null/.test(match)) {
+          color = '#f87171'; // Null: red
+        } else {
+          color = '#facc15'; // Number: warm yellow
+        }
+        return `<span style="color: ${color};">${match}</span>`;
+      }
+    );
+  };
+
+  // Quick summary pills for patients if available
+  const patients = data.patients_breakdown || (data.hn ? [{ hn: data.hn, parameters: data.parameters }] : []);
+
+  return (
+    <div
+      style={{
+        marginTop: '6px',
+        marginLeft: '24px',
+        background: '#040711',
+        borderRadius: '8px',
+        border: '1px solid #1e293b',
+        overflow: 'hidden',
+        fontSize: '11px',
+      }}
+    >
+      {/* Header Bar */}
+      <div
+        onClick={() => setIsExpanded(!isExpanded)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '6px 12px',
+          background: '#0a101f',
+          borderBottom: isExpanded ? '1px solid #1e293b' : 'none',
+          cursor: 'pointer',
+          userSelect: 'none',
+          fontSize: '11px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ color: '#38bdf8', fontWeight: 700, fontFamily: 'monospace' }}>
+            {'{ }'} JSON ข้อมูลละเอียด
+          </span>
+
+          {/* Quick pills */}
+          {Array.isArray(patients) && patients.slice(0, 3).map((p: any, idx: number) => {
+            const hnStr = p.hn ? (String(p.hn).startsWith('HN') ? p.hn : `HN ${p.hn}`) : '';
+            const params = p.parameters ? (Array.isArray(p.parameters) ? p.parameters.join(', ') : p.parameters) : '';
+            if (!hnStr) return null;
+            return (
+              <span
+                key={idx}
+                style={{
+                  background: 'rgba(56, 189, 248, 0.12)',
+                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                  color: '#7dd3fc',
+                  padding: '1px 6px',
+                  borderRadius: '4px',
+                  fontSize: '10px',
+                  fontWeight: 600,
+                }}
+              >
+                {hnStr} {params ? `• [${params}]` : ''}
+              </span>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            type="button"
+            onClick={handleCopy}
+            style={{
+              background: isCopied ? '#15803d' : '#1e293b',
+              color: isCopied ? '#ffffff' : '#94a3b8',
+              border: '1px solid #334155',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '10px',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+            }}
+            title="คัดลอก JSON"
+          >
+            {isCopied ? '✓ คัดลอกแล้ว' : '📋 คัดลอก JSON'}
+          </button>
+          <span style={{ color: '#64748b', fontSize: '10px' }}>
+            {isExpanded ? '▲ ย่อ' : '▼ ขยาย'}
+          </span>
+        </div>
+      </div>
+
+      {/* Formatted syntax-highlighted JSON */}
+      {isExpanded && (
+        <pre
+          style={{
+            margin: 0,
+            padding: '10px 14px',
+            overflowX: 'auto',
+            fontFamily: 'SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+            lineHeight: 1.5,
+            color: '#cbd5e1',
+          }}
+          dangerouslySetInnerHTML={{ __html: formatJson(jsonStr) }}
+        />
+      )}
+    </div>
+  );
+}
+
 export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [summary, setSummary] = useState<LogSummary | null>(null);
@@ -576,23 +713,9 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
                     </span>
                   </div>
 
-                  {/* Optional JSON details */}
+                  {/* Optional JSON details with syntax highlighting & collapse */}
                   {log.details && Object.keys(log.details).length > 0 && (
-                    <div
-                      style={{
-                        marginTop: '4px',
-                        marginLeft: '24px',
-                        padding: '4px 8px',
-                        background: '#090d16',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        color: '#94a3b8',
-                        border: '1px solid #1e293b',
-                        whiteSpace: 'pre-wrap',
-                      }}
-                    >
-                      {JSON.stringify(log.details, null, 2)}
-                    </div>
+                    <JsonSyntaxViewer data={log.details} />
                   )}
                 </div>
               );

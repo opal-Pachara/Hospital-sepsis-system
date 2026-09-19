@@ -61,6 +61,8 @@ services:
     depends_on:
       auth_db:
         condition: service_healthy
+    volumes:
+      - ./backend:/app/backend
     environment:
       TZ: Asia/Bangkok
       # 1. การเชื่อมต่อ Auth DB ภายในเครือข่าย Docker

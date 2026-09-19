@@ -13,4 +13,4 @@ if [ "$DASHBOARD_DB_HOST" = "127.0.0.1" ] || [ "$DASHBOARD_DB_HOST" = "localhost
     export DASHBOARD_DB_HOST="host.docker.internal"
 fi
 
-exec uvicorn backend.main:app --host 0.0.0.0 --port 8000
+exec uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
