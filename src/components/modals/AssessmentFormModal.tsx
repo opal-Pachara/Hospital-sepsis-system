@@ -191,8 +191,8 @@ export default function AssessmentFormModal() {
     const timelineEventVitals: TimelineEvent = {
       id: `tl_vitals_${Date.now()}`,
       timestamp: now,
-      actionText: `🩺 บันทึกสัญญาณชีพสิ้นสุดการรักษา (ครั้งที่ ${data.sequence}) — BP ${sbpN}/${!isNaN(parseFloat(dbp)) ? dbp : '—'} mmHg, HR ${hrN} bpm, RR ${rrN}/min, SpO2 ${spo2N}%, Temp ${btN}°C (NEWS: ${fullNews.totalScore} คะแนน - ${riskLabel})`,
-      color: fullNews.totalScore >= 5 ? 'orange' : 'blue',
+      actionText: `🩺 บันทึกสัญญาณชีพสิ้นสุดการรักษา (ครั้งที่ ${data.sequence}) — BP ${sbpN}/${!isNaN(parseFloat(dbp)) ? dbp : '—'} mmHg, HR ${hrN} bpm, RR ${rrN}/min, SpO2 ${spo2N}%, Temp ${btN}°C, GCS ${gcsN} (${derivedAVPU}) (NEWS: ${fullNews.totalScore} คะแนน - ${riskLabel})`,
+      color: fullNews.totalScore >= 7 ? 'red' : fullNews.totalScore >= 5 ? 'orange' : 'green',
       actor,
     };
 

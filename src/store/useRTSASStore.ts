@@ -22,6 +22,7 @@ import type {
   ChecklistItemStatus,
   TimelineEventColor,
   TreatmentStatus,
+  gcsToAVPU,
 } from '../types';
 import {
   calculateNEWS,
@@ -1178,16 +1179,16 @@ export const useRTSASStore = create<RTSASState>()(
           const updatedPatients = state.patients.map((p) =>
             (p.id === patientId || p.hn === patientId)
               ? {
-                  ...p,
-                  treatmentStatus: {
-                    ...(p.treatmentStatus || {}),
-                    hn: p.hn,
-                    sepsis_ruled_out: true,
-                    doctor_confirmed: false,
-                    countdown_started_at: null,
-                    treatment_completed: false,
-                  } as TreatmentStatus,
-                }
+                ...p,
+                treatmentStatus: {
+                  ...(p.treatmentStatus || {}),
+                  hn: p.hn,
+                  sepsis_ruled_out: true,
+                  doctor_confirmed: false,
+                  countdown_started_at: null,
+                  treatment_completed: false,
+                } as TreatmentStatus,
+              }
               : p
           );
 
@@ -1277,14 +1278,14 @@ export const useRTSASStore = create<RTSASState>()(
           const updatedPatients = state.patients.map((p) =>
             (p.id === patientId || p.hn === patientId)
               ? {
-                  ...p,
-                  treatmentStatus: {
-                    ...(p.treatmentStatus || {}),
-                    hn: p.hn,
-                    treatment_completed: true,
-                    treatment_completed_at: now,
-                  } as TreatmentStatus,
-                }
+                ...p,
+                treatmentStatus: {
+                  ...(p.treatmentStatus || {}),
+                  hn: p.hn,
+                  treatment_completed: true,
+                  treatment_completed_at: now,
+                } as TreatmentStatus,
+              }
               : p
           );
 
@@ -1491,11 +1492,11 @@ export const useRTSASStore = create<RTSASState>()(
             items: phase.items.map((item) =>
               item.id === 'doctor_confirm'
                 ? {
-                    ...item,
-                    status: 'completed' as const,
-                    completedAt: item.completedAt || effectiveStartTime,
-                    completedBy: item.completedBy || 'แพทย์เวร ER',
-                  }
+                  ...item,
+                  status: 'completed' as const,
+                  completedAt: item.completedAt || effectiveStartTime,
+                  completedBy: item.completedBy || 'แพทย์เวร ER',
+                }
                 : item
             ),
           }));
@@ -1547,14 +1548,14 @@ export const useRTSASStore = create<RTSASState>()(
           const updatedPatients = state.patients.map((p) =>
             (p.id === pId || p.hn === pHn || p.id === pHn)
               ? {
-                  ...p,
-                  treatmentStatus: {
-                    ...(p.treatmentStatus || {}),
-                    hn: p.hn,
-                    countdown_started_at: p.treatmentStatus?.countdown_started_at || effectiveStartTime,
-                    countdown_duration: 3600,
-                  } as TreatmentStatus,
-                }
+                ...p,
+                treatmentStatus: {
+                  ...(p.treatmentStatus || {}),
+                  hn: p.hn,
+                  countdown_started_at: p.treatmentStatus?.countdown_started_at || effectiveStartTime,
+                  countdown_duration: 3600,
+                } as TreatmentStatus,
+              }
               : p
           );
 
@@ -1739,11 +1740,11 @@ export const useRTSASStore = create<RTSASState>()(
             updatedEntries = updatedEntries.map((entry) =>
               entry.sequence === nextSeq
                 ? {
-                    ...entry,
-                    scheduledTime: nextScheduledTime,
-                    reminderTriggered: false,
-                    lastReminderAt: null,
-                  }
+                  ...entry,
+                  scheduledTime: nextScheduledTime,
+                  reminderTriggered: false,
+                  lastReminderAt: null,
+                }
                 : entry
             );
           } else {
@@ -1774,11 +1775,26 @@ export const useRTSASStore = create<RTSASState>()(
           (e) => e.id === entryId
         );
 
+        const seq = entry?.sequence ?? '?';
+        const sbpStr = vitals.systolicBP != null ? vitals.systolicBP : '—';
+        const dbpStr = vitals.diastolicBP != null ? vitals.diastolicBP : '—';
+        const hrStr = vitals.heartRate != null ? vitals.heartRate : '—';
+        const rrStr = vitals.respiratoryRate != null ? vitals.respiratoryRate : '—';
+        const spo2Str = vitals.spO2 != null ? vitals.spO2 : '—';
+        const tempStr = vitals.temperature != null ? vitals.temperature : '—';
+        const gcsVal = vitals.gcs != null ? vitals.gcs : '—';
+        const avpuVal = vitals.avpu || (typeof vitals.gcs === 'number' ? gcsToAVPU(vitals.gcs) : 'A');
+
+        const score = newsResult.totalScore;
+        let eventColor: TimelineEventColor = 'green';
+
+        const actionText = `🩺 ประเมินสัญญาณชีพ (ครั้งที่ ${seq}) — BP ${sbpStr}/${dbpStr} mmHg, HR ${hrStr} bpm, RR ${rrStr}/min, SpO2 ${spo2Str}%, Temp ${tempStr}°C, GCS ${gcsVal} (${avpuVal}) (NEWS: ${score} คะแนน)`;
+
         get().addTimelineEvent(
-          `ประเมินสัญญาณชีพ ครั้งที่ ${entry?.sequence ?? '?'} (NEWS: ${newsResult.totalScore} คะแนน)`,
-          newsResult.totalScore >= 5 ? 'red' : 'green',
+          actionText,
+          eventColor,
           completedBy,
-          { vitals, newsScore: newsResult.totalScore }
+          { vitals, newsScore: score }
         );
 
         // Also update the patient's vitals

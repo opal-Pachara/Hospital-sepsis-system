@@ -371,4 +371,93 @@ describe('getTimelineText formatting for HIS', () => {
   });
 });
 
+describe('completeAssessment vital signs parameter timeline logging', () => {
+  it('records full vital sign parameters (BP, HR, RR, SpO2, Temp, GCS/AVPU, NEWS) in timeline with correct color', () => {
+    const store = useRTSASStore.getState();
+    const patient: any = {
+      id: 'pt_vs_test',
+      hn: '333333333',
+      fullName: 'นาย ทดสอบ สัญญาณชีพ',
+      currentRiskLevel: 'low',
+      hasSepsisAlert: true,
+      latestNewsScore: 0,
+      arrivalTime: '2026-09-18T10:00:00',
+    };
+
+    store.setPatients([patient]);
+    store.selectPatient('pt_vs_test');
+    store.generateSchedule('2026-09-18T10:00:00');
+
+    const schedule = useRTSASStore.getState().assessmentSchedule!;
+    const entry1 = schedule.entries[0];
+
+    const normalVitals = {
+      respiratoryRate: 20,
+      spO2: 100,
+      oxygenSupplementation: 'room_air' as const,
+      temperature: 37,
+      systolicBP: 120,
+      diastolicBP: 80,
+      heartRate: 80,
+      gcs: 15,
+      avpu: 'A' as const,
+    };
+
+    store.completeAssessment(entry1.id, normalVitals, 'พยาบาลวิชาชีพ');
+
+    const state = useRTSASStore.getState();
+    const timeline = state.timeline;
+    const vsEvent = timeline.find((e) => e.actionText.includes('ประเมินสัญญาณชีพ (ครั้งที่ 1)'));
+
+    expect(vsEvent).toBeDefined();
+    expect(vsEvent?.color).toBe('green');
+    expect(vsEvent?.actionText).toContain('BP 120/80 mmHg');
+    expect(vsEvent?.actionText).toContain('HR 80 bpm');
+    expect(vsEvent?.actionText).toContain('RR 20/min');
+    expect(vsEvent?.actionText).toContain('SpO2 100%');
+    expect(vsEvent?.actionText).toContain('Temp 37°C');
+    expect(vsEvent?.actionText).toContain('GCS 15 (A)');
+    expect(vsEvent?.actionText).toContain('(NEWS: 0 คะแนน - 🟢 ปกติ — NEWS = 0)');
+
+    // Check HIS text format includes this entry
+    const hisText = store.getTimelineText();
+    expect(hisText).toContain('BP 120/80 mmHg, HR 80 bpm, RR 20/min, SpO2 100%, Temp 37°C, GCS 15 (A)');
+    expect(hisText).toContain('[ผู้ปฏิบัติ: ]');
+  });
+
+  it('records high risk vital signs with red event color and urgency label', () => {
+    const store = useRTSASStore.getState();
+    const schedule = useRTSASStore.getState().assessmentSchedule!;
+    const entry2 = schedule.entries[1];
+
+    const criticalVitals = {
+      respiratoryRate: 28,
+      spO2: 91,
+      oxygenSupplementation: 'room_air' as const,
+      temperature: 39.2,
+      systolicBP: 85,
+      diastolicBP: 50,
+      heartRate: 125,
+      gcs: 14,
+      avpu: 'V' as const,
+    };
+
+    store.completeAssessment(entry2.id, criticalVitals, 'พยาบาลวิชาชีพ');
+
+    const state = useRTSASStore.getState();
+    const timeline = state.timeline;
+    const vsEvent = timeline.find((e) => e.actionText.includes('ประเมินสัญญาณชีพ (ครั้งที่ 2)'));
+
+    expect(vsEvent).toBeDefined();
+    expect(vsEvent?.color).toBe('red');
+    expect(vsEvent?.actionText).toContain('BP 85/50 mmHg');
+    expect(vsEvent?.actionText).toContain('HR 125 bpm');
+    expect(vsEvent?.actionText).toContain('RR 28/min');
+    expect(vsEvent?.actionText).toContain('SpO2 91%');
+    expect(vsEvent?.actionText).toContain('Temp 39.2°C');
+    expect(vsEvent?.actionText).toContain('GCS 14 (V)');
+    expect(vsEvent?.actionText).toContain('🔴 สูง — ต้องการการดูแลเร่งด่วน');
+  });
+});
+
 
