@@ -1,7 +1,7 @@
 import { useRTSASStore } from '../store/useRTSASStore';
 
 export default function StatusBar() {
-  const { openModal, resetChecklist, clearTimeline, resetCountdown, ui, setConnectionStatus } = useRTSASStore();
+  const { openModal, ui, setConnectionStatus } = useRTSASStore();
 
   const handleTriggerAlert = () => {
     const patient = useRTSASStore.getState().selectedPatient;
@@ -20,9 +20,10 @@ export default function StatusBar() {
   };
 
   const handleReset = () => {
-    resetChecklist();
-    clearTimeline();
-    resetCountdown();
+    // Clear Zustand persist storage and reload to completely reset all state
+    localStorage.clear();
+    sessionStorage.clear();
+    window.location.reload();
   };
 
   return (

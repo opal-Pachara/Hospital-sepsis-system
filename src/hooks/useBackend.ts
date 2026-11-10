@@ -10,6 +10,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
 import type { Patient, VitalSigns, NEWSResult, NEWSParameterScore } from '../types';
 import { gcsToAVPU } from '../types';
+import { MOCK_PATIENTS } from '../data/mockData';
 
 // ---------------------------------------------------------------------------
 // Types matching the backend JSON response (PatientListItem schema)
@@ -130,7 +131,7 @@ function riskToTriageLevel(risk: string): Patient['triageLevel'] {
 // ---------------------------------------------------------------------------
 
 export function usePatientData() {
-  const { setPatients, selectPatient, setConnectionStatus, openModal, queueAlert } = useRTSASStore();
+  const { setPatients, selectPatient, setConnectionStatus, setLoading, queueAlert } = useRTSASStore();
 
   const fetchPatients = useCallback(async () => {
     try {
@@ -139,6 +140,8 @@ export function usePatientData() {
 
       const data: BackendPatientsResponse = await res.json();
       const patients = data.patients.map(mapBackendToPatient);
+
+      setConnectionStatus('connected');
 
       setPatients(patients);
 
@@ -152,17 +155,11 @@ export function usePatientData() {
         selectPatient(patients[0].id);
         console.log(`[RTSAS] Initial load: ${data.count} patients. Top: HN ${patients[0].hn} NEWS ${patients[0].latestNewsScore}`);
 
-        // ✅ Bug #2 Fix: Queue alerts for high-risk patients only (NEWS >= 5 + riskLevel=high)
-        // Cap at 3 to prevent popup flood
-        const highRisk = patients.filter(p => p.hasSepsisAlert).slice(0, 3);
+        // Queue alerts for ALL high-risk patients (NEWS >= 5 + riskLevel=high)
+        // We no longer limit to 3, and we let the AlertSummaryBanner handle the UI
+        const highRisk = patients.filter(p => p.hasSepsisAlert);
         if (highRisk.length > 0) {
-          // Show first alert immediately
-          openModal('alert', {
-            newsScore: highRisk[0].latestNewsScore,
-            patientName: highRisk[0].hn,
-          });
-          // Queue the rest (max 2 more)
-          highRisk.slice(1).forEach(p => {
+          highRisk.forEach(p => {
             queueAlert(p.hn, p.latestNewsScore);
           });
           console.log(`[RTSAS] Queued ${highRisk.length} high-risk alerts (NEWS >= 5).`);
@@ -172,10 +169,21 @@ export function usePatientData() {
         console.log(`[RTSAS] Refreshed ${data.count} patients (silent update).`);
       }
     } catch (err) {
-      console.error('[usePatientData] Failed to fetch patients:', err);
+      console.warn('[usePatientData] Backend unavailable — fallback to offline demo patient data:', err);
       setConnectionStatus('disconnected');
+
+      const currentPatients = useRTSASStore.getState().patients;
+      if (!currentPatients || currentPatients.length === 0) {
+        setPatients(MOCK_PATIENTS);
+        const currentSelected = useRTSASStore.getState().selectedPatient;
+        if (!currentSelected && MOCK_PATIENTS.length > 0) {
+          selectPatient(MOCK_PATIENTS[0].id);
+        }
+      }
+    } finally {
+      setLoading(false);
     }
-  }, [setPatients, selectPatient, setConnectionStatus, openModal, queueAlert]);
+  }, [setPatients, selectPatient, setConnectionStatus, setLoading, queueAlert]);
 
 
   useEffect(() => {
@@ -185,6 +193,8 @@ export function usePatientData() {
     const interval = setInterval(fetchPatients, 60_000);
     return () => clearInterval(interval);
   }, [fetchPatients]);
+
+  return { fetchPatients };
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +202,7 @@ export function usePatientData() {
 // ---------------------------------------------------------------------------
 
 export function useWebSocketAlerts() {
-  const { patients, setPatients, setConnectionStatus, addTimelineEvent, openModal, queueAlert } = useRTSASStore();
+  const { setPatients, setConnectionStatus, addTimelineEvent, queueAlert } = useRTSASStore();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMounted = useRef(true);

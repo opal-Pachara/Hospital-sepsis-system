@@ -38,3 +38,9 @@ backend/__pycache__/
 
 # Local planning docs — do not push to GitHub
 TODO.md
+
+# Auth package cache
+backend/auth/__pycache__/
+
+# Docker volume data
+auth_db_data/

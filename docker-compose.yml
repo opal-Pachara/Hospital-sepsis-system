@@ -1,0 +1,84 @@
+# RTSAS — Real-Time Sepsis Alert System
+# Docker Compose v3 — รัน: docker compose up --build
+#
+# Services:
+#   auth_db  — MySQL 8 สำหรับ user accounts (ภายใน Docker)
+#   backend  — FastAPI (เชื่อม auth_db + HOSxP ผ่าน LAN)
+#   frontend — Vite build + nginx (port 80)
+#
+# HOSxP MySQL อยู่นอก Docker — เชื่อมผ่าน LAN ด้วย DB_HOST ใน .env
+
+services:
+
+  # ── Auth Database ─────────────────────────────────────────────────────────
+  auth_db:
+    image: mysql:8.0
+    container_name: rtsas_auth_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${AUTH_DB_ROOT_PASSWORD:-rtsas_root}
+      MYSQL_DATABASE: rtsas_auth
+      MYSQL_USER: rtsas
+      MYSQL_PASSWORD: ${AUTH_DB_PASSWORD:-rtsas}
+    ports:
+      - "3307:3306"   # expose on 3307 to avoid conflict with HOSxP on host
+    volumes:
+      - auth_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "rtsas", "-prtsas"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rtsas_net
+
+  # ── Backend (FastAPI) ─────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: rtsas_backend
+    restart: unless-stopped
+    depends_on:
+      auth_db:
+        condition: service_healthy
+    environment:
+      # Auth DB (inside Docker)
+      AUTH_DB_URL: mysql+pymysql://rtsas:${AUTH_DB_PASSWORD:-rtsas}@auth_db:3306/rtsas_auth
+      # JWT
+      JWT_SECRET: ${JWT_SECRET:-CHANGE_ME_BEFORE_DEPLOY}
+      JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-8}
+      # HOSxP — external MySQL over LAN
+      DB_HOST: ${DB_HOST:-192.168.2.230}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-bk}
+      DB_PASSWORD: ${DB_PASSWORD:-bk}
+      DB_NAME: ${DB_NAME:-hos}
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # allow backend to reach LAN host
+    networks:
+      - rtsas_net
+
+  # ── Frontend (nginx) ──────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+    container_name: rtsas_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - rtsas_net
+
+# ── Volumes & Networks ─────────────────────────────────────────────────────
+volumes:
+  auth_db_data:
+
+networks:
+  rtsas_net:
+    driver: bridge
