@@ -23,6 +23,11 @@ CREATE TABLE IF NOT EXISTS patient_treatment_status (
     treatment_completed_by VARCHAR(100) NULL,
     sepsis_ruled_out TINYINT(1) DEFAULT 0,
     checklist_json MEDIUMTEXT NULL,
+    avpu_status VARCHAR(30) DEFAULT 'unassessed',
+    assessed_avpu VARCHAR(5) NULL,
+    avpu_assessed_at DATETIME NULL,
+    supplemental_oxygen TINYINT(1) DEFAULT NULL,
+    recorded_gcs INT NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
@@ -74,6 +79,19 @@ async def init_treatment_table():
             async with conn.cursor() as cur:
                 await cur.execute(CREATE_TABLE_SQL)
                 await cur.execute(CREATE_ARCHIVE_TABLE_SQL)
+                # Ensure new columns exist in patient_treatment_status if table was already created
+                for col_sql in [
+                    "ALTER TABLE patient_treatment_status ADD COLUMN avpu_status VARCHAR(30) DEFAULT 'unassessed'",
+                    "ALTER TABLE patient_treatment_status ADD COLUMN assessed_avpu VARCHAR(5) NULL",
+                    "ALTER TABLE patient_treatment_status ADD COLUMN avpu_assessed_at DATETIME NULL",
+                    "ALTER TABLE patient_treatment_status ADD COLUMN supplemental_oxygen TINYINT(1) DEFAULT NULL",
+                    "ALTER TABLE patient_treatment_status MODIFY COLUMN supplemental_oxygen TINYINT(1) DEFAULT NULL",
+                    "ALTER TABLE patient_treatment_status ADD COLUMN recorded_gcs INT NULL",
+                ]:
+                    try:
+                        await cur.execute(col_sql)
+                    except Exception:
+                        pass
                 logger.info("Initialized patient_treatment_status and treated_patient_archive tables in rtsas_dashboard.")
     except Exception as e:
         logger.error(f"Failed to initialize treatment tables: {e}")
@@ -86,6 +104,7 @@ def _format_dt(val) -> Optional[str]:
     return str(val)
 
 def _row_to_status_dict(row: Dict[str, Any]) -> Dict[str, Any]:
+    raw_o2 = row.get("supplemental_oxygen")
     return {
         "hn": str(row.get("hn", "")),
         "vn": row.get("vn"),
@@ -100,6 +119,11 @@ def _row_to_status_dict(row: Dict[str, Any]) -> Dict[str, Any]:
         "treatment_completed_by": row.get("treatment_completed_by"),
         "sepsis_ruled_out": bool(row.get("sepsis_ruled_out", 0)),
         "checklist_json": row.get("checklist_json"),
+        "avpu_status": row.get("avpu_status", "unassessed"),
+        "assessed_avpu": row.get("assessed_avpu"),
+        "avpu_assessed_at": _format_dt(row.get("avpu_assessed_at")),
+        "supplemental_oxygen": None if raw_o2 is None else bool(raw_o2),
+        "recorded_gcs": row.get("recorded_gcs"),
         "updated_at": _format_dt(row.get("updated_at")),
     }
 
@@ -185,7 +209,8 @@ async def get_treatment_status(hn: str) -> Optional[Dict[str, Any]]:
 
 async def acknowledge_alert(hn: str, acknowledged_by: str = "Nurse/System", vn: Optional[str] = None) -> Dict[str, Any]:
     """
-    Mark a patient's alert as acknowledged and start the 1-hour bundle countdown.
+    Mark a patient's NEWS alert as acknowledged WITHOUT starting the 1-hour bundle countdown.
+    The 60-minute bundle timer starts only when the doctor explicitly confirms Sepsis (doctor_confirm_sepsis).
     Upserts into patient_treatment_status.
     """
     now = datetime.now()
@@ -195,19 +220,17 @@ async def acknowledge_alert(hn: str, acknowledged_by: str = "Nurse/System", vn: 
     INSERT INTO patient_treatment_status (
         hn, vn, acknowledged, acknowledged_at, acknowledged_by,
         doctor_confirmed, countdown_started_at, countdown_duration
-    ) VALUES (%s, %s, 1, %s, %s, 1, %s, 3600)
+    ) VALUES (%s, %s, 1, %s, %s, 0, NULL, 3600)
     ON DUPLICATE KEY UPDATE
         acknowledged = 1,
         acknowledged_at = COALESCE(acknowledged_at, VALUES(acknowledged_at)),
         acknowledged_by = COALESCE(acknowledged_by, VALUES(acknowledged_by)),
-        doctor_confirmed = 1,
-        countdown_started_at = COALESCE(countdown_started_at, VALUES(countdown_started_at)),
         updated_at = NOW();
     """
     try:
         async with dashboard_pool.get_connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(query, (hn, vn, now_str, acknowledged_by, now_str))
+                await cur.execute(query, (hn, vn, now_str, acknowledged_by))
         logger.info(f"Acknowledged alert centrally for HN {hn} by {acknowledged_by}")
         status = await get_treatment_status(hn)
         return status or {
@@ -215,8 +238,8 @@ async def acknowledge_alert(hn: str, acknowledged_by: str = "Nurse/System", vn: 
             "acknowledged": True,
             "acknowledged_at": now.isoformat(),
             "acknowledged_by": acknowledged_by,
-            "doctor_confirmed": True,
-            "countdown_started_at": now.isoformat(),
+            "doctor_confirmed": False,
+            "countdown_started_at": None,
             "countdown_duration": 3600,
             "treatment_completed": False,
             "sepsis_ruled_out": False,
@@ -683,7 +706,7 @@ async def get_archived_stats() -> Dict[str, Any]:
                 for d_str in dates:
                     await cur.execute(
                         "SELECT COUNT(*) as total, "
-                        "SUM(CASE WHEN news_score >= 5 OR has_single_alert = 1 THEN 1 ELSE 0 END) as high_risk, "
+                        "SUM(CASE WHEN news_score >= 5 THEN 1 ELSE 0 END) as high_risk, "
                         "SUM(CASE WHEN treatment_completed = 1 THEN 1 ELSE 0 END) as treated, "
                         "SUM(CASE WHEN sepsis_ruled_out = 1 THEN 1 ELSE 0 END) as ruled_out "
                         "FROM treated_patient_archive WHERE arrival_date = %s",
@@ -763,3 +786,96 @@ async def clear_treated_statuses() -> List[str]:
     except Exception as e:
         logger.warning(f"Could not clear treated statuses from DB: {e}")
         return []
+
+
+async def set_avpu_assessment(
+    hn: str,
+    avpu: str,
+    vn: Optional[str] = None,
+    current_gcs: Optional[int] = None,
+    supplemental_oxygen: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """
+    Record nurse AVPU assessment (A, V, P, U) for a patient in rtsas_dashboard.
+    avpu: 'A', 'V', 'P', or 'U'
+    status: 'confirmed_alert' if (avpu == 'A' and current_gcs == 15) else 'assessed'
+    """
+    now = datetime.now()
+    now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+    avpu_status = 'confirmed_alert' if (avpu == 'A' and current_gcs == 15) else 'assessed'
+
+    if supplemental_oxygen is not None:
+        o2_val = 1 if supplemental_oxygen else 0
+        query = """
+        INSERT INTO patient_treatment_status (
+            hn, vn, avpu_status, assessed_avpu, avpu_assessed_at, recorded_gcs, supplemental_oxygen
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            avpu_status = VALUES(avpu_status),
+            assessed_avpu = VALUES(assessed_avpu),
+            avpu_assessed_at = VALUES(avpu_assessed_at),
+            recorded_gcs = VALUES(recorded_gcs),
+            supplemental_oxygen = VALUES(supplemental_oxygen),
+            updated_at = NOW();
+        """
+        params = (hn, vn, avpu_status, avpu, now_str, current_gcs, o2_val)
+    else:
+        query = """
+        INSERT INTO patient_treatment_status (
+            hn, vn, avpu_status, assessed_avpu, avpu_assessed_at, recorded_gcs
+        ) VALUES (%s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            avpu_status = VALUES(avpu_status),
+            assessed_avpu = VALUES(assessed_avpu),
+            avpu_assessed_at = VALUES(avpu_assessed_at),
+            recorded_gcs = VALUES(recorded_gcs),
+            updated_at = NOW();
+        """
+        params = (hn, vn, avpu_status, avpu, now_str, current_gcs)
+
+    try:
+        async with dashboard_pool.get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(query, params)
+        logger.info(f"Recorded AVPU assessment for HN {hn}: {avpu} ({avpu_status})")
+        status = await get_treatment_status(hn)
+        return status or {
+            "hn": hn,
+            "avpu_status": avpu_status,
+            "assessed_avpu": avpu,
+            "avpu_assessed_at": now.isoformat(),
+            "recorded_gcs": current_gcs,
+            **({"supplemental_oxygen": supplemental_oxygen} if supplemental_oxygen is not None else {}),
+        }
+    except Exception as e:
+        logger.error(f"Error recording AVPU assessment for HN {hn}: {e}")
+        return {}
+
+
+async def toggle_oxygen_supplementation(hn: str, supplemental_oxygen: bool, vn: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Update supplemental oxygen status for a patient in rtsas_dashboard.
+    """
+    query = """
+    INSERT INTO patient_treatment_status (
+        hn, vn, supplemental_oxygen
+    ) VALUES (%s, %s, %s)
+    ON DUPLICATE KEY UPDATE
+        supplemental_oxygen = VALUES(supplemental_oxygen),
+        updated_at = NOW();
+    """
+    try:
+        val = 1 if supplemental_oxygen else 0
+        async with dashboard_pool.get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(query, (hn, vn, val))
+        logger.info(f"Updated supplemental oxygen for HN {hn}: {supplemental_oxygen}")
+        status = await get_treatment_status(hn)
+        return status or {
+            "hn": hn,
+            "supplemental_oxygen": supplemental_oxygen,
+        }
+    except Exception as e:
+        logger.error(f"Error updating supplemental oxygen for HN {hn}: {e}")
+        return {}
+

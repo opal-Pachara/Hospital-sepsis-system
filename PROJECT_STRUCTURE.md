@@ -74,7 +74,7 @@ Hospital/
 │   │   ├── newsCalculator.ts            # การคำนวณคะแนน NEWS 2017 ตามเกณฑ์ RCP
 │   │   └── patientMemory.ts             # การจัดการ Clean up ข้อมูลผู้ป่วยและบันทึก HIS Note
 │   │
-│   ├── data/                            # 📦 ข้อมูล Mock / ตัวอย่างสำหรับการทดสอบ
+│   ├── data/                            # 📦 ข้อมูลตั้งต้นระบบ (ปิด Mock Data ใน Production)
 │   │   └── mockData.ts
 │   ├── assets/                          # 🎨 รูปภาพและไอคอน SVG
 │   ├── __tests__/                       # 🧪 Automated Unit & Integration Tests (Vitest)

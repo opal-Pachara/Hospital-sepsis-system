@@ -318,7 +318,7 @@ async def fetch_vitals_from_db() -> List[Dict[str, Any]]:
 # Build PatientListItem list from raw rows
 # ---------------------------------------------------------------------------
 
-def build_patient_list(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def build_patient_list(rows: List[Dict[str, Any]], treatment_statuses: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Convert raw DB rows into PatientListItem dicts, computing NEWS for each."""
     result = []
     seen_hns = set()
@@ -332,7 +332,37 @@ def build_patient_list(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             vstdate = row.get('vstdate')
             vsttime = row.get('vsttime')
 
-            news = calculate_news_from_row(row)
+            # Merge centralized treatment status (AVPU assessment, Supplemental Oxygen)
+            t_status = (treatment_statuses.get(hn) if treatment_statuses else None) or row.get('treatment_status')
+            assessed_avpu = row.get('assessed_avpu')
+            avpu_status = row.get('avpu_status')
+            supp_o2 = row.get('supplemental_oxygen', None)
+
+            if t_status:
+                if 'assessed_avpu' in t_status and t_status['assessed_avpu'] is not None:
+                    assessed_avpu = t_status['assessed_avpu']
+                if 'avpu_status' in t_status and t_status['avpu_status'] is not None:
+                    avpu_status = t_status['avpu_status']
+                if 'supplemental_oxygen' in t_status and t_status['supplemental_oxygen'] is not None:
+                    supp_o2 = t_status['supplemental_oxygen']
+
+                # Check if GCS from HOSxP changed compared to recorded_gcs
+                rec_gcs = t_status.get('recorded_gcs')
+                cur_gcs = _safe_int(row.get('gcs'))
+                if rec_gcs is not None and cur_gcs is not None and cur_gcs != rec_gcs:
+                    if cur_gcs == 15:
+                        assessed_avpu = 'A'
+                        avpu_status = 'confirmed_alert'
+                    else:
+                        assessed_avpu = None
+                        avpu_status = 'unassessed'
+
+            calc_row = dict(row)
+            calc_row['assessed_avpu'] = assessed_avpu
+            calc_row['avpu_status'] = avpu_status
+            calc_row['supplemental_oxygen'] = supp_o2
+
+            news = calculate_news_from_row(calc_row)
             arrival_iso = row_to_arrival_iso(vstdate, vsttime)
 
             vstdate_str = format_date_str(vstdate)
@@ -359,6 +389,9 @@ def build_patient_list(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 temperature=_sf(row.get('temperature')),
                 news_result=news,
                 arrival_time=arrival_iso,
+                assessed_avpu=assessed_avpu,
+                avpu_status=avpu_status,
+                supplemental_oxygen=None if supp_o2 is None else bool(supp_o2),
             )
             result.append(item.model_dump())
         except Exception as e:
@@ -376,8 +409,12 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
     logger.info("Polling sepsis_db for new vital signs...")
     rows = await fetch_vitals_from_db()
 
+    # Fetch centralized treatment statuses to incorporate AVPU and Oxygen
+    from .treatment_service import get_all_treatment_statuses
+    treatment_statuses = await get_all_treatment_statuses()
+
     # Update the cache used by GET /api/patients
-    _patients_cache = build_patient_list(rows)
+    _patients_cache = build_patient_list(rows, treatment_statuses)
 
     # Broadcast new alerts via WebSocket
     from .main import broadcast_message  # imported here to avoid circular imports
@@ -557,10 +594,19 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
 
             is_new_patient = (hn not in last_seen_patient_snapshots and reading_key not in last_seen_vitals)
 
+            calc_row = dict(row)
+            if t_status:
+                if t_status.get('assessed_avpu') is not None:
+                    calc_row['assessed_avpu'] = t_status['assessed_avpu']
+                if t_status.get('avpu_status') is not None:
+                    calc_row['avpu_status'] = t_status['avpu_status']
+                if 'supplemental_oxygen' in t_status:
+                    calc_row['supplemental_oxygen'] = t_status['supplemental_oxygen']
+
             if is_new_patient:
                 # ─── CASE A: New Patient Ingested ───
                 t0 = time.perf_counter()
-                r_news = calculate_news_from_row(row)
+                r_news = calculate_news_from_row(calc_row)
                 calc_duration_ms = round((time.perf_counter() - t0) * 1000, 2)
                 if calc_duration_ms < 0.01:
                     calc_duration_ms = 0.43
@@ -609,7 +655,7 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                     details["missing_fields"] = missing_fields
                     details["present_fields"] = present_fields
 
-                is_high = (risk_lvl == "high" or total_score >= 5 or single_alert)
+                is_high = (risk_lvl == "high" or total_score >= 5)
                 is_new_alert = is_high and not is_finished_treatment
                 if is_finished_treatment:
                     is_high = False
@@ -701,7 +747,7 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
 
                 if has_update:
                     t0 = time.perf_counter()
-                    r_news = calculate_news_from_row(row)
+                    r_news = calculate_news_from_row(calc_row)
                     calc_duration_ms = round((time.perf_counter() - t0) * 1000, 2)
                     if calc_duration_ms < 0.01:
                         calc_duration_ms = 0.43
@@ -766,7 +812,7 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                         details["missing_fields"] = missing_fields
                         details["present_fields"] = present_fields
 
-                    is_high = (risk_lvl == "high" or total_score >= 5 or single_alert)
+                    is_high = (risk_lvl == "high" or total_score >= 5)
                     is_new_alert = is_high and not is_finished_treatment
                     if is_finished_treatment:
                         is_high = False

@@ -621,6 +621,44 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
             >
               <span>📋</span> {copied ? 'คัดลอกเรียบร้อย!' : 'คัดลอก Log'}
             </button>
+
+            <button
+              type="button"
+              onClick={async () => {
+                if (!window.confirm('ยืนยันการล้าง System Logs ทั้งหมดใช่หรือไม่? ข้อมูลเก่าจะไม่สามารถกู้คืนได้')) return;
+                try {
+                  setIsLoading(true);
+                  const res = await fetch('/api/system/logs/clear', { method: 'POST' });
+                  if (res.ok) {
+                    setLogs([]);
+                    setSummary({ total_logs: 0, error_logs: 0, last_entry: null });
+                    await fetchLogsData();
+                  }
+                } catch (err) {
+                  console.error('Failed to clear logs:', err);
+                } finally {
+                  setIsLoading(false);
+                }
+              }}
+              disabled={isLoading}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                fontWeight: 700,
+                background: '#dc2626',
+                color: '#ffffff',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                transition: 'all 0.15s',
+              }}
+              title="ล้าง System Logs ทั้งหมด"
+            >
+              <span>🗑️</span> ล้าง Logs
+            </button>
           </div>
         </div>
 

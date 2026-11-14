@@ -551,7 +551,7 @@ function PhaseSection({ phase }: { phase: ChecklistPhase }) {
   );
 }
 
-const ASSESSMENT_GRID_TEMPLATE = '30px minmax(66px, 1fr) 38px 44px 46px 58px 40px 54px 40px minmax(104px, 1.2fr)';
+const ASSESSMENT_GRID_TEMPLATE = '28px minmax(64px, 1fr) 34px 40px 42px 54px 40px 36px 40px 48px 36px minmax(96px, 1.2fr)';
 
 function getParamDetails(
   vitals: VitalSigns | null,
@@ -568,6 +568,9 @@ function getParamDetails(
   const sbpScore = getScore('systolicBP');
   const hrScore = getScore('heartRate');
   const avpuScore = getScore('avpu');
+  const o2Score =
+    getScore('oxygenSupplementation') ||
+    (vitals.oxygenSupplementation === 'supplemental' ? 2 : 0);
 
   const getColor = (score: number) => {
     if (score >= 3) return '#dc2626'; // Red (Critical)
@@ -579,7 +582,33 @@ function getParamDetails(
   const bpDisplay = vitals.diastolicBP
     ? `${vitals.systolicBP}/${vitals.diastolicBP}`
     : `${vitals.systolicBP ?? '—'}`;
-  const gcsDisplay = `${vitals.gcs ?? 15} (${vitals.avpu || 'A'})`;
+  const mapVal =
+    vitals.map != null
+      ? vitals.map
+      : vitals.systolicBP != null && vitals.diastolicBP != null
+        ? Math.round((vitals.systolicBP + 2 * vitals.diastolicBP) / 3)
+        : null;
+  const avpuVal = vitals.avpu || 'A';
+  const o2Detail =
+    vitals.oxygenSupplementation === 'unassessed'
+      ? {
+          val: '—',
+          color: '#94a3b8',
+          tooltip: 'ยังไม่ระบุการได้รับออกซิเจนเสริม',
+        }
+      : vitals.oxygenSupplementation === 'supplemental' || o2Score > 0
+        ? {
+            val: 'ใช้ O₂',
+            score: 2,
+            color: getColor(2),
+            tooltip: 'การได้รับออกซิเจนเสริม (O₂): ใช้ออกซิเจนเสริม (+2 คะแนน)',
+          }
+        : {
+            val: 'ไม่ใช้',
+            score: 0,
+            color: getColor(0),
+            tooltip: 'การได้รับออกซิเจนเสริม (O₂): ไม่ใช้ออกซิเจนเสริม / Room Air (0 คะแนน)',
+          };
 
   return {
     rr: {
@@ -606,6 +635,13 @@ function getParamDetails(
       color: getColor(sbpScore),
       tooltip: `ความดันโลหิต (BP): ${bpDisplay} mmHg (เกณฑ์ปกติ SBP 111-219) | คะแนน: +${sbpScore}`,
     },
+    map: {
+      val: mapVal !== null ? `${mapVal}` : '—',
+      color: mapVal !== null ? (mapVal < 65 ? '#dc2626' : '#16a34a') : '#94a3b8',
+      tooltip: mapVal !== null
+        ? `ความดันเลือดแดงเฉลี่ย (MAP): ${mapVal} mmHg (คำนวณจาก (SBP + 2×DBP)/3, เกณฑ์เป้าหมาย ≥65 mmHg)`
+        : 'ยังไม่มีค่า DBP สำหรับคำนวณ MAP',
+    },
     hr: {
       val: vitals.heartRate ?? '—',
       score: hrScore,
@@ -613,11 +649,12 @@ function getParamDetails(
       tooltip: `ชีพจร (HR): ${vitals.heartRate ?? '—'} bpm (เกณฑ์ปกติ 51-90) | คะแนน: +${hrScore}`,
     },
     gcsAvpu: {
-      val: gcsDisplay,
+      val: avpuVal,
       score: avpuScore,
       color: getColor(avpuScore),
-      tooltip: `ระดับความรู้สึกตัว: GCS ${vitals.gcs ?? 15} / AVPU ${vitals.avpu || 'A'} (เกณฑ์ปกติ 15/A) | คะแนน: +${avpuScore}`,
+      tooltip: `ระดับความรู้สึกตัว (AVPU): ${avpuVal} (เกณฑ์ปกติ A = 0, V/P/U = +3) | คะแนน: +${avpuScore}`,
     },
+    o2: o2Detail,
   };
 }
 
@@ -710,7 +747,7 @@ function AssessmentScheduleSection({
           }}
         >
           <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            <div style={{ minWidth: '530px' }}>
+            <div style={{ minWidth: '560px' }}>
               {/* Table Header */}
               <div
                 style={{
@@ -734,8 +771,10 @@ function AssessmentScheduleSection({
                 <span style={{ textAlign: 'center' }} title="SpO2 (ความอิ่มตัวออกซิเจน)">SpO₂</span>
                 <span style={{ textAlign: 'center' }} title="Temperature (อุณหภูมิร่างกาย)">Temp</span>
                 <span style={{ textAlign: 'center' }} title="Blood Pressure (ความดันโลหิต)">BP</span>
+                <span style={{ textAlign: 'center' }} title="Mean Arterial Pressure (ความดันเลือดแดงเฉลี่ย คำนวณอัตโนมัติ เกณฑ์ ≥65 mmHg)">MAP</span>
                 <span style={{ textAlign: 'center' }} title="Heart Rate (ชีพจร)">HR</span>
-                <span style={{ textAlign: 'center' }} title="Glasgow Coma Scale / AVPU">GCS/AVPU</span>
+                <span style={{ textAlign: 'center' }} title="ระดับความรู้สึกตัว (AVPU: A / V / P / U)">AVPU</span>
+                <span style={{ textAlign: 'center' }} title="การได้รับออกซิเจนเสริม (Supplemental O₂)">O₂</span>
                 <span style={{ textAlign: 'center' }} title="NEWS Score รวม">NEWS</span>
                 <span style={{ textAlign: 'center' }}>สถานะ</span>
               </div>
@@ -866,6 +905,21 @@ function AssessmentScheduleSection({
                             {paramDetails ? paramDetails.bp.val : '—'}
                           </span>
 
+                          {/* MAP (Auto-calculated) */}
+                          <span
+                            style={{
+                              textAlign: 'center',
+                              fontSize: '9.5px',
+                              fontWeight: paramDetails ? 700 : 400,
+                              color: paramDetails?.map.color ?? '#94a3b8',
+                              cursor: paramDetails ? 'help' : 'default',
+                              whiteSpace: 'nowrap',
+                            }}
+                            title={paramDetails?.map.tooltip}
+                          >
+                            {paramDetails ? paramDetails.map.val : '—'}
+                          </span>
+
                           {/* HR */}
                           <span
                             style={{
@@ -880,7 +934,7 @@ function AssessmentScheduleSection({
                             {paramDetails ? paramDetails.hr.val : '—'}
                           </span>
 
-                          {/* GCS/AVPU */}
+                          {/* AVPU */}
                           <span
                             style={{
                               textAlign: 'center',
@@ -893,6 +947,21 @@ function AssessmentScheduleSection({
                             title={paramDetails?.gcsAvpu.tooltip}
                           >
                             {paramDetails ? paramDetails.gcsAvpu.val : '—'}
+                          </span>
+
+                          {/* O2 Supplement */}
+                          <span
+                            style={{
+                              textAlign: 'center',
+                              fontSize: '9.5px',
+                              fontWeight: paramDetails ? 700 : 400,
+                              color: paramDetails?.o2.color ?? '#94a3b8',
+                              cursor: paramDetails ? 'help' : 'default',
+                              whiteSpace: 'nowrap',
+                            }}
+                            title={paramDetails?.o2.tooltip}
+                          >
+                            {paramDetails ? paramDetails.o2.val : '—'}
                           </span>
 
                           {/* NEWS Score */}
@@ -1168,6 +1237,8 @@ function AssessmentScheduleSection({
                           <span style={{ fontSize: '10px', color: '#94a3b8' }}>—</span>
                           <span style={{ fontSize: '8px', color: '#94a3b8', display: 'block' }}>{item.label}</span>
                         </span>
+                        <span style={{ textAlign: 'center', color: '#cbd5e1' }}>—</span>
+                        <span style={{ textAlign: 'center', color: '#cbd5e1' }}>—</span>
                         <span style={{ textAlign: 'center', color: '#cbd5e1' }}>—</span>
                         <span style={{ textAlign: 'center', color: '#cbd5e1' }}>—</span>
                         <span style={{ textAlign: 'center', color: '#cbd5e1' }}>—</span>

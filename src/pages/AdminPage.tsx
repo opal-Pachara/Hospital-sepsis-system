@@ -819,6 +819,7 @@ export default function AdminPage({ onBack }: AdminPageProps) {
   const [showConfirmClear, setShowConfirmClear] = useState(false);
   const [showConfirmReset, setShowConfirmReset] = useState(false);
   const [showConfirmClearLogs, setShowConfirmClearLogs] = useState(false);
+  const [isClearingLogs, setIsClearingLogs] = useState(false);
   const [isClearingCache, setIsClearingCache] = useState(false);
   const [isResettingDashboard, setIsResettingDashboard] = useState(false);
   const [resetPasswordUser, setResetPasswordUser] = useState<UserRecord | null>(null);
@@ -921,9 +922,13 @@ export default function AdminPage({ onBack }: AdminPageProps) {
   const handleClearLogs = async () => {
     setIsClearingLogs(true);
     try {
-      const res = await fetch(`${API_BASE}/api/system/logs/clear`, { method: 'POST' });
+      const res = await fetch(`${API_BASE}/api/system/logs/clear`, {
+        method: 'POST',
+        headers: authHeaders,
+      });
       if (res.ok) {
         const data = await res.json();
+        setLogs([]);
         showToast(`✅ ล้าง System Logs สำเร็จ (${data.cleared_count ?? 0} รายการ)`, 'success');
         await loadLogs();
       } else {

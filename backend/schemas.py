@@ -76,6 +76,8 @@ class NEWSResult(BaseModel):
     calculatedAt: str
     isComplete: bool = True
     missingParameters: List[str] = Field(default_factory=list)
+    needsAvpuPrompt: bool = False
+    needsOxygenPrompt: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +108,9 @@ class PatientListItem(BaseModel):
     # Computed
     news_result: NEWSResult
     arrival_time: str                # ISO 8601 timestamp
+    assessed_avpu: Optional[str] = None
+    avpu_status: Optional[str] = None
+    supplemental_oxygen: Optional[bool] = None
 
 
 # ---------------------------------------------------------------------------
@@ -133,3 +138,6 @@ class SepsisAlertPayload(BaseModel):
     news_result: NEWSResult
     is_new_alert: bool
     timestamp: str
+    assessed_avpu: Optional[str] = None
+    avpu_status: Optional[str] = None
+    supplemental_oxygen: Optional[bool] = None

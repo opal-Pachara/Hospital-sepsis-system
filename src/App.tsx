@@ -22,6 +22,7 @@ import {
   MultiAlertModal,
   SepsisConfirmModal,
   GlobalAuthModal,
+  AVPUAssessmentModal,
 } from './components/modals';
 
 // Common UI & Feedback
@@ -407,6 +408,7 @@ export default function App() {
       <AssessmentFormModal />
       <SepsisConfirmModal />
       <GlobalAuthModal />
+      <AVPUAssessmentModal />
 
       {/* Toast Notifications */}
       <ToastContainer />

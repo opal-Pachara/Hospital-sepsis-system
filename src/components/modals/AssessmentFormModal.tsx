@@ -1,23 +1,34 @@
 import { useState } from 'react';
 import { useRTSASStore } from '../../store/useRTSASStore';
-import type { VitalSigns, TimelineEvent } from '../../types';
-import { gcsToAVPU } from '../../types';
+import type { VitalSigns, TimelineEvent, AVPULevel, OxygenStatus } from '../../types';
+import { gcsToAVPU, calculateMAP } from '../../types';
 import { showToast } from '../common/Toast';
 import { maskHN } from '../../utils/hnMask';
 import { calculateNEWS } from '../../utils/newsCalculator';
 
-function calcNEWSScore(rr: number, spo2: number, temp: number, sbp: number, hr: number, gcs: number) {
+function calcNEWSScore(
+  rr: number,
+  spo2: number,
+  temp: number,
+  sbp: number,
+  hr: number,
+  gcs: number,
+  avpuLevel?: AVPULevel | null,
+  o2Status: OxygenStatus = 'room_air'
+) {
   let sc = 0;
   const bd: string[] = [];
   const rrP = rr <= 8 ? 3 : rr <= 11 ? 1 : rr <= 20 ? 0 : rr <= 24 ? 2 : 3; sc += rrP; bd.push(`RR(${rrP})`);
   const spoP = spo2 <= 91 ? 3 : spo2 <= 93 ? 2 : spo2 <= 95 ? 1 : 0; sc += spoP; bd.push(`SpO₂(${spoP})`);
+  const o2P = o2Status === 'supplemental' ? 2 : 0; sc += o2P; if (o2P > 0) bd.push(`O₂(${o2P})`);
   const tmpP = temp <= 35 ? 3 : temp <= 36 ? 1 : temp <= 38 ? 0 : temp <= 39 ? 1 : 2; sc += tmpP; bd.push(`Temp(${tmpP})`);
   const sbpP = sbp <= 90 ? 3 : sbp <= 100 ? 2 : sbp <= 110 ? 1 : sbp <= 219 ? 0 : 3; sc += sbpP; bd.push(`SBP(${sbpP})`);
   const hrP = hr <= 40 ? 3 : hr <= 50 ? 1 : hr <= 90 ? 0 : hr <= 110 ? 1 : hr <= 130 ? 2 : 3; sc += hrP; bd.push(`HR(${hrP})`);
-  const avpu = gcsToAVPU(gcs);
-  const avpuP = avpu === 'A' ? 0 : 3; sc += avpuP; bd.push(`GCS${gcs}→${avpu}(${avpuP})`);
+  const finalAvpu = avpuLevel || gcsToAVPU(gcs);
+  const avpuP = finalAvpu === 'A' ? 0 : 3; sc += avpuP; bd.push(`AVPU:${finalAvpu}(${avpuP})`);
   return { score: sc, breakdown: bd.join(' + ') + ' = ' + sc };
 }
+
 
 /* ── Shared input style constant ── */
 const inputStyle: React.CSSProperties = {
@@ -60,7 +71,8 @@ export default function AssessmentFormModal() {
   const [dbp, setDBP] = useState('');
   const [hr, setHR] = useState('');
   const [bt, setBT] = useState('');
-  const [gcsInput, setGCSInput] = useState('');
+  const [selectedAvpu, setSelectedAvpu] = useState<AVPULevel | null>(null);
+  const [oxygenStatus, setOxygenStatus] = useState<OxygenStatus>('unassessed');
   const [isConfirmingComplete, setIsConfirmingComplete] = useState(false);
 
   if (ui.modal.activeModal !== 'assessment_form') return null;
@@ -80,42 +92,53 @@ export default function AssessmentFormModal() {
 
   if (!data) return null;
 
-  // Live NEWS calculation
+  // Live NEWS calculation (NEWS 2012: 7 parameters) + Auto MAP calculation
   const rrN = parseFloat(rr), spo2N = parseFloat(spo2), sbpN = parseFloat(sbp),
-    hrN = parseFloat(hr), btN = parseFloat(bt);
-  const gcsN = parseInt(gcsInput);
-  const allFilled = !isNaN(rrN) && !isNaN(spo2N) && !isNaN(sbpN) && !isNaN(hrN) && !isNaN(btN) && !isNaN(gcsN) && gcsN >= 3 && gcsN <= 15;
-  const liveNews = allFilled ? calcNEWSScore(rrN, spo2N, btN, sbpN, hrN, gcsN) : null;
+    dbpN = parseFloat(dbp), hrN = parseFloat(hr), btN = parseFloat(bt);
+  const mapN = calculateMAP(sbpN, dbpN);
+  const effectiveAvpu: AVPULevel = selectedAvpu || 'A';
+  const gcsN = effectiveAvpu === 'A' ? 15 : effectiveAvpu === 'V' ? 14 : effectiveAvpu === 'P' ? 8 : 3;
+  const allFilled =
+    !isNaN(rrN) &&
+    !isNaN(spo2N) &&
+    !isNaN(sbpN) &&
+    !isNaN(hrN) &&
+    !isNaN(btN) &&
+    selectedAvpu !== null &&
+    oxygenStatus !== 'unassessed';
+  const liveNews = allFilled ? calcNEWSScore(rrN, spo2N, btN, sbpN, hrN, gcsN, effectiveAvpu, oxygenStatus) : null;
 
   let riskLabel = 'กรอกข้อมูลเพื่อคำนวณ';
   let riskColor = '#94a3b8';
   let riskBg = 'rgba(148, 163, 184, .12)';
   if (liveNews) {
-    if (liveNews.score >= 7) { riskLabel = '🔴 สูง — ต้องการการดูแลเร่งด่วน'; riskColor = '#ef4444'; riskBg = 'rgba(239, 68, 68, .12)'; }
-    else if (liveNews.score >= 5) { riskLabel = '🟡 ปานกลาง — ติดตามใกล้ชิด'; riskColor = '#f97316'; riskBg = 'rgba(249, 115, 22, .12)'; }
-    else if (liveNews.score >= 1) { riskLabel = '🟢 ต่ำ-ปานกลาง'; riskColor = '#22c55e'; riskBg = 'rgba(34, 197, 94, .12)'; }
+    if (liveNews.score >= 7) { riskLabel = '🔴 สูง'; riskColor = '#ef4444'; riskBg = 'rgba(239, 68, 68, .12)'; }
+    else if (liveNews.score >= 5) { riskLabel = '🟡 ปานกลาง'; riskColor = '#f97316'; riskBg = 'rgba(249, 115, 22, .12)'; }
+    else if (liveNews.score >= 1) { riskLabel = '🟢 ปานกลาง-ต่ำ'; riskColor = '#22c55e'; riskBg = 'rgba(34, 197, 94, .12)'; }
     else { riskLabel = '🟢 ปกติ — NEWS = 0'; riskColor = '#22c55e'; riskBg = 'rgba(34, 197, 94, .12)'; }
   }
 
-  const filledCount = [rr, spo2, sbp, hr, bt, gcsInput].filter(Boolean).length;
+  const filledCount = [rr, spo2, sbp, hr, bt, selectedAvpu, oxygenStatus !== 'unassessed' ? oxygenStatus : ''].filter(Boolean).length;
 
   const handleSave = () => {
     if (!allFilled) {
-      showToast('กรุณากรอกข้อมูลสัญญาณชีพให้ครบถ้วน', 'error');
+      showToast('กรุณากรอกข้อมูลสัญญาณชีพ AVPU และการได้รับออกซิเจนเสริมให้ครบถ้วน', 'error');
       return;
     }
 
-    const derivedAVPU = gcsToAVPU(gcsN);
     const vitals: VitalSigns = {
       respiratoryRate: rrN,
       spO2: spo2N,
-      oxygenSupplementation: 'room_air',
+      oxygenSupplementation: oxygenStatus,
       temperature: btN,
       systolicBP: sbpN,
-      diastolicBP: !isNaN(parseFloat(dbp)) ? parseFloat(dbp) : null,
+      diastolicBP: !isNaN(dbpN) ? dbpN : null,
+      map: mapN,
       heartRate: hrN,
       gcs: gcsN,
-      avpu: derivedAVPU,
+      avpu: effectiveAvpu,
+      isAvpuConfirmed: true,
+      avpuStatus: 'confirmed',
     };
 
     const actor = currentUser?.name || 'พยาบาลห้องฉุกเฉิน';
@@ -124,12 +147,13 @@ export default function AssessmentFormModal() {
     closeModal();
 
     // Reset fields
-    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT(''); setGCSInput('');
+    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT('');
+    setSelectedAvpu(null); setOxygenStatus('unassessed');
   };
 
   const handleCompleteTreatment = () => {
     if (!allFilled) {
-      showToast('กรุณากรอกข้อมูลสัญญาณชีพให้ครบถ้วนก่อนสิ้นสุดการรักษา', 'error');
+      showToast('กรุณากรอกข้อมูลสัญญาณชีพ AVPU และการได้รับออกซิเจนเสริมให้ครบถ้วนก่อนสิ้นสุดการรักษา', 'error');
       return;
     }
 
@@ -138,22 +162,27 @@ export default function AssessmentFormModal() {
       return;
     }
 
-    if (!selectedPatient) return;
-    const actor = currentUser?.name || 'พยาบาลห้องฉุกเฉิน';
-    const now = new Date().toISOString();
-    const derivedAVPU = gcsToAVPU(gcsN);
     const vitals: VitalSigns = {
       respiratoryRate: rrN,
       spO2: spo2N,
-      oxygenSupplementation: 'room_air',
+      oxygenSupplementation: oxygenStatus,
       temperature: btN,
       systolicBP: sbpN,
-      diastolicBP: !isNaN(parseFloat(dbp)) ? parseFloat(dbp) : null,
+      diastolicBP: !isNaN(dbpN) ? dbpN : null,
+      map: mapN,
       heartRate: hrN,
       gcs: gcsN,
-      avpu: derivedAVPU,
+      avpu: effectiveAvpu,
+      isAvpuConfirmed: true,
+      avpuStatus: 'confirmed',
     };
+
+
+    if (!selectedPatient) return;
+    const actor = currentUser?.name || 'พยาบาลห้องฉุกเฉิน';
+    const now = new Date().toISOString();
     const fullNews = calculateNEWS(vitals);
+
 
     // 1. Update assessmentSchedule: mark current sequence completed, cancel subsequent
     const currentSchedule = patientData[selectedPatient.id]?.assessmentSchedule || assessmentSchedule;
@@ -170,6 +199,7 @@ export default function AssessmentFormModal() {
               isCompleted: true,
               completedAt: now,
               completedBy: actor,
+              vitals: vitals,
               vitalSigns: vitals,
               newsResult: fullNews,
               isCanceled: true,
@@ -188,12 +218,15 @@ export default function AssessmentFormModal() {
     }
 
     // 2. Timeline events
+    const o2Str = oxygenStatus === 'supplemental' ? 'O₂ (+2)' : 'Room Air (0)';
+    const mapStr = mapN !== null ? `, MAP ${mapN} mmHg` : '';
     const timelineEventVitals: TimelineEvent = {
       id: `tl_vitals_${Date.now()}`,
       timestamp: now,
-      actionText: `🩺 บันทึกสัญญาณชีพสิ้นสุดการรักษา (ครั้งที่ ${data.sequence}) — BP ${sbpN}/${!isNaN(parseFloat(dbp)) ? dbp : '—'} mmHg, HR ${hrN} bpm, RR ${rrN}/min, SpO2 ${spo2N}%, Temp ${btN}°C, GCS ${gcsN} (${derivedAVPU}) (NEWS: ${fullNews.totalScore} คะแนน - ${riskLabel})`,
+      actionText: `🩺 บันทึกสัญญาณชีพสิ้นสุดการรักษา (ครั้งที่ ${data.sequence}) — BP ${sbpN}/${!isNaN(dbpN) ? dbp : '—'} mmHg, HR ${hrN} bpm, RR ${rrN}/min, SpO2 ${spo2N}%, Temp ${btN}°C, GCS ${gcsN} (${effectiveAvpu}), ${o2Str}${mapStr} (NEWS: ${fullNews.totalScore} คะแนน)`,
       color: fullNews.totalScore >= 7 ? 'red' : fullNews.totalScore >= 5 ? 'orange' : 'green',
       actor,
+      metadata: { vitals, newsScore: fullNews.totalScore },
     };
 
     const timelineEventComplete: TimelineEvent = {
@@ -218,13 +251,20 @@ export default function AssessmentFormModal() {
     const updatedPatient = {
       ...selectedPatient,
       latestVitals: vitals,
-      newsScore: fullNews.totalScore,
-      treatmentStatus: {
-        ...(selectedPatient.treatmentStatus || {}),
-        treatment_completed: true,
-        treatment_completed_at: now,
-        treatment_completed_by: actor,
-      },
+      latestNewsScore: fullNews.totalScore,
+      latestNewsResult: fullNews,
+      currentRiskLevel: fullNews.riskLevel,
+      hasSepsisAlert: fullNews.totalScore >= 5,
+      treatmentStatus: selectedPatient.treatmentStatus
+        ? {
+          ...selectedPatient.treatmentStatus,
+          hn: selectedPatient.hn,
+          treatment_completed: true,
+          treatment_completed_at: now,
+          treatment_completed_by: actor,
+        }
+        : selectedPatient.treatmentStatus,
+
     };
 
     const updatedPatients = (patients || []).map((p) =>
@@ -239,7 +279,9 @@ export default function AssessmentFormModal() {
         treatmentCompletedAt: now,
         treatmentCompletedBy: actor,
         latestVitals: vitals,
-        newsScore: fullNews.totalScore,
+        latestNewsScore: fullNews.totalScore,
+        latestNewsResult: fullNews,
+        currentRiskLevel: fullNews.riskLevel,
         countdownTimer: updatedTimer,
         assessmentSchedule: updatedSchedule,
         timeline: updatedTimeline,
@@ -251,7 +293,9 @@ export default function AssessmentFormModal() {
           treatmentCompletedAt: now,
           treatmentCompletedBy: actor,
           latestVitals: vitals,
-          newsScore: fullNews.totalScore,
+          latestNewsScore: fullNews.totalScore,
+          latestNewsResult: fullNews,
+          currentRiskLevel: fullNews.riskLevel,
           countdownTimer: updatedTimer,
           assessmentSchedule: updatedSchedule,
           timeline: updatedTimeline,
@@ -294,13 +338,15 @@ export default function AssessmentFormModal() {
     showToast('✅ สิ้นสุดการรักษาและบันทึกข้อมูลไปยัง Dashboard สำเร็จ', 'success');
     closeModal();
     setIsConfirmingComplete(false);
-    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT(''); setGCSInput('');
+    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT('');
+    setSelectedAvpu(null); setOxygenStatus('unassessed');
   };
 
   const handleClose = () => {
     closeModal();
     setIsConfirmingComplete(false);
-    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT(''); setGCSInput('');
+    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT('');
+    setSelectedAvpu(null); setOxygenStatus('unassessed');
   };
 
   const handleInputFocus = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -410,7 +456,7 @@ export default function AssessmentFormModal() {
             background: allFilled ? '#dcfce7' : '#eff6ff',
             borderRadius: '6px', padding: '2px 8px',
           }}>
-            {allFilled ? '✓ ครบ 6 ช่อง' : `${filledCount}/6 ช่อง`}
+            {allFilled ? '✓ ครบ 7 รายการ' : `${filledCount}/7 รายการ`}
           </div>
         </div>
 
@@ -468,6 +514,70 @@ export default function AssessmentFormModal() {
               />
             </div>
 
+            {/* Auto-calculated MAP (Mean Arterial Pressure) */}
+            <div
+              style={{
+                gridColumn: '1 / -1',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                borderRadius: '12px',
+                border: mapN !== null
+                  ? (mapN < 65 ? '1.5px solid #fca5a5' : '1.5px solid #86efac')
+                  : '1.5px dashed #cbd5e1',
+                background: mapN !== null
+                  ? (mapN < 65 ? '#fef2f2' : '#f0fdf4')
+                  : '#f8fafc',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>🩸 ความดันเลือดแดงเฉลี่ย (MAP)</span>
+                  <span style={{
+                    fontSize: '9px', fontWeight: 700, color: '#2563eb',
+                    background: '#dbeafe', padding: '1px 6px', borderRadius: '4px',
+                  }}>
+                    คำนวณอัตโนมัติ
+                  </span>
+                </div>
+                <div style={{ fontSize: '10px', color: '#64748b' }}>
+                  สูตร: (SBP + 2×DBP) ÷ 3 · เกณฑ์เป้าหมาย Sepsis ≥ 65 mmHg
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {mapN !== null ? (
+                  <>
+                    <span style={{
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      color: mapN < 65 ? '#dc2626' : '#16a34a',
+                      background: mapN < 65 ? '#fee2e2' : '#dcfce7',
+                      border: mapN < 65 ? '1px solid #fecaca' : '1px solid #bbf7d0',
+                    }}>
+                      {mapN < 65 ? '⚠️ ต่ำกว่าเกณฑ์ (< 65)' : '✓ ปกติ (≥ 65)'}
+                    </span>
+                    <div style={{
+                      fontSize: '20px',
+                      fontWeight: 900,
+                      fontVariantNumeric: 'tabular-nums',
+                      color: mapN < 65 ? '#dc2626' : '#15803d',
+                    }}>
+                      {mapN} <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>mmHg</span>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>
+                    -- mmHg <span style={{ fontSize: '10px', fontWeight: 400 }}>(กรอก SBP/DBP)</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* HR */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
               <label style={labelStyle}>
@@ -493,52 +603,119 @@ export default function AssessmentFormModal() {
             </div>
           </div>
 
-          {/* GCS / AVPU - full width */}
+          {/* AVPU - full width */}
           <div style={{ marginBottom: '18px' }}>
-            <label style={{ ...labelStyle, marginBottom: '5px' }}>
-              🧠 GCS Score <span style={unitStyle}>(3-15) → แปลง AVPU อัตโนมัติ</span>
-            </label>
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <input
-                type="number"
-                min={3}
-                max={15}
-                value={gcsInput}
-                onChange={(e) => setGCSInput(e.target.value)}
-                placeholder="เช่น 15"
-                style={{ ...inputStyle, flex: 1 }}
-                onFocus={handleInputFocus} onBlur={handleInputBlur}
-              />
-              {/* Auto-derived AVPU badge */}
-              {!isNaN(gcsN) && gcsN >= 3 && gcsN <= 15 && (() => {
-                const derivedAVPU = gcsToAVPU(gcsN);
-                const avpuConfig: Record<string, { label: string; desc: string; color: string; score: number }> = {
-                  A: { label: 'A', desc: 'Alert', color: '#22c55e', score: 0 },
-                  V: { label: 'V', desc: 'Voice', color: '#f59e0b', score: 3 },
-                  P: { label: 'P', desc: 'Pain', color: '#f97316', score: 3 },
-                  U: { label: 'U', desc: 'Unresponsive', color: '#ef4444', score: 3 },
-                };
-                const cfg = avpuConfig[derivedAVPU];
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <label style={labelStyle}>
+                🧠 ระดับความรู้สึกตัว (AVPU)
+              </label>
+              {selectedAvpu ? (
+                (() => {
+                  const avpuConfig: Record<string, { label: string; desc: string; color: string; score: number }> = {
+                    A: { label: 'A', desc: 'Alert', color: '#22c55e', score: 0 },
+                    V: { label: 'V', desc: 'Voice', color: '#f59e0b', score: 3 },
+                    P: { label: 'P', desc: 'Pain', color: '#f97316', score: 3 },
+                    U: { label: 'U', desc: 'Unresponsive', color: '#ef4444', score: 3 },
+                  };
+                  const cfg = avpuConfig[selectedAvpu] || avpuConfig.A;
+                  return (
+                    <span style={{
+                      fontSize: '10px', fontWeight: 700, color: cfg.color,
+                      background: `${cfg.color}15`, border: `1px solid ${cfg.color}`,
+                      borderRadius: '6px', padding: '1px 8px',
+                    }}>
+                      {cfg.label} ({cfg.desc}: +{cfg.score} คะแนน)
+                    </span>
+                  );
+                })()
+              ) : (
+                <span style={{ fontSize: '10px', color: '#d97706', fontWeight: 600 }}>
+                  รอเลือก AVPU
+                </span>
+              )}
+            </div>
+
+            {/* AVPU explicit choice pills */}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {(['A', 'V', 'P', 'U'] as AVPULevel[]).map((lvl) => {
+                const isSelected = selectedAvpu === lvl;
                 return (
-                  <div style={{
-                    padding: '8px 14px', borderRadius: '12px',
-                    border: `2px solid ${cfg.color}`,
-                    background: `${cfg.color}10`,
-                    textAlign: 'center', minWidth: '90px',
-                    flexShrink: 0,
-                  }}>
-                    <div style={{ fontSize: '18px', fontWeight: 900, color: cfg.color, lineHeight: 1 }}>
-                      {cfg.label}
-                    </div>
-                    <div style={{ fontSize: '9px', fontWeight: 600, color: cfg.color, marginTop: '3px' }}>
-                      {cfg.desc} (+{cfg.score})
-                    </div>
-                  </div>
+                  <button
+                    key={lvl}
+                    type="button"
+                    onClick={() => setSelectedAvpu(lvl)}
+                    style={{
+                      flex: 1,
+                      padding: '8px 8px',
+                      borderRadius: '10px',
+                      border: isSelected ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                      background: isSelected ? '#eff6ff' : '#f8fafc',
+                      color: isSelected ? '#1d4ed8' : '#475569',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    [{lvl}] {lvl === 'A' ? 'Alert (0)' : lvl === 'V' ? 'Voice (+3)' : lvl === 'P' ? 'Pain (+3)' : 'Unresp (+3)'}
+                  </button>
                 );
-              })()}
+              })}
             </div>
             <div style={{ fontSize: '9px', color: '#94a3b8', marginTop: '4px' }}>
-              GCS 15 = A (0 คะแนน) | GCS 9-14 = V (+3) | GCS 4-8 = P (+3) | GCS 3 = U (+3)
+              เลือกระดับความรู้สึกตัวตามเกณฑ์ NEWS 2012 (A = 0 คะแนน, V/P/U = 3 คะแนน)
+            </div>
+          </div>
+
+          {/* Supplemental Oxygen 1-click Toggle */}
+          <div style={{ marginBottom: '18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
+              <label style={labelStyle}>
+                🌬️ การได้รับออกซิเจนเสริม (Supplemental O₂)
+              </label>
+              {oxygenStatus === 'unassessed' && (
+                <span style={{ fontSize: '10px', color: '#d97706', fontWeight: 600 }}>
+                  รอเลือกสถานะ O₂
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setOxygenStatus('room_air')}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  borderRadius: '10px',
+                  border: oxygenStatus === 'room_air' ? '2px solid #10b981' : '1px solid #cbd5e1',
+                  background: oxygenStatus === 'room_air' ? '#ecfdf5' : '#ffffff',
+                  color: oxygenStatus === 'room_air' ? '#047857' : '#64748b',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                🌿 ไม่ได้รับออกซิเจนเสริม (0 คะแนน)
+              </button>
+              <button
+                type="button"
+                onClick={() => setOxygenStatus('supplemental')}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  borderRadius: '10px',
+                  border: oxygenStatus === 'supplemental' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                  background: oxygenStatus === 'supplemental' ? '#f0f9ff' : '#ffffff',
+                  color: oxygenStatus === 'supplemental' ? '#0369a1' : '#64748b',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                💨 ได้รับออกซิเจนเสริม (+2 คะแนน)
+              </button>
             </div>
           </div>
 
@@ -612,10 +789,10 @@ export default function AssessmentFormModal() {
               <span style={{ fontSize: '16px', flexShrink: 0 }}>⚠️</span>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#b45309' }}>
-                  ยังกรอกข้อมูลไม่ครบถ้วน ({filledCount}/6 ช่อง)
+                  ยังกรอกข้อมูลไม่ครบถ้วน ({filledCount}/7 รายการ)
                 </div>
                 <div style={{ fontSize: '9.5px', color: '#d97706', marginTop: '1px' }}>
-                  กรุณากรอกสัญญาณชีพให้ครบทุกช่องเพื่อคำนวณคะแนน NEWS และบันทึกข้อมูล
+                  กรุณากรอกสัญญาณชีพ เลือก AVPU และระบุการได้รับออกซิเจนเสริมให้ครบทุกช่องเพื่อคำนวณคะแนน NEWS 2012
                 </div>
               </div>
             </div>

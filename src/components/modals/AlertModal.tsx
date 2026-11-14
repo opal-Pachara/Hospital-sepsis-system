@@ -77,19 +77,15 @@ export default function AlertModal() {
     // Switch context to target patient
     selectPatient(targetPatientId);
 
-    // Check if countdown is already running for this target patient strictly
-    const existingTimer = targetPatientId ? useRTSASStore.getState().patientData[targetPatientId]?.countdownTimer : undefined;
-    const alreadyRunning = Boolean(
-      existingTimer?.isActive ||
+    // Note (Principle 3): Acknowledging a NEWS alert NEVER starts the 60-minute Sepsis bundle countdown.
+    // The 60-minute timer starts only when the doctor explicitly confirms Sepsis in Phase 2.
+    const alreadyLogged = Boolean(
+      targetPatient?.treatmentStatus?.acknowledged ||
       targetPatient?.treatmentStatus?.countdown_started_at
     );
 
-    if (!alreadyRunning) {
-      // Start 60-minute bundle countdown immediately
+    if (!alreadyLogged) {
       const nowIso = new Date().toISOString();
-      useRTSASStore.getState().startCountdown(nowIso, targetPatientId);
-
-      // Auto-record visit time + NEWS calculation in timeline with real timestamps
       const patient = targetPatient;
       const newsScore = patient?.latestNewsScore ?? alertNewsScore ?? 0;
       const riskLevel = patient?.currentRiskLevel ?? 'low';
@@ -109,7 +105,7 @@ export default function AlertModal() {
 
       const calcIso = patient?.latestNewsResult?.calculatedAt || nowIso;
       useRTSASStore.getState().addTimelineEvent(
-        `🧮 ระบบคำนวณ NEWS Score = ${newsScore} (${riskLevel === 'high' ? 'เสี่ยงสูง' : riskLevel === 'medium' ? 'เสี่ยงปานกลาง' : 'เสี่ยงต่ำ'})`,
+        `🧮 ระบบคำนวณ NEWS Score = ${newsScore}${patient?.latestNewsResult?.isComplete === false ? ' (ข้อมูลยังไม่ครบ)' : ''} (${riskLevel === 'high' ? 'เสี่ยงสูง' : riskLevel === 'medium' ? 'เสี่ยงปานกลาง' : 'เสี่ยงต่ำ'})`,
         newsScore >= 5 ? 'red' : 'orange',
         'ระบบ RTSAS',
         undefined,
@@ -127,9 +123,11 @@ export default function AlertModal() {
     advanceQueue();
   };
 
-  // Build breakdown rows from patient's NEWS result
+  // Build breakdown rows from patient's NEWS result (exclude unassessed O₂)
   const breakdownItems = patient?.latestNewsResult?.breakdown
-    .filter((p) => p.parameter !== 'oxygenSupplementation') || [];
+    .filter((p) =>
+      !(p.parameter === 'oxygenSupplementation' && (p.displayValue.includes('ยังไม่') || p.displayValue.includes('รอ')))
+    ) || [];
 
   return (
     <div
@@ -270,17 +268,36 @@ export default function AlertModal() {
               <div style={{ fontSize: '13px', fontWeight: 800, color: '#dc2626', marginTop: '3px' }}>
                 ⚠ เสี่ยงติดเชื้อในกระแสเลือด
               </div>
+              {patient?.latestNewsResult?.isComplete === false && (
+                <div style={{ fontSize: '10px', fontWeight: 600, color: '#b45309', marginTop: '2px' }}>
+                  ⚠️ ข้อมูล AVPU / O₂ ยังไม่ครบถ้วน (แจ้งเตือนทันทีจากคะแนนที่มี ≥ 5)
+                </div>
+              )}
               {/* Parameter breakdown chips */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '8px' }}>
-                {breakdownItems.map((p) => (
-                  <span key={p.parameter} style={{
-                    fontSize: '9px', fontWeight: 600, color: '#dc2626',
-                    background: '#fff', border: '1px solid #fecaca', borderRadius: '6px',
-                    padding: '2px 6px', whiteSpace: 'nowrap',
-                  }}>
-                    {p.displayValue} <span style={{ opacity: 0.7 }}>+{p.score}</span>
-                  </span>
-                ))}
+                {breakdownItems.map((p) => {
+                  const isUnassessed =
+                    p.displayValue.includes('รอประเมิน') ||
+                    p.displayValue.includes('ยังไม่ประเมิน') ||
+                    p.displayValue.includes('ยังไม่ระบุ') ||
+                    p.displayValue.includes('รอเลือก');
+                  return (
+                    <span key={p.parameter} style={{
+                      fontSize: '9px',
+                      fontWeight: 600,
+                      color: isUnassessed ? '#64748b' : '#dc2626',
+                      background: isUnassessed ? '#f8fafc' : '#fff',
+                      border: `1px solid ${isUnassessed ? '#cbd5e1' : '#fecaca'}`,
+                      borderRadius: '6px',
+                      padding: '2px 6px',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {isUnassessed
+                        ? `${p.parameter === 'avpu' ? 'AVPU: ยังไม่ประเมิน' : 'O₂: ยังไม่ระบุ'} (—)`
+                        : <>{p.displayValue} <span style={{ opacity: 0.7 }}>+{p.score}</span></>}
+                    </span>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -298,8 +315,8 @@ export default function AlertModal() {
               borderRadius: '12px 0 0 12px',
             }} />
             <div style={{ paddingLeft: '10px', fontSize: '12px', color: '#475569', lineHeight: 1.8 }}>
-              <strong style={{ color: '#ea580c' }}>เกณฑ์:</strong> NEWS ≥ 5 → เสี่ยงติดเชื้อในกระแสเลือด<br />
-              <strong style={{ color: '#ea580c' }}>ขั้นตอนต่อไป:</strong> ประเมินซ้ำที่จุดคัดแยก → นำเข้าห้อง ER → รายงานแพทย์เวรทันที
+              <strong style={{ color: '#ea580c' }}>เกณฑ์:</strong> NEWS ≥ 5 (หรือคะแนนจากองค์ประกอบที่ทราบแล้ว ≥ 5) → เสี่ยงติดเชื้อในกระแสเลือด — แจ้งเตือนทันที<br />
+              <strong style={{ color: '#ea580c' }}>ขั้นตอนต่อไป:</strong> ประเมิน AVPU / O₂ ให้ครบถ้วน → นำเข้าห้อง ER → รายงานแพทย์เวร <strong>(เริ่มจับเวลา 60 นาทีเมื่อแพทย์ยืนยัน Sepsis ใน Phase 2)</strong>
             </div>
           </div>
 

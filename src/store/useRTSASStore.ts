@@ -22,8 +22,10 @@ import type {
   ChecklistItemStatus,
   TimelineEventColor,
   TreatmentStatus,
-  gcsToAVPU,
+  AVPULevel,
+  OxygenStatus,
 } from '../types';
+import { gcsToAVPU, calculateMAP } from '../types';
 import {
   calculateNEWS,
   generateAssessmentSchedule,
@@ -32,7 +34,6 @@ import {
 } from '../utils/newsCalculator';
 import { maskHN } from '../utils/hnMask';
 import { playAlertChime } from '../utils/alertSound';
-import { MOCK_PATIENTS } from '../data/mockData';
 import {
   evaluatePatientTreatmentStatus,
   auditPatientMemory,
@@ -470,6 +471,9 @@ export interface RTSASState {
   selectPatient: (patientId: string | null, isHistoricalArchive?: boolean) => void;
   selectPatientAsync: (patientId: string, isHistoricalArchive?: boolean) => Promise<Patient | null>;
   updatePatientVitals: (patientId: string, vitals: VitalSigns) => void;
+  confirmAlert: (patientId: string) => Promise<void>;
+  assessAVPU: (patientId: string, avpu: AVPULevel, supplementalOxygen?: boolean) => Promise<void>;
+  toggleOxygenSupplementation: (patientId: string, supplemental?: boolean) => Promise<void>;
 
   // --- Checklist Actions ---
   completeChecklistItem: (
@@ -548,7 +552,7 @@ export const useRTSASStore = create<RTSASState>()(
   persist(
     subscribeWithSelector((set, get) => ({
       // ---- Initial State ----
-      patients: MOCK_PATIENTS,
+      patients: [],
       selectedPatient: null,
       patientData: {},
 
@@ -759,6 +763,17 @@ export const useRTSASStore = create<RTSASState>()(
         dataToLoad.timeline = ensureInitialTimelineEvents(patient, dataToLoad.timeline);
         newPatientDataMap[patientId] = dataToLoad;
 
+        const shouldPromptAdditional =
+          !isHistorical &&
+          !dataToLoad.treatmentCompleted &&
+          !dataToLoad.sepsisRuledOut &&
+          state.ui.modal.activeModal === null &&
+          patient &&
+          Boolean(
+            patient.latestNewsResult?.needsAvpuPrompt ||
+            patient.latestNewsResult?.needsOxygenPrompt
+          );
+
         set({
           selectedPatient: patient,
           patientData: newPatientDataMap,
@@ -771,7 +786,21 @@ export const useRTSASStore = create<RTSASState>()(
           ruledOutBy: dataToLoad.ruledOutBy,
           treatmentCompleted: dataToLoad.treatmentCompleted,
           treatmentCompletedAt: dataToLoad.treatmentCompletedAt,
-          ui: { ...state.ui, selectedPatientId: patient ? patient.id : patientId },
+          ui: {
+            ...state.ui,
+            selectedPatientId: patient ? patient.id : patientId,
+            modal: shouldPromptAdditional && patient
+              ? {
+                  activeModal: 'avpu_assessment',
+                  modalData: {
+                    patientId: patient.id,
+                    hn: patient.hn,
+                    gcs: patient.latestVitals.gcs,
+                    patientName: patient.fullName,
+                  },
+                }
+              : state.ui.modal,
+          },
         });
       },
 
@@ -893,9 +922,7 @@ export const useRTSASStore = create<RTSASState>()(
                 latestNewsScore: newsResult.totalScore,
                 latestNewsResult: newsResult,
                 currentRiskLevel: newsResult.riskLevel,
-                hasSepsisAlert:
-                  newsResult.totalScore >= 5 ||
-                  newsResult.hasSingleParameterAlert,
+                hasSepsisAlert: newsResult.totalScore >= 5,
               }
               : p
           ),
@@ -908,14 +935,12 @@ export const useRTSASStore = create<RTSASState>()(
                 latestNewsScore: newsResult.totalScore,
                 latestNewsResult: newsResult,
                 currentRiskLevel: newsResult.riskLevel,
-                hasSepsisAlert:
-                  newsResult.totalScore >= 5 ||
-                  newsResult.hasSingleParameterAlert,
+                hasSepsisAlert: newsResult.totalScore >= 5,
               }
               : state.selectedPatient,
         }));
 
-        // Auto-open alert modal for high NEWS scores
+        // Auto-open alert modal for high NEWS scores (>= 5)
         if (newsResult.totalScore >= 5) {
           get().openModal('alert', {
             newsScore: newsResult.totalScore,
@@ -923,6 +948,300 @@ export const useRTSASStore = create<RTSASState>()(
             patientName:
               get().patients.find((p) => p.id === patientId)?.fullName ?? '',
           });
+        }
+      },
+
+      confirmAlert: async (patientId) => {
+        const patient = get().patients.find((p) => p.id === patientId || p.hn === patientId);
+        if (!patient) return;
+
+        const updatedVitals: VitalSigns = {
+          ...patient.latestVitals,
+          avpu: 'A',
+          avpuStatus: 'confirmed',
+          isAvpuConfirmed: true,
+        };
+        const newsResult = calculateNEWS(updatedVitals);
+
+        set((state) => ({
+          patients: state.patients.map((p) =>
+            p.id === patient.id
+              ? {
+                ...p,
+                latestVitals: updatedVitals,
+                latestNewsScore: newsResult.totalScore,
+                latestNewsResult: newsResult,
+                currentRiskLevel: newsResult.riskLevel,
+                avpuStatus: 'confirmed',
+                assessedAvpu: 'A',
+                treatmentStatus: p.treatmentStatus
+                  ? {
+                    ...p.treatmentStatus,
+                    avpu_status: 'confirmed',
+                    assessed_avpu: 'A',
+                    avpu_assessed_at: new Date().toISOString(),
+                  }
+                  : p.treatmentStatus,
+                hasSepsisAlert: newsResult.totalScore >= 5,
+              }
+              : p
+          ),
+          selectedPatient:
+            state.selectedPatient?.id === patient.id
+              ? {
+                ...state.selectedPatient,
+                latestVitals: updatedVitals,
+                latestNewsScore: newsResult.totalScore,
+                latestNewsResult: newsResult,
+                currentRiskLevel: newsResult.riskLevel,
+                avpuStatus: 'confirmed',
+                assessedAvpu: 'A',
+                treatmentStatus: state.selectedPatient.treatmentStatus
+                  ? {
+                    ...state.selectedPatient.treatmentStatus,
+                    avpu_status: 'confirmed',
+                    assessed_avpu: 'A',
+                    avpu_assessed_at: new Date().toISOString(),
+                  }
+                  : state.selectedPatient.treatmentStatus,
+                hasSepsisAlert: newsResult.totalScore >= 5,
+              }
+              : state.selectedPatient,
+        }));
+
+
+        get().addTimelineEvent(
+          `🧠 ยืนยันระดับความรู้สึกตัว Alert (A) (GCS 15) — NEWS: ${newsResult.totalScore} คะแนน`,
+          newsResult.totalScore >= 5 ? 'red' : 'green',
+          'พยาบาลวิชาชีพ',
+          { avpu: 'A', score: newsResult.totalScore },
+          undefined,
+          patient.id
+        );
+
+        try {
+          await fetch('/api/treatment-status/avpu', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              hn: patient.hn,
+              avpu: 'A',
+              vn: patient.vn,
+              current_gcs: 15,
+            }),
+          });
+        } catch (e) {
+          console.error('[RTSAS] Failed to sync AVPU confirmation to backend:', e);
+        }
+      },
+
+      assessAVPU: async (patientId, avpu, supplementalOxygen) => {
+        const patient = get().patients.find((p) => p.id === patientId || p.hn === patientId);
+        if (!patient) return;
+
+        const targetO2: OxygenStatus =
+          supplementalOxygen !== undefined
+            ? (supplementalOxygen ? 'supplemental' : 'room_air')
+            : patient.latestVitals.oxygenSupplementation;
+
+        const updatedVitals: VitalSigns = {
+          ...patient.latestVitals,
+          avpu,
+          avpuStatus: 'confirmed',
+          isAvpuConfirmed: true,
+          oxygenSupplementation: targetO2,
+        };
+        const newsResult = calculateNEWS(updatedVitals);
+        const nowIso = new Date().toISOString();
+
+        set((state) => ({
+          patients: state.patients.map((p) =>
+            p.id === patient.id
+              ? {
+                ...p,
+                latestVitals: updatedVitals,
+                latestNewsScore: newsResult.totalScore,
+                latestNewsResult: newsResult,
+                currentRiskLevel: newsResult.riskLevel,
+                avpuStatus: 'confirmed',
+                assessedAvpu: avpu,
+                treatmentStatus: p.treatmentStatus
+                  ? {
+                    ...p.treatmentStatus,
+                    avpu_status: 'confirmed',
+                    assessed_avpu: avpu,
+                    avpu_assessed_at: nowIso,
+                    ...(supplementalOxygen !== undefined ? { supplemental_oxygen: targetO2 } : {}),
+                  }
+                  : p.treatmentStatus,
+                hasSepsisAlert: newsResult.totalScore >= 5,
+              }
+              : p
+          ),
+          selectedPatient:
+            state.selectedPatient?.id === patient.id
+              ? {
+                ...state.selectedPatient,
+                latestVitals: updatedVitals,
+                latestNewsScore: newsResult.totalScore,
+                latestNewsResult: newsResult,
+                currentRiskLevel: newsResult.riskLevel,
+                avpuStatus: 'confirmed',
+                assessedAvpu: avpu,
+                treatmentStatus: state.selectedPatient.treatmentStatus
+                  ? {
+                    ...state.selectedPatient.treatmentStatus,
+                    avpu_status: 'confirmed',
+                    assessed_avpu: avpu,
+                    avpu_assessed_at: nowIso,
+                    ...(supplementalOxygen !== undefined ? { supplemental_oxygen: targetO2 } : {}),
+                  }
+                  : state.selectedPatient.treatmentStatus,
+                hasSepsisAlert: newsResult.totalScore >= 5,
+              }
+              : state.selectedPatient,
+        }));
+
+        const isAbnormal = avpu !== 'A';
+        const o2Suffix =
+          supplementalOxygen !== undefined
+            ? `, ออกซิเจน: ${supplementalOxygen ? 'ได้รับออกซิเจนเสริม (+2)' : 'ไม่ได้รับออกซิเจนเสริม (0)'}`
+            : '';
+        get().addTimelineEvent(
+          `🧠 ประเมินระดับความรู้สึกตัว AVPU: ${avpu} (GCS ${patient.latestVitals.gcs})${o2Suffix} — NEWS: ${newsResult.totalScore} คะแนน`,
+          newsResult.totalScore >= 5 || isAbnormal ? 'red' : 'green',
+          'พยาบาลวิชาชีพ',
+          {
+            avpu,
+            score: newsResult.totalScore,
+            gcs: patient.latestVitals.gcs,
+            ...(supplementalOxygen !== undefined ? { oxygenSupplementation: targetO2 } : {}),
+          },
+          undefined,
+          patient.id
+        );
+
+        if (newsResult.totalScore >= 5) {
+          get().openModal('alert', {
+            hn: patient.hn,
+            newsScore: newsResult.totalScore,
+            riskLevel: newsResult.riskLevel,
+            patientName: patient.fullName,
+          });
+        }
+
+        try {
+          await fetch('/api/treatment-status/avpu', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              hn: patient.hn,
+              avpu,
+              vn: patient.vn,
+              current_gcs: patient.latestVitals.gcs,
+              ...(supplementalOxygen !== undefined ? { supplemental_oxygen: supplementalOxygen } : {}),
+            }),
+          });
+          if (supplementalOxygen !== undefined) {
+            await fetch('/api/treatment-status/oxygen', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                hn: patient.hn,
+                supplemental_oxygen: supplementalOxygen,
+                vn: patient.vn,
+              }),
+            });
+          }
+        } catch (e) {
+          console.error('[RTSAS] Failed to sync AVPU assessment to backend:', e);
+        }
+      },
+
+      toggleOxygenSupplementation: async (patientId, supplemental) => {
+        const patient = get().patients.find((p) => p.id === patientId || p.hn === patientId);
+        if (!patient) return;
+
+        const currentO2 = patient.latestVitals.oxygenSupplementation;
+        const targetO2: OxygenStatus = supplemental !== undefined
+          ? (supplemental ? 'supplemental' : 'room_air')
+          : (currentO2 === 'supplemental' ? 'room_air' : 'supplemental');
+
+        const updatedVitals: VitalSigns = {
+          ...patient.latestVitals,
+          oxygenSupplementation: targetO2,
+        };
+        const newsResult = calculateNEWS(updatedVitals);
+
+        set((state) => ({
+          patients: state.patients.map((p) =>
+            p.id === patient.id
+              ? {
+                ...p,
+                latestVitals: updatedVitals,
+                latestNewsScore: newsResult.totalScore,
+                latestNewsResult: newsResult,
+                currentRiskLevel: newsResult.riskLevel,
+                treatmentStatus: p.treatmentStatus
+                  ? {
+                    ...p.treatmentStatus,
+                    supplemental_oxygen: targetO2,
+                  }
+                  : p.treatmentStatus,
+                hasSepsisAlert: newsResult.totalScore >= 5,
+              }
+              : p
+          ),
+          selectedPatient:
+            state.selectedPatient?.id === patient.id
+              ? {
+                ...state.selectedPatient,
+                latestVitals: updatedVitals,
+                latestNewsScore: newsResult.totalScore,
+                latestNewsResult: newsResult,
+                currentRiskLevel: newsResult.riskLevel,
+                treatmentStatus: state.selectedPatient.treatmentStatus
+                  ? {
+                    ...state.selectedPatient.treatmentStatus,
+                    supplemental_oxygen: targetO2,
+                  }
+                  : state.selectedPatient.treatmentStatus,
+                hasSepsisAlert: newsResult.totalScore >= 5,
+              }
+              : state.selectedPatient,
+        }));
+
+        get().addTimelineEvent(
+          `🔵 บันทึกสถานะออกซิเจนเป็น ${targetO2 === 'supplemental' ? 'ได้รับออกซิเจนเสริม (+2 คะแนน)' : 'ไม่ได้รับออกซิเจนเสริม / Room Air (0 คะแนน)'} — NEWS: ${newsResult.totalScore} คะแนน`,
+          newsResult.totalScore >= 5 ? 'red' : targetO2 === 'supplemental' ? 'blue' : 'gray',
+          'พยาบาลวิชาชีพ',
+          { oxygenSupplementation: targetO2, score: newsResult.totalScore },
+          undefined,
+          patient.id
+        );
+
+        // Point 3: If adding supplemental oxygen causes total score to reach >= 5, trigger Sepsis Alert immediately!
+        if (newsResult.totalScore >= 5) {
+          get().openModal('alert', {
+            hn: patient.hn,
+            newsScore: newsResult.totalScore,
+            riskLevel: newsResult.riskLevel,
+            patientName: patient.fullName,
+          });
+        }
+
+        try {
+          await fetch('/api/treatment-status/oxygen', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              hn: patient.hn,
+              supplemental_oxygen: targetO2 === 'supplemental',
+              vn: patient.vn,
+            }),
+          });
+        } catch (e) {
+          console.error('[RTSAS] Failed to sync Oxygen toggle to backend:', e);
         }
       },
 
@@ -1485,7 +1804,7 @@ export const useRTSASStore = create<RTSASState>()(
           const pHn = targetPatient?.hn || state.selectedPatient?.hn;
 
           // Complete doctor_confirm item only, leaving Phase 1 items untouched for nurse
-          const curData = (pId && updatedPatientData[pId]) || (pHn && updatedPatientData[pHn]);
+          const curData = (pId ? updatedPatientData[pId] : undefined) || (pHn ? updatedPatientData[pHn] : undefined);
           const curChecklist = curData?.checklist || createDefaultChecklist();
           const updatedChecklist = curChecklist.map((phase) => ({
             ...phase,
@@ -1733,7 +2052,7 @@ export const useRTSASStore = create<RTSASState>()(
 
           // 2. Schedule next round chained from completedAt (15m for rounds 2-4, 30m for rounds 5+)
           const intervalMinutes = nextSeq <= 4 ? 15 : 30;
-          const nextScheduledTime = new Date(Date.now() + intervalMinutes * 60 * 1000).toISOString();
+          const nextScheduledTime = new Date(new Date(now).getTime() + intervalMinutes * 60 * 1000).toISOString();
 
           const nextEntryExists = updatedEntries.some((e) => e.sequence === nextSeq);
           if (nextEntryExists) {
@@ -1784,22 +2103,20 @@ export const useRTSASStore = create<RTSASState>()(
         const tempStr = vitals.temperature != null ? vitals.temperature : '—';
         const gcsVal = vitals.gcs != null ? vitals.gcs : '—';
         const avpuVal = vitals.avpu || (typeof vitals.gcs === 'number' ? gcsToAVPU(vitals.gcs) : 'A');
+        const o2Str = vitals.oxygenSupplementation === 'supplemental' ? 'O₂ (+2)' : 'Room Air (0)';
+        const mapVal = vitals.map ?? calculateMAP(vitals.systolicBP, vitals.diastolicBP);
+        const mapStr = mapVal !== null ? `, MAP ${mapVal} mmHg` : '';
 
         const score = newsResult.totalScore;
         let eventColor: TimelineEventColor = 'green';
-        let riskLabel = '🟢 ปกติ — NEWS = 0';
         if (score >= 7) {
           eventColor = 'red';
-          riskLabel = '🔴 สูง — ต้องการการดูแลเร่งด่วน';
         } else if (score >= 5) {
-          eventColor = 'yellow';
-          riskLabel = '🟡 ปานกลาง — ติดตามใกล้ชิด';
-        } else if (score >= 1) {
-          eventColor = 'green';
-          riskLabel = '🟢 ต่ำ-ปานกลาง';
+          eventColor = 'orange';
         }
 
-        const actionText = `🩺 ประเมินสัญญาณชีพ (ครั้งที่ ${seq}) — BP ${sbpStr}/${dbpStr} mmHg, HR ${hrStr} bpm, RR ${rrStr}/min, SpO2 ${spo2Str}%, Temp ${tempStr}°C, GCS ${gcsVal} (${avpuVal}) (NEWS: ${score} คะแนน - ${riskLabel})`;
+
+        const actionText = `🩺 ประเมินสัญญาณชีพ (ครั้งที่ ${seq}) — BP ${sbpStr}/${dbpStr} mmHg, HR ${hrStr} bpm, RR ${rrStr}/min, SpO2 ${spo2Str}%, Temp ${tempStr}°C, GCS ${gcsVal} (${avpuVal}), ${o2Str}${mapStr} (NEWS: ${score} คะแนน)`;
 
         get().addTimelineEvent(
           actionText,
@@ -2153,7 +2470,62 @@ export const useRTSASStore = create<RTSASState>()(
             sepsisRuledOut: status.sepsis_ruled_out !== undefined ? Boolean(status.sepsis_ruled_out) : existingData.sepsisRuledOut,
           };
 
+          // Update patient in patients list
+          const updatedPatients = state.patients.map((p) => {
+            if (p.hn === hn || p.id === patientId) {
+              const newAssessedAvpu = status.assessed_avpu !== undefined ? status.assessed_avpu : p.assessedAvpu;
+              const rawAvpuStatus = status.avpu_status !== undefined ? status.avpu_status : p.avpuStatus;
+              const isConfirmedStatus =
+                p.latestVitals.gcs === 15 ||
+                rawAvpuStatus === 'confirmed' ||
+                (rawAvpuStatus as string) === 'assessed' ||
+                (rawAvpuStatus as string) === 'confirmed_alert' ||
+                Boolean(newAssessedAvpu);
+              const newAvpuStatus = isConfirmedStatus ? 'confirmed' : 'pending_assessment';
+
+              let newO2Status: OxygenStatus = p.latestVitals.oxygenSupplementation;
+              if (status.supplemental_oxygen === true || status.supplemental_oxygen === 'supplemental') {
+                newO2Status = 'supplemental';
+              } else if (status.supplemental_oxygen === false || status.supplemental_oxygen === 'room_air') {
+                newO2Status = 'room_air';
+              } else if (status.supplemental_oxygen === 'unassessed') {
+                newO2Status = 'unassessed';
+              }
+
+              const newVitals: VitalSigns = {
+                ...p.latestVitals,
+                avpu: newAssessedAvpu || (p.latestVitals.gcs === 15 ? 'A' : p.latestVitals.avpu),
+                avpuStatus: newAvpuStatus,
+                isAvpuConfirmed: isConfirmedStatus,
+                oxygenSupplementation: newO2Status,
+              };
+              const nr = calculateNEWS(newVitals);
+
+              return {
+                ...p,
+                treatmentStatus: {
+                  ...(p.treatmentStatus || {}),
+                  ...status,
+                },
+                latestVitals: newVitals,
+                latestNewsScore: nr.totalScore,
+                latestNewsResult: nr,
+                currentRiskLevel: nr.riskLevel,
+                avpuStatus: newAvpuStatus,
+                assessedAvpu: newAssessedAvpu,
+                hasSepsisAlert: nr.totalScore >= 5,
+              };
+            }
+            return p;
+          });
+
+          const updatedSelected = isCurrentlySelected && state.selectedPatient
+            ? (updatedPatients.find((p) => p.id === state.selectedPatient?.id) || state.selectedPatient)
+            : state.selectedPatient;
+
           return {
+            patients: updatedPatients,
+            selectedPatient: updatedSelected,
             patientData: {
               ...state.patientData,
               [patientId]: updatedPatientData,
@@ -2362,6 +2734,56 @@ export const useRTSASStore = create<RTSASState>()(
     })),
     {
       name: 'rtsas-storage',
+      version: 2,
+      migrate: (persistedState: any) => {
+        if (!persistedState) return persistedState;
+        const MOCK_IDS = new Set(['P001', 'P002', 'P003', 'P004']);
+        const isMockPatient = (p: any) =>
+          !p ||
+          MOCK_IDS.has(p.id) ||
+          p.hn === 'HN-660001' ||
+          p.hn === 'HN-660042' ||
+          p.hn === 'HN-660108' ||
+          p.hn === 'HN-660203' ||
+          p.fullName === 'นายสมชาย ใจดี' ||
+          p.fullName === 'นางมาลี สุขสันต์' ||
+          p.fullName === 'นายประเสริฐ มงคล' ||
+          p.fullName === 'นางสาวพิมพ์ลดา วงศ์สกุล';
+
+        if (Array.isArray(persistedState.patients)) {
+          persistedState.patients = persistedState.patients.filter((p: any) => !isMockPatient(p));
+        }
+        if (persistedState.selectedPatient && isMockPatient(persistedState.selectedPatient)) {
+          persistedState.selectedPatient = null;
+        }
+        if (persistedState.patientData && typeof persistedState.patientData === 'object') {
+          for (const key of Object.keys(persistedState.patientData)) {
+            if (MOCK_IDS.has(key) || key === 'HN-660001' || key === 'HN-660042' || key === 'HN-660108' || key === 'HN-660203') {
+              delete persistedState.patientData[key];
+            }
+          }
+        }
+        return persistedState;
+      },
+      onRehydrateStorage: () => (state) => {
+        if (state && Array.isArray(state.patients)) {
+          const MOCK_IDS = new Set(['P001', 'P002', 'P003', 'P004']);
+          const isMock = (p: any) =>
+            !p ||
+            MOCK_IDS.has(p?.id) ||
+            p?.hn === 'HN-660001' ||
+            p?.hn === 'HN-660042' ||
+            p?.hn === 'HN-660108' ||
+            p?.hn === 'HN-660203';
+
+          if (state.patients.some(isMock)) {
+            state.patients = state.patients.filter((p) => !isMock(p));
+          }
+          if (state.selectedPatient && isMock(state.selectedPatient)) {
+            state.selectedPatient = null;
+          }
+        }
+      },
       partialize: (state) => ({
         // Only persist essential state, avoid UI state that might cause issues on reload
         patients: state.patients,

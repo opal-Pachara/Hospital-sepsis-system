@@ -204,14 +204,22 @@ def get_log_summary() -> Dict[str, Any]:
 
 
 def clear_logs() -> int:
-    """Clear all timestamp logs from SQLite database."""
+    """Clear all timestamp logs from SQLite database and reset autoincrement ID."""
     with _lock:
         conn = get_connection()
         try:
             cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM timestamp_logs;")
+            row = cur.fetchone()
+            count = row[0] if row else 0
+
             cur.execute("DELETE FROM timestamp_logs;")
+            try:
+                cur.execute("DELETE FROM sqlite_sequence WHERE name='timestamp_logs';")
+            except Exception:
+                pass
             conn.commit()
-            return cur.rowcount
+            return count
         except Exception as e:
             logger.error(f"Failed to clear timestamp_logs: {e}")
             return 0

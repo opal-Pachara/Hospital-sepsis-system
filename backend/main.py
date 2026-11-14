@@ -294,14 +294,9 @@ async def reconnect_db_route():
 )
 async def clear_logs_route():
     """Clear all system logs."""
-    from .log_service import clear_logs, record_log
+    from .log_service import clear_logs
     cleared = clear_logs()
-    record_log(
-        "Note",
-        f"Admin Action: Cleared {cleared} diagnostic log entries.",
-        component="System_Logs",
-        details={"cleared_count": cleared, "cleared_at": datetime.now().isoformat()}
-    )
+    logger.info(f"Admin Action: Cleared {cleared} diagnostic log entries.")
     return {"success": True, "cleared_count": cleared}
 
 
@@ -462,18 +457,19 @@ async def get_patients(refresh: bool = False):
     if refresh:
         await process_vitals()
 
+    from .treatment_service import get_all_treatment_statuses
+    treatment_statuses = await get_all_treatment_statuses()
+
     # If cache is empty (e.g., first request before scheduler ran), fetch immediately
     cache = get_patients_cache()
     if not cache:
         rows = await fetch_vitals_from_db()
-        cache = build_patient_list(rows)
+        cache = build_patient_list(rows, treatment_statuses)
 
     # Sort by NEWS score descending
     sorted_patients = sorted(cache, key=lambda p: p.get("news_result", {}).get("totalScore", 0), reverse=True)
 
     # Attach centralized treatment_status from MySQL
-    from .treatment_service import get_all_treatment_statuses
-    treatment_statuses = await get_all_treatment_statuses()
     for p in sorted_patients:
         hn = str(p.get("hn", ""))
         p["treatment_status"] = treatment_statuses.get(hn)
@@ -774,6 +770,18 @@ class DoctorConfirmRequest(BaseModel):
     physician: Optional[str] = None
     confirmed_at: Optional[str] = None
 
+class AVPUAssessmentRequest(BaseModel):
+    hn: str
+    avpu: str  # 'A', 'V', 'P', 'U'
+    vn: Optional[str] = None
+    current_gcs: Optional[int] = None
+    supplemental_oxygen: Optional[bool] = None
+
+class SupplementalOxygenRequest(BaseModel):
+    hn: str
+    supplemental_oxygen: bool
+    vn: Optional[str] = None
+
 @app.get("/api/treatment-status")
 async def get_all_treatment_status_route():
     from .treatment_service import get_all_treatment_statuses
@@ -881,6 +889,77 @@ async def clear_treated_route():
         "message": f"Cleared {len(cleared_hns)} completed treatment record(s).",
         "cleared_hns": cleared_hns
     })
+
+
+@app.post("/api/treatment-status/avpu")
+async def avpu_assessment_route(body: AVPUAssessmentRequest):
+    from .treatment_service import set_avpu_assessment
+    from .scheduler import process_vitals
+    status = await set_avpu_assessment(body.hn, body.avpu, body.vn, body.current_gcs, body.supplemental_oxygen)
+    await process_vitals(trigger="avpu_assessment")
+    await broadcast_message(json.dumps({
+        "type": "TREATMENT_STATUS_UPDATE",
+        "action": "avpu_assessed",
+        "hn": body.hn,
+        "avpu": body.avpu,
+        "data": status
+    }))
+    return JSONResponse(content={"status": "saved", "data": status})
+
+
+@app.post("/api/treatment-status/oxygen")
+async def oxygen_toggle_route(body: SupplementalOxygenRequest):
+    from .treatment_service import toggle_oxygen_supplementation
+    from .scheduler import process_vitals
+    status = await toggle_oxygen_supplementation(body.hn, body.supplemental_oxygen, body.vn)
+    await process_vitals(trigger="oxygen_toggle")
+    await broadcast_message(json.dumps({
+        "type": "TREATMENT_STATUS_UPDATE",
+        "action": "oxygen_updated",
+        "hn": body.hn,
+        "supplemental_oxygen": body.supplemental_oxygen,
+        "data": status
+    }))
+    return JSONResponse(content={"status": "saved", "data": status})
+
+
+@app.post("/api/patients/{hn}/avpu")
+async def patient_avpu_route(hn: str, body: Dict[str, Any]):
+    from .treatment_service import set_avpu_assessment
+    from .scheduler import process_vitals
+    avpu = body.get("avpu", "A")
+    vn = body.get("vn")
+    current_gcs = body.get("current_gcs")
+    supp_o2 = body.get("supplemental_oxygen")
+    status = await set_avpu_assessment(hn, avpu, vn, current_gcs, supp_o2)
+    await process_vitals(trigger="avpu_assessment")
+    await broadcast_message(json.dumps({
+        "type": "TREATMENT_STATUS_UPDATE",
+        "action": "avpu_assessed",
+        "hn": hn,
+        "avpu": avpu,
+        "data": status
+    }))
+    return JSONResponse(content={"status": "saved", "data": status})
+
+
+@app.post("/api/patients/{hn}/oxygen")
+async def patient_oxygen_route(hn: str, body: Dict[str, Any]):
+    from .treatment_service import toggle_oxygen_supplementation
+    from .scheduler import process_vitals
+    supp_o2 = bool(body.get("supplemental_oxygen", False))
+    vn = body.get("vn")
+    status = await toggle_oxygen_supplementation(hn, supp_o2, vn)
+    await process_vitals(trigger="oxygen_toggle")
+    await broadcast_message(json.dumps({
+        "type": "TREATMENT_STATUS_UPDATE",
+        "action": "oxygen_updated",
+        "hn": hn,
+        "supplemental_oxygen": supp_o2,
+        "data": status
+    }))
+    return JSONResponse(content={"status": "saved", "data": status})
+
 
 
 # ---------------------------------------------------------------------------

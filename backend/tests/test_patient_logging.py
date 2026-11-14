@@ -62,7 +62,7 @@ class TestPatientLogging(unittest.TestCase):
         msg = log_entry["message"]
         self.assertTrue(msg.startswith("นำเข้าข้อมูลผู้ป่วยใหม่ HN 000559689 (VN: 690916212151): สัญญาณชีพ BP 86/52, HR 126, RR 26, BT 39.4°C, SpO2 89%, GCS 13"))
         self.assertIn("คำนวณ NEWS เสร็จเวลา", msg)
-        self.assertIn("ได้ 16 คะแนน [HIGH RISK]", msg)
+        self.assertIn("ได้ 13 คะแนน [HIGH RISK]", msg)
 
         # 2. Check JSON details structure
         d = log_entry["details"]
@@ -79,7 +79,7 @@ class TestPatientLogging(unittest.TestCase):
         self.assertEqual(d["vitals"]["spo2"], 89)
         self.assertEqual(d["vitals"]["gcs"], 13)
         self.assertEqual(d["vitals_summary"], "BP 86/52, HR 126, RR 26, BT 39.4°C, SpO2 89%, GCS 13")
-        self.assertEqual(d["news_score"], 16)
+        self.assertEqual(d["news_score"], 13)
         self.assertEqual(d["risk_level"], "high")
         self.assertTrue(d["is_complete"])
         self.assertTrue(d["has_single_alert"])

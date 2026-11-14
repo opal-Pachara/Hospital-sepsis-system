@@ -80,16 +80,116 @@ class TestServicesNEWS(unittest.TestCase):
             'temperature': 39.5, # 2
             'sbp': 85,           # 3
             'heart_rate': 135,   # 3
-            'gcs': 13,           # 3
+            'gcs': 13,
+            'assessed_avpu': 'V', # 3
+            'supplemental_oxygen': 0,
         }
         res = calculate_news_from_row(row)
         self.assertEqual(res.totalScore, 17)
         self.assertEqual(res.riskLevel, 'high')
         self.assertTrue(res.hasSingleParameterAlert)
         self.assertEqual(res.missingDataCount, 0)
+        self.assertTrue(res.isComplete)
+
+    def test_calculate_news_unassessed_gcs_less_than_15_high_risk(self):
+        # Other vitals sum to 14 (>= 5), GCS 13 is unassessed
+        # Safety rule: triggers High Risk immediately, but isComplete is False
+        row = {
+            'resp_rate': 28,     # 3
+            'spo2': 90,          # 3
+            'temperature': 39.5, # 2
+            'sbp': 85,           # 3
+            'heart_rate': 135,   # 3
+            'gcs': 13,           # unassessed
+        }
+        res = calculate_news_from_row(row)
+        self.assertEqual(res.totalScore, 14)
+        self.assertEqual(res.riskLevel, 'high')
+        self.assertTrue(res.hasSingleParameterAlert)
+        self.assertFalse(res.isComplete)
+        self.assertFalse(res.needsAvpuPrompt)
+        self.assertIn("รอประเมิน AVPU (GCS < 15)", res.missingParameters)
+
+    def test_calculate_news_unconfirmed_gcs_less_than_15_incomplete(self):
+        # Other vitals sum to 2 (< 5), GCS 14 is unassessed
+        # Clinical rule: cannot conclude low risk / complete, needsAvpuPrompt = True
+        row = {
+            'resp_rate': 22,     # 2
+            'spo2': 98,          # 0
+            'temperature': 37.0, # 0
+            'sbp': 120,          # 0
+            'heart_rate': 75,    # 0
+            'gcs': 14,           # unassessed
+        }
+        res = calculate_news_from_row(row)
+        self.assertEqual(res.totalScore, 2)
+        self.assertEqual(res.riskLevel, 'incomplete')
+        self.assertFalse(res.isComplete)
+        self.assertTrue(res.needsAvpuPrompt)
+
+    def test_calculate_news_gcs_15_auto_confirmed_with_unassessed_oxygen_tiers(self):
+        # Tier 1: GCS 15 (auto 0 pts), score 2 (0-2 range), O2 unassessed -> low risk, no prompt, isComplete=False
+        row_0_2 = {
+            'resp_rate': 22,     # 2
+            'spo2': 98,          # 0
+            'temperature': 37.0, # 0
+            'sbp': 120,          # 0
+            'heart_rate': 75,    # 0
+            'gcs': 15,           # auto A (0)
+        }
+        res_0_2 = calculate_news_from_row(row_0_2)
+        self.assertEqual(res_0_2.totalScore, 2)
+        self.assertEqual(res_0_2.riskLevel, 'low')
+        self.assertFalse(res_0_2.isComplete)
+        self.assertFalse(res_0_2.needsOxygenPrompt)
+
+        # Tier 2: GCS 15 (auto 0 pts), score 3 (3-4 range), O2 unassessed -> incomplete, needsOxygenPrompt=True
+        row_3_4 = {
+            'resp_rate': 26,     # 3
+            'spo2': 98,          # 0
+            'temperature': 37.0, # 0
+            'sbp': 120,          # 0
+            'heart_rate': 75,    # 0
+            'gcs': 15,           # auto A (0)
+        }
+        res_3_4 = calculate_news_from_row(row_3_4)
+        self.assertEqual(res_3_4.totalScore, 3)
+        self.assertEqual(res_3_4.riskLevel, 'incomplete')
+        self.assertFalse(res_3_4.isComplete)
+        self.assertTrue(res_3_4.needsOxygenPrompt)
+
+        # Tier 3: GCS 15 (auto 0 pts), score 5 (>= 5), O2 unassessed -> high risk immediately, needsOxygenPrompt=False
+        row_5_plus = {
+            'resp_rate': 26,     # 3
+            'spo2': 92,          # 2
+            'temperature': 37.0, # 0
+            'sbp': 120,          # 0
+            'heart_rate': 75,    # 0
+            'gcs': 15,           # auto A (0)
+        }
+        res_5_plus = calculate_news_from_row(row_5_plus)
+        self.assertEqual(res_5_plus.totalScore, 5)
+        self.assertEqual(res_5_plus.riskLevel, 'high')
+        self.assertFalse(res_5_plus.isComplete)
+        self.assertFalse(res_5_plus.needsOxygenPrompt)
+
+    def test_calculate_news_supplemental_oxygen(self):
+        row = {
+            'resp_rate': 18,     # 0
+            'spo2': 98,          # 0
+            'temperature': 37.0, # 0
+            'sbp': 120,          # 0
+            'heart_rate': 75,    # 0
+            'gcs': 15,
+            'supplemental_oxygen': 1, # +2
+        }
+        res = calculate_news_from_row(row)
+        self.assertEqual(res.totalScore, 2)
+        self.assertEqual(res.riskLevel, 'low')
+        self.assertTrue(res.isComplete)
 
     def test_calculate_news_from_row_single_alert_escalation(self):
-        # Total score is 3 (less than 5), but one score is 3 → riskLevel must be low_medium
+        # Total score is 3 (less than 5), one score is 3, and O2 is assessed as 0 (Room Air) -> riskLevel must be low_medium
         row = {
             'resp_rate': 18,     # 0
             'spo2': 98,          # 0
@@ -97,11 +197,13 @@ class TestServicesNEWS(unittest.TestCase):
             'sbp': 85,           # 3 (critical!)
             'heart_rate': 75,    # 0
             'gcs': 15,           # 0
+            'supplemental_oxygen': 0,
         }
         res = calculate_news_from_row(row)
         self.assertEqual(res.totalScore, 3)
         self.assertTrue(res.hasSingleParameterAlert)
         self.assertEqual(res.riskLevel, 'low_medium')
+        self.assertTrue(res.isComplete)
 
     def test_calculate_news_from_row_with_missing_data(self):
         row = {

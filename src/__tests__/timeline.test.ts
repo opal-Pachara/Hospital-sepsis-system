@@ -417,7 +417,7 @@ describe('completeAssessment vital signs parameter timeline logging', () => {
     expect(vsEvent?.actionText).toContain('SpO2 100%');
     expect(vsEvent?.actionText).toContain('Temp 37°C');
     expect(vsEvent?.actionText).toContain('GCS 15 (A)');
-    expect(vsEvent?.actionText).toContain('(NEWS: 0 คะแนน - 🟢 ปกติ — NEWS = 0)');
+    expect(vsEvent?.actionText).toContain('(NEWS: 0 คะแนน)');
 
     // Check HIS text format includes this entry
     const hisText = store.getTimelineText();
@@ -456,7 +456,7 @@ describe('completeAssessment vital signs parameter timeline logging', () => {
     expect(vsEvent?.actionText).toContain('SpO2 91%');
     expect(vsEvent?.actionText).toContain('Temp 39.2°C');
     expect(vsEvent?.actionText).toContain('GCS 14 (V)');
-    expect(vsEvent?.actionText).toContain('🔴 สูง — ต้องการการดูแลเร่งด่วน');
+    expect(vsEvent?.actionText).toContain('(NEWS: 16 คะแนน)');
   });
 });
 

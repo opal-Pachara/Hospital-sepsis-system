@@ -1038,7 +1038,7 @@ export default memo(function TreatedDashboard({
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredCases.map((c) => {
-                    const isHigh = c.news_score >= 5 || c.has_single_alert;
+                    const isHigh = c.news_score >= 5;
                     return (
                       <tr key={c.id} className="hover:bg-slate-50 transition-colors">
                         <td className="py-2 px-3.5 font-mono font-bold text-slate-800">

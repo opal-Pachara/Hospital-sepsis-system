@@ -7,3 +7,4 @@ export { default as ReminderModal } from './ReminderModal';
 export { default as SystemLogsModal } from './SystemLogsModal';
 export { default as SepsisConfirmModal } from './SepsisConfirmModal';
 export { default as GlobalAuthModal } from './GlobalAuthModal';
+export { default as AVPUAssessmentModal } from './AVPUAssessmentModal';

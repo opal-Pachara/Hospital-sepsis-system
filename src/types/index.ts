@@ -9,6 +9,9 @@
 /** AVPU consciousness scale (derived from GCS) */
 export type AVPULevel = 'A' | 'V' | 'P' | 'U';
 
+/** Status of AVPU consciousness assessment by nurse */
+export type AVPUAssessmentStatus = 'pending_confirmation' | 'pending_assessment' | 'confirmed';
+
 /** Convert GCS score to AVPU level.
  * GCS 15 = A (Alert, 0 points)
  * GCS 9-14 = V (Voice, +3 points)
@@ -22,8 +25,17 @@ export function gcsToAVPU(gcs: number): AVPULevel {
   return 'U';
 }
 
-/** Supplemental oxygen status */
-export type OxygenStatus = 'room_air' | 'supplemental';
+/** Calculate Mean Arterial Pressure (MAP) = round((SBP + 2 * DBP) / 3) */
+export function calculateMAP(
+  sbp: number | null | undefined,
+  dbp: number | null | undefined
+): number | null {
+  if (sbp == null || dbp == null || isNaN(sbp) || isNaN(dbp)) return null;
+  return Math.round((sbp + 2 * dbp) / 3);
+}
+
+/** Supplemental oxygen status ('unassessed' when not yet specified by nurse) */
+export type OxygenStatus = 'room_air' | 'supplemental' | 'unassessed';
 
 /** Risk severity derived from aggregate NEWS score */
 export type RiskLevel = 'low' | 'low_medium' | 'medium' | 'high' | 'incomplete';
@@ -77,6 +89,9 @@ export interface VitalSigns {
   /** Diastolic blood pressure (mmHg) */
   diastolicBP?: number | null;
 
+  /** Mean Arterial Pressure (mmHg) — auto-calculated from (SBP + 2*DBP)/3 */
+  map?: number | null;
+
   /** Heart rate (beats per minute) */
   heartRate: number | null;
 
@@ -85,6 +100,12 @@ export interface VitalSigns {
 
   /** Derived AVPU level from GCS (computed, not stored directly) */
   avpu: AVPULevel;
+
+  /** AVPU assessment status: pending_confirmation (GCS 15), pending_assessment (GCS < 15), or confirmed */
+  avpuStatus?: AVPUAssessmentStatus;
+
+  /** Whether the AVPU has been confirmed/assessed by nurse */
+  isAvpuConfirmed?: boolean;
 }
 
 /**
@@ -145,6 +166,12 @@ export interface NEWSResult {
 
   /** List of missing parameter names if incomplete */
   missingParameters?: string[];
+
+  /** Whether nurse must be prompted to assess AVPU (GCS < 15 and known score < 5) */
+  needsAvpuPrompt?: boolean;
+
+  /** Whether nurse must be prompted to specify Supplemental O₂ (known score 3–4 and O₂ unassessed) */
+  needsOxygenPrompt?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +238,12 @@ export interface Patient {
 
   /** Centralized treatment status from MySQL sepsis_db */
   treatmentStatus?: TreatmentStatus | null;
+
+  /** AVPU assessment status for this patient */
+  avpuStatus?: AVPUAssessmentStatus;
+
+  /** Assessed AVPU level */
+  assessedAvpu?: AVPULevel | null;
 }
 
 /** Centralized patient treatment & alert status in MySQL */
@@ -228,8 +261,14 @@ export interface TreatmentStatus {
   treatment_completed_by?: string | null;
   sepsis_ruled_out: boolean;
   checklist_json?: string | null;
+  avpu_status?: AVPUAssessmentStatus;
+  assessed_avpu?: AVPULevel | null;
+  avpu_assessed_at?: string | null;
+  supplemental_oxygen?: boolean | OxygenStatus | null;
+  recorded_gcs?: number | null;
   updated_at?: string | null;
 }
+
 
 // ---------------------------------------------------------------------------
 // Checklist & Workflow
@@ -420,7 +459,7 @@ export interface CountdownTimer {
 // Modal State
 // ---------------------------------------------------------------------------
 
-export type ModalType = 'alert' | 'multi_alert' | 'reminder' | 'assessment_form' | 'auth' | 'sepsis_confirm' | null;
+export type ModalType = 'alert' | 'multi_alert' | 'reminder' | 'assessment_form' | 'auth' | 'sepsis_confirm' | 'avpu_assessment' | null;
 
 export interface ModalState {
   /** Currently open modal type */

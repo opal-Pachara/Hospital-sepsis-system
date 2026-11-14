@@ -117,7 +117,7 @@ async def get_daily_dashboard_stats() -> Dict[str, Any]:
                 }
 
                 news = calculate_news_from_row(row_dict)
-                is_high_risk = news.totalScore >= 5 or news.hasSingleParameterAlert
+                is_high_risk = news.totalScore >= 5
                 if is_high_risk:
                     high_risk_cases += 1
 
@@ -264,10 +264,10 @@ async def get_daily_treated_cases(target_date: Optional[str] = None, treated_onl
                     outcome_label = "🟢 Rule Out Sepsis"
                 elif t_status["acknowledged"]:
                     outcome_label = "⏳ กำลังดูแลรักษา"
-                elif news.totalScore >= 5 or news.hasSingleParameterAlert:
+                elif news.totalScore >= 5:
                     outcome_label = "🔴 เสี่ยงสูง (รอรับทราบ)"
             else:
-                if news.totalScore >= 5 or news.hasSingleParameterAlert:
+                if news.totalScore >= 5:
                     outcome_label = "🔴 เสี่ยงสูง (รอประเมิน)"
 
             if treated_only and not is_treated:

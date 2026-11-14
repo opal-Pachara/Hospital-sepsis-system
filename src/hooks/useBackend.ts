@@ -8,148 +8,12 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
-import type { Patient, VitalSigns, NEWSResult, NEWSParameterScore, TreatmentStatus } from '../types';
-import { gcsToAVPU } from '../types';
-import { maskHN } from '../utils/hnMask';
-import { MOCK_PATIENTS } from '../data/mockData';
+import type { Patient, TreatmentStatus } from '../types';
+import { mapBackendToPatient, type BackendPatient, type BackendNEWSResult } from '../utils/patientMapper';
 
-// ---------------------------------------------------------------------------
-// Types matching the backend JSON response (PatientListItem schema)
-// ---------------------------------------------------------------------------
-
-interface BackendNEWSParameter {
-  parameter: string;
-  label: string;
-  displayValue: string;
-  score: number;
-  isAbnormal: boolean;
-  isCritical: boolean;
-}
-
-interface BackendNEWSResult {
-  totalScore: number;
-  breakdown: BackendNEWSParameter[];
-  riskLevel: 'low' | 'low_medium' | 'medium' | 'high';
-  hasSingleParameterAlert: boolean;
-  missingDataCount: number;
-  calculatedAt: string;
-}
-
-interface BackendPatient {
-  id: string;
-  hn: string;
-  vn: string | null;
-  patient_name: string | null;
-  age: number | null;
-  vstdate: string;
-  vsttime: string;
-  sex: 'male' | 'female' | 'other' | null;
-  chief_complaint: string | null;
-  weight: number | null;
-  height: number | null;
-  gcs: number | null;
-  spo2: number | null;
-  heart_rate: number | null;
-  sbp: number | null;
-  dbp: number | null;
-  resp_rate: number | null;
-  temperature: number | null;
-  news_result: BackendNEWSResult;
-  arrival_time: string;
-  treatment_status?: any;
-}
-
-interface BackendPatientsResponse {
+export interface BackendPatientsResponse {
   patients: BackendPatient[];
   count: number;
-}
-
-// ---------------------------------------------------------------------------
-// Mapper: BackendPatient → frontend Patient type
-// ---------------------------------------------------------------------------
-
-function mapBackendToPatient(bp: BackendPatient): Patient {
-  const gcs = bp.gcs ?? 15;
-
-  const vitals: VitalSigns = {
-    respiratoryRate: bp.resp_rate ?? null,
-    spO2: bp.spo2 ?? null,
-    oxygenSupplementation: 'room_air',
-    temperature: bp.temperature ?? null,
-    systolicBP: bp.sbp ?? null,
-    heartRate: bp.heart_rate ?? null,
-    gcs,
-    avpu: gcsToAVPU(gcs),
-  };
-
-  const nr = bp.news_result || {
-    totalScore: 0,
-    breakdown: [],
-    riskLevel: 'low' as const,
-    hasSingleParameterAlert: false,
-    missingDataCount: 0,
-    calculatedAt: new Date().toISOString(),
-  };
-
-  // Map backend NEWSResult to frontend NEWSResult
-  const newsResult: NEWSResult = {
-    totalScore: nr.totalScore ?? 0,
-    breakdown: (nr.breakdown || []).map((b): NEWSParameterScore => ({
-      parameter: b.parameter as NEWSParameterScore['parameter'],
-      label: b.label,
-      displayValue: b.displayValue,
-      score: b.score,
-      isAbnormal: b.isAbnormal,
-      isCritical: b.isCritical,
-    })),
-    riskLevel: nr.riskLevel || 'low',
-    hasSingleParameterAlert: nr.hasSingleParameterAlert ?? false,
-    missingDataCount: nr.missingDataCount ?? 0,
-    calculatedAt: nr.calculatedAt || new Date().toISOString(),
-  };
-
-  // Safely construct arrivalTime:
-  // If bp.arrival_time is missing or default midnight (T00:00:00) while vsttime has real time, use vstdate + vsttime
-  let arrivalTime = bp.arrival_time;
-  if ((!arrivalTime || arrivalTime.endsWith('T00:00:00') || arrivalTime.endsWith('T00:00')) && bp.vsttime) {
-    const timeParts = bp.vsttime.split(':');
-    if (timeParts.length >= 2) {
-      const hh = timeParts[0].padStart(2, '0');
-      const mm = timeParts[1].padStart(2, '0');
-      const ss = (timeParts[2] || '00').padStart(2, '0');
-      const datePart = bp.vstdate || new Date().toISOString().split('T')[0];
-      arrivalTime = `${datePart}T${hh}:${mm}:${ss}`;
-    }
-  }
-
-  return {
-    id: bp.hn,
-    hn: bp.hn,
-    vn: bp.vn ?? '',
-    fullName: maskHN(bp.hn),
-    age: (bp.age != null && bp.age > 0) ? bp.age : null,
-    gender: bp.sex ?? 'other',
-    triageLevel: riskToTriageLevel(bp.news_result.riskLevel),
-    arrivalTime: arrivalTime || new Date().toISOString(),
-    chiefComplaint: bp.chief_complaint ?? 'ไม่ระบุ',
-    allergies: [],
-    currentRiskLevel: bp.news_result.riskLevel,
-    latestNewsScore: bp.news_result.totalScore,
-    latestVitals: vitals,
-    latestNewsResult: newsResult,
-    hasSepsisAlert: bp.news_result.totalScore >= 5 && bp.news_result.riskLevel === 'high',
-    attendingPhysician: null,
-    primaryNurse: null,
-    location: `VN: ${bp.vn ?? '-'}`,
-    treatmentStatus: (bp as any).treatment_status ?? null,
-  };
-}
-
-function riskToTriageLevel(risk: string): Patient['triageLevel'] {
-  if (risk === 'high') return 'resuscitation';
-  if (risk === 'medium') return 'emergency';
-  if (risk === 'low_medium') return 'urgent';
-  return 'semi_urgent';
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +23,7 @@ function riskToTriageLevel(risk: string): Patient['triageLevel'] {
 export function usePatientData() {
   const { setPatients, selectPatient, setConnectionStatus, setLoading, queueAlert } = useRTSASStore();
   const alertedKeysRef = useRef<Set<string>>(new Set());
+  const promptedKeysRef = useRef<Set<string>>(new Set());
 
   const fetchPatients = useCallback(async (forceRefresh = false) => {
     try {
@@ -186,7 +51,7 @@ export function usePatientData() {
       });
 
 
-      // 🚨 Detect high-risk sepsis patients (NEWS >= 5 or single parameter alert)
+      // 🚨 Detect high-risk sepsis patients (NEWS >= 5)
       // that have not been alerted yet in this session and haven't finished treatment
       const patientDataStore = useRTSASStore.getState().patientData;
       const highRisk = patients.filter((p) => {
@@ -213,14 +78,36 @@ export function usePatientData() {
       } else {
         console.log(`[RTSAS] Refreshed ${data.count} patients.`);
       }
-    } catch (err) {
-      console.warn('[usePatientData] Backend unavailable — fallback to offline demo patient data:', err);
-      setConnectionStatus('disconnected');
 
-      const currentPatients = useRTSASStore.getState().patients;
-      if (!currentPatients || currentPatients.length === 0) {
-        setPatients(MOCK_PATIENTS);
+      // 🧠💨 Detect patients needing additional AVPU (GCS < 15 & score < 5) or Oxygen (score 3-4) prompt
+      const currentState = useRTSASStore.getState();
+      if (currentState.ui.modal.activeModal === null && currentState.pendingAlerts.length === 0) {
+        const pendingPromptPatient = patients.find((p) => {
+          const pData = currentState.patientData[p.id] || (p.hn ? currentState.patientData[p.hn] : undefined);
+          if (pData?.treatmentCompleted || pData?.sepsisRuledOut || p.treatmentStatus?.treatment_completed || p.treatmentStatus?.sepsis_ruled_out) return false;
+          const latestNews = pData?.latestNewsResult || p.latestNewsResult;
+          if (!latestNews?.needsAvpuPrompt && !latestNews?.needsOxygenPrompt) return false;
+          const promptKey = `${p.hn}_${p.arrivalTime || ''}_${latestNews.needsAvpuPrompt ? 'avpu' : ''}_${latestNews.needsOxygenPrompt ? 'o2' : ''}`;
+          return !promptedKeysRef.current.has(promptKey);
+        });
+
+        if (pendingPromptPatient) {
+          const pData = currentState.patientData[pendingPromptPatient.id] || (pendingPromptPatient.hn ? currentState.patientData[pendingPromptPatient.hn] : undefined);
+          const latestNews = pData?.latestNewsResult || pendingPromptPatient.latestNewsResult;
+          const promptKey = `${pendingPromptPatient.hn}_${pendingPromptPatient.arrivalTime || ''}_${latestNews?.needsAvpuPrompt ? 'avpu' : ''}_${latestNews?.needsOxygenPrompt ? 'o2' : ''}`;
+          promptedKeysRef.current.add(promptKey);
+          useRTSASStore.getState().selectPatient(pendingPromptPatient.id);
+          useRTSASStore.getState().openModal('avpu_assessment', {
+            patientId: pendingPromptPatient.id,
+            hn: pendingPromptPatient.hn,
+            gcs: pendingPromptPatient.latestVitals.gcs,
+            patientName: pendingPromptPatient.fullName,
+          });
+        }
       }
+    } catch (err) {
+      console.warn('[usePatientData] Backend unavailable:', err);
+      setConnectionStatus('disconnected');
     } finally {
       setLoading(false);
     }
@@ -385,11 +272,22 @@ export function useWebSocketAlerts() {
           patient.treatmentStatus?.sepsis_ruled_out
         );
 
-        if (!isFinished && payload.is_new_alert &&
-          (payload.news_result.totalScore >= 5 || payload.news_result.hasSingleParameterAlert)) {
-
+        if (!isFinished && payload.is_new_alert && payload.news_result.totalScore >= 5) {
           // Queue the alert — if modal is already open it will stack, not override
           queueAlert(payload.hn, payload.news_result.totalScore);
+        } else if (
+          !isFinished &&
+          (patient.latestNewsResult?.needsAvpuPrompt || patient.latestNewsResult?.needsOxygenPrompt) &&
+          useRTSASStore.getState().ui.modal.activeModal === null &&
+          useRTSASStore.getState().pendingAlerts.length === 0
+        ) {
+          useRTSASStore.getState().selectPatient(patient.id);
+          useRTSASStore.getState().openModal('avpu_assessment', {
+            patientId: patient.id,
+            hn: patient.hn,
+            gcs: patient.latestVitals.gcs,
+            patientName: patient.fullName,
+          });
         }
       } catch (err) {
         console.error('[WebSocket] Failed to parse message:', err);

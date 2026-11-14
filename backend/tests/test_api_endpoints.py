@@ -55,12 +55,24 @@ class TestApiEndpoints(unittest.TestCase):
         ack_data = ack_res.json()["data"]
         self.assertEqual(ack_data["hn"], test_hn)
         self.assertTrue(ack_data["acknowledged"])
-        self.assertTrue(ack_data.get("doctor_confirmed", False))
+        self.assertFalse(ack_data.get("doctor_confirmed", False))
+        self.assertIsNone(ack_data.get("countdown_started_at"))
 
         # 2. Get status for HN
         get_res = self.client.get(f"/api/treatment-status/{test_hn}")
         self.assertEqual(get_res.status_code, 200)
         self.assertEqual(get_res.json()["acknowledged_by"], "Dr. Test API")
+
+        # 2b. Doctor confirms Sepsis -> starts 60-min countdown
+        doc_res = self.client.post("/api/treatment-status/doctor-confirm", json={
+            "hn": test_hn,
+            "confirmed_by": "Nurse_Test",
+            "physician": "Dr. Test API",
+        })
+        self.assertEqual(doc_res.status_code, 200)
+        doc_data = doc_res.json()["data"]
+        self.assertTrue(doc_data.get("doctor_confirmed", False))
+        self.assertIsNotNone(doc_data.get("countdown_started_at"))
 
         # 3. Save checklist
         chk_res = self.client.post("/api/treatment-status/checklist", json={

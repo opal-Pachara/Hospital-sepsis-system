@@ -1,17 +1,17 @@
 // =============================================================================
-// NEWS (National Early Warning Score) Calculation Engine
+// NEWS 2012 (National Early Warning Score) Calculation Engine
 // =============================================================================
 //
-// Implements the Royal College of Physicians NEWS2 scoring system.
+// Implements the Royal College of Physicians NEWS (2012) scoring system.
 // This is a PURE function — no side effects, fully deterministic.
 //
 // Scoring table reference:
 //   Score:        3       2       1       0       1       2       3
 //   RR:         ≤8       —     9–11   12–20     —    21–24    ≥25
 //   SpO₂ (%):  ≤91    92–93   94–95   ≥96      —      —       —
-//   O₂ Supp:    —       —      Yes     No       —      —       —
+//   O₂ Supp:    —     Yes       —      No       —      —       —
 //   Temp (°C): ≤35.0    —   35.1–36  36.1–38  38.1–39  ≥39.1   —
-//   SBP (mmHg): ≤90   91–100 101–110 111–219    —     ≥220     —
+//   SBP (mmHg): ≤90   91–100 101–110 111–219    —      —      ≥220
 //   HR (bpm):  ≤40      —    41–50   51–90   91–110 111–130   ≥131
 //   AVPU:       —       —      —       A        —      —      V/P/U
 // =============================================================================
@@ -163,14 +163,25 @@ function formatDisplayValue(
   value: number | string | null,
   vitals: VitalSigns
 ): string {
-  // O₂ supplementation and AVPU are always derived from enums, not nullable
+  // O₂ supplementation and AVPU are derived from enums
   switch (parameter) {
     case 'oxygenSupplementation':
+      if (vitals.oxygenSupplementation === 'unassessed') {
+        return 'ยังไม่ระบุ (รอเลือก)';
+      }
       return vitals.oxygenSupplementation === 'supplemental'
         ? 'Yes (O₂)'
         : 'Room Air';
-    case 'avpu':
-      return String(value ?? vitals.avpu);
+    case 'avpu': {
+      const isPending =
+        vitals.gcs < 15 &&
+        (vitals.isAvpuConfirmed === false || vitals.avpuStatus === 'pending_assessment');
+      if (isPending) {
+        return `GCS ${vitals.gcs} (รอประเมิน AVPU)`;
+      }
+      const effectiveAvpu = vitals.gcs === 15 && !vitals.isAvpuConfirmed ? 'A' : (value ?? vitals.avpu);
+      return `${vitals.gcs ? `GCS ${vitals.gcs} ` : ''}(${effectiveAvpu})`;
+    }
     default:
       break;
   }
@@ -276,8 +287,9 @@ export function calculateNEWS(vitals: VitalSigns): NEWSResult {
   // 2. SpO₂
   processNumericParam('spO2', 'SpO₂', vitals.spO2, scoreSpO2);
 
-  // 3. Supplemental Oxygen (always present — enum, not nullable)
-  const o2Score = scoreOxygenSupplementation(vitals.oxygenSupplementation);
+  // 3. Supplemental Oxygen ('unassessed' | 'room_air' | 'supplemental')
+  const isOxygenPending = vitals.oxygenSupplementation === 'unassessed';
+  const o2Score = isOxygenPending ? 0 : scoreOxygenSupplementation(vitals.oxygenSupplementation);
   totalScore += o2Score;
   breakdown.push({
     parameter: 'oxygenSupplementation',
@@ -316,11 +328,26 @@ export function calculateNEWS(vitals: VitalSigns): NEWSResult {
     scoreHeartRate
   );
 
-  // 7. AVPU (always present — enum, not nullable)
-  const avpuScore = scoreAVPU(vitals.avpu);
-  totalScore += avpuScore;
-  const avpuCritical = avpuScore === 3;
-  if (avpuCritical) hasSingleParameterAlert = true;
+  // 7. AVPU (NEWS 2012: GCS = 15 automatically scores A = 0 unless nurse explicitly changed AVPU;
+  // GCS < 15 requires nurse AVPU assessment A/V/P/U before assigning score)
+  const isAvpuPending =
+    vitals.gcs < 15 &&
+    (vitals.isAvpuConfirmed === false || vitals.avpuStatus === 'pending_assessment');
+
+  let avpuScore = 0;
+  let avpuCritical = false;
+
+  if (isAvpuPending) {
+    avpuScore = 0;
+    avpuCritical = false;
+  } else {
+    const effectiveAvpu: AVPULevel =
+      vitals.gcs === 15 && !vitals.isAvpuConfirmed ? 'A' : vitals.avpu;
+    avpuScore = scoreAVPU(effectiveAvpu);
+    totalScore += avpuScore;
+    avpuCritical = avpuScore === 3;
+    if (avpuCritical) hasSingleParameterAlert = true;
+  }
 
   breakdown.push({
     parameter: 'avpu',
@@ -331,7 +358,120 @@ export function calculateNEWS(vitals: VitalSigns): NEWSResult {
     isCritical: avpuCritical,
   });
 
-  // --- Derive risk level ---
+  // Check if any fundamental vital sign is missing
+  const missingParameters: string[] = [];
+  if (vitals.respiratoryRate === null || vitals.respiratoryRate === undefined || isNaN(vitals.respiratoryRate)) {
+    missingParameters.push('อัตราการหายใจ (RR)');
+  }
+  if (vitals.spO2 === null || vitals.spO2 === undefined || isNaN(vitals.spO2)) {
+    missingParameters.push('ความอิ่มตัวออกซิเจน (SpO2)');
+  }
+  if (vitals.temperature === null || vitals.temperature === undefined || isNaN(vitals.temperature)) {
+    missingParameters.push('อุณหภูมิร่างกาย (BT)');
+  }
+  if (vitals.systolicBP === null || vitals.systolicBP === undefined || isNaN(vitals.systolicBP)) {
+    missingParameters.push('ความดันโลหิต (SBP)');
+  }
+  if (vitals.heartRate === null || vitals.heartRate === undefined || isNaN(vitals.heartRate)) {
+    missingParameters.push('ชีพจร (HR)');
+  }
+
+  if (missingParameters.length > 0) {
+    return {
+      totalScore: 0,
+      breakdown,
+      riskLevel: 'incomplete',
+      hasSingleParameterAlert: false,
+      missingDataCount: missingParameters.length,
+      calculatedAt: '',
+      isComplete: false,
+      missingParameters,
+      needsAvpuPrompt: false,
+      needsOxygenPrompt: false,
+    };
+  }
+
+  // Build pending clinical assessment list (AVPU for GCS < 15, and Supplemental O₂)
+  const pendingItems: string[] = [];
+  if (isAvpuPending) {
+    pendingItems.push('รอประเมิน AVPU (GCS < 15)');
+  }
+  if (isOxygenPending) {
+    pendingItems.push(
+      totalScore >= 3 && totalScore <= 4
+        ? 'รอระบุการได้รับออกซิเจนเสริม (คะแนนเบื้องต้น 3–4 คะแนน)'
+        : 'ยังไม่ระบุการได้รับออกซิเจนเสริม'
+    );
+  }
+
+  // Case 1: Known components already reach >= 5 -> Alert immediately without waiting for AVPU or Oxygen!
+  if (totalScore >= 5 && (isAvpuPending || isOxygenPending)) {
+    return {
+      totalScore,
+      breakdown,
+      riskLevel: 'high',
+      hasSingleParameterAlert: true,
+      missingDataCount: pendingItems.length,
+      calculatedAt: new Date().toISOString(),
+      isComplete: false,
+      missingParameters: pendingItems,
+      needsAvpuPrompt: false,
+      needsOxygenPrompt: false,
+    };
+  }
+
+  // Case 2: GCS < 15 and AVPU is still pending while known score < 5 -> Prompt nurse for AVPU (and O₂ if also pending)
+  if (isAvpuPending) {
+    return {
+      totalScore,
+      breakdown,
+      riskLevel: 'incomplete',
+      hasSingleParameterAlert,
+      missingDataCount: pendingItems.length,
+      calculatedAt: '',
+      isComplete: false,
+      missingParameters: pendingItems,
+      needsAvpuPrompt: true,
+      needsOxygenPrompt: isOxygenPending,
+    };
+  }
+
+  // Case 3: AVPU is known, but Supplemental Oxygen is unassessed while score < 5
+  if (isOxygenPending) {
+    if (totalScore >= 3 && totalScore <= 4) {
+      // 3–4 points: Must prompt nurse to specify Supplemental O₂ before concluding!
+      return {
+        totalScore,
+        breakdown,
+        riskLevel: 'incomplete',
+        hasSingleParameterAlert,
+        missingDataCount: 1,
+        calculatedAt: '',
+        isComplete: false,
+        missingParameters: pendingItems,
+        needsAvpuPrompt: false,
+        needsOxygenPrompt: true,
+      };
+    } else {
+      // 0–2 points: Do NOT interrupt/alert nurse (even +2 O₂ will be <= 4 < 5),
+      // but mark score as incomplete (do not assume O₂ = 0 as complete).
+      const preliminaryRisk = classifyRiskLevel(totalScore, hasSingleParameterAlert);
+      return {
+        totalScore,
+        breakdown,
+        riskLevel: preliminaryRisk,
+        hasSingleParameterAlert,
+        missingDataCount: 1,
+        calculatedAt: new Date().toISOString(),
+        isComplete: false,
+        missingParameters: pendingItems,
+        needsAvpuPrompt: false,
+        needsOxygenPrompt: false,
+      };
+    }
+  }
+
+  // --- Derive risk level for fully complete vitals (all 7 parameters known) ---
   const riskLevel = classifyRiskLevel(totalScore, hasSingleParameterAlert);
 
   return {
@@ -339,8 +479,12 @@ export function calculateNEWS(vitals: VitalSigns): NEWSResult {
     breakdown,
     riskLevel,
     hasSingleParameterAlert,
-    missingDataCount,
+    missingDataCount: 0,
     calculatedAt: new Date().toISOString(),
+    isComplete: true,
+    missingParameters: [],
+    needsAvpuPrompt: false,
+    needsOxygenPrompt: false,
   };
 }
 

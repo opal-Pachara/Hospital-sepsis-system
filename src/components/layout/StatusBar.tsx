@@ -18,7 +18,7 @@ export default function StatusBar() {
         <span className="w-1.5 h-1.5 rounded-full bg-status-success inline-block" />
         Rule Engine: Active
       </div>
-      <span>NEWS (RCP 2017)</span>
+      <span>NEWS 2012 (RCP 2012)</span>
       <span className="ml-auto">v2.0 · โรงพยาบาลบางคล้า 2569</span>
     </div>
   );

@@ -98,10 +98,22 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
     year: '2-digit',
   });
 
-  const isHighRisk = patient.currentRiskLevel === 'high';
-  const isMissingData = patient.currentRiskLevel === 'incomplete' ||
-    patient.latestNewsResult?.isComplete === false ||
-    !!(patient.latestNewsResult?.missingDataCount && patient.latestNewsResult.missingDataCount > 0);
+  const openModal = useRTSASStore((s) => s.openModal);
+
+  const isHighRisk = patient.currentRiskLevel === 'high' || patient.hasSepsisAlert;
+  const isComplete = patient.latestNewsResult?.isComplete !== false;
+
+  const avpuStatus =
+    patient.treatmentStatus?.avpu_status ??
+    patient.latestVitals.avpuStatus ??
+    (patient.latestVitals.gcs === 15 ? 'confirmed' : 'pending_assessment');
+  const isAvpuPending =
+    avpuStatus === 'pending_assessment' || Boolean(patient.latestNewsResult?.needsAvpuPrompt);
+  const needsOxygenPrompt = Boolean(patient.latestNewsResult?.needsOxygenPrompt);
+
+  const isMissingData =
+    patient.currentRiskLevel === 'incomplete' ||
+    (!isHighRisk && (isAvpuPending || needsOxygenPrompt));
 
   return (
     <button
@@ -146,15 +158,29 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
       </div>
 
       {/* Score Chip */}
-      <div className="flex gap-2" style={{ marginLeft: '8px', marginTop: '5px' }}>
-        {isMissingData ? (
+      <div className="flex items-center gap-1.5 flex-wrap" style={{ marginLeft: '8px', marginTop: '5px' }}>
+        {isHighRisk ? (
+          <span
+            style={{
+              fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '8px',
+              background: risk.chipBg, color: risk.chipText, border: `1px solid ${risk.chipBorder}`,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            NEWS {patient.latestNewsScore}{!isComplete ? '*' : ''}
+          </span>
+        ) : isMissingData ? (
           <span
             style={{
               fontSize: '9px', fontWeight: 600, padding: '2px 7px', borderRadius: '8px',
               background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1',
             }}
           >
-            ⚠ คำนวณ NEWS ไม่ได้
+            {isAvpuPending
+              ? `รอประเมิน AVPU (${patient.latestNewsScore}*)`
+              : needsOxygenPrompt
+              ? `รอระบุ O₂ (${patient.latestNewsScore}*)`
+              : '⚠ คำนวณ NEWS ไม่ได้'}
           </span>
         ) : (
           <span
@@ -164,15 +190,89 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
               whiteSpace: 'nowrap',
             }}
           >
-            NEWS {patient.latestNewsScore}
+            NEWS {patient.latestNewsScore}{!isComplete ? '*' : ''}
           </span>
+        )}
+
+        {isAvpuPending && (
+          <button
+            type="button"
+            title="ประเมินระดับความรู้สึกตัว AVPU ของผู้ป่วย"
+            onClick={(e) => {
+              e.stopPropagation();
+              selectPatient(patient.id);
+              openModal('avpu_assessment', {
+                patientId: patient.id,
+                hn: patient.hn,
+                gcs: patient.latestVitals.gcs,
+                patientName: patient.fullName,
+                mode: 'avpu',
+              });
+            }}
+            style={{
+              fontSize: '9px',
+              fontWeight: 700,
+              padding: '2px 6px',
+              borderRadius: '6px',
+              background: '#fffbeb',
+              color: '#b45309',
+              border: '1px solid #fde68a',
+              cursor: 'pointer',
+            }}
+          >
+            🧠 ประเมิน AVPU
+          </button>
+        )}
+
+        {!isAvpuPending && needsOxygenPrompt && (
+          <button
+            type="button"
+            title="ระบุการได้รับออกซิเจนเสริมของผู้ป่วย (คะแนน 3–4)"
+            onClick={(e) => {
+              e.stopPropagation();
+              selectPatient(patient.id);
+              openModal('avpu_assessment', {
+                patientId: patient.id,
+                hn: patient.hn,
+                gcs: patient.latestVitals.gcs,
+                patientName: patient.fullName,
+                mode: 'oxygen',
+              });
+            }}
+            style={{
+              fontSize: '9px',
+              fontWeight: 700,
+              padding: '2px 6px',
+              borderRadius: '6px',
+              background: '#f0f9ff',
+              color: '#0369a1',
+              border: '1px solid #bae6fd',
+              cursor: 'pointer',
+            }}
+          >
+            💨 ระบุ O₂
+          </button>
         )}
       </div>
 
-      {/* Missing data info */}
-      {isMissingData && (
+      {/* Missing data / AVPU / Oxygen pending info */}
+      {isHighRisk && !isComplete && (
+        <div style={{ fontSize: '9px', color: '#dc2626', marginLeft: '8px', marginTop: '2px', fontWeight: 600 }}>
+          แจ้งเตือนทันที (คะแนนที่ทราบแล้ว ≥ 5)
+        </div>
+      )}
+      {!isHighRisk && isMissingData && (
         <div style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '8px', marginTop: '2px' }}>
-          ขาดข้อมูล: {patient.latestNewsResult?.missingDataCount} รายการ
+          {isAvpuPending
+            ? `GCS ${patient.latestVitals.gcs ?? '?'}: รอเลือก AVPU`
+            : needsOxygenPrompt
+            ? `คะแนน ${patient.latestNewsScore}*: รอระบุออกซิเจนเสริม`
+            : `ขาดข้อมูล: ${patient.latestNewsResult?.missingDataCount} รายการ`}
+        </div>
+      )}
+      {!isHighRisk && !isMissingData && !isComplete && (
+        <div style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '8px', marginTop: '2px' }}>
+          *ยังไม่ระบุ O₂ (คะแนน 0–2 ไม่ถึงเกณฑ์ 5)
         </div>
       )}
 
@@ -201,6 +301,7 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
       )}
     </button>
   );
+
 }
 
 // ─── Completed Patient Card (Rule Out or Bundle Done) ───────────────────────

@@ -27,15 +27,15 @@ export default function MultiAlertModal() {
     // Switch context to target patient
     selectPatient(patient.id);
 
-    const existingTimer = patient?.id ? useRTSASStore.getState().patientData[patient.id]?.countdownTimer : undefined;
-    const alreadyRunning = Boolean(
-      existingTimer?.isActive ||
+    // Principle 3: Acknowledging a NEWS alert NEVER starts the 60-minute Sepsis bundle countdown.
+    // The 60-minute timer starts only when the doctor confirms Sepsis in Phase 2.
+    const alreadyLogged = Boolean(
+      patient?.treatmentStatus?.acknowledged ||
       patient?.treatmentStatus?.countdown_started_at
     );
 
-    if (!alreadyRunning) {
+    if (!alreadyLogged) {
       const nowIso = new Date().toISOString();
-      useRTSASStore.getState().startCountdown(nowIso, patient.id);
 
       const newsScore = patient?.latestNewsScore ?? 0;
       const riskLevel = patient?.currentRiskLevel ?? 'low';
@@ -55,7 +55,7 @@ export default function MultiAlertModal() {
 
       const calcIso = patient?.latestNewsResult?.calculatedAt || nowIso;
       useRTSASStore.getState().addTimelineEvent(
-        `🧮 ระบบคำนวณ NEWS Score = ${newsScore} (${riskLevel === 'high' ? 'เสี่ยงสูง' : riskLevel === 'medium' ? 'เสี่ยงปานกลาง' : 'เสี่ยงต่ำ'})`,
+        `🧮 ระบบคำนวณ NEWS Score = ${newsScore}${patient?.latestNewsResult?.isComplete === false ? ' (ข้อมูลยังไม่ครบ)' : ''} (${riskLevel === 'high' ? 'เสี่ยงสูง' : riskLevel === 'medium' ? 'เสี่ยงปานกลาง' : 'เสี่ยงต่ำ'})`,
         newsScore >= 5 ? 'red' : 'orange',
         'ระบบ RTSAS',
         undefined,
@@ -147,6 +147,11 @@ export default function MultiAlertModal() {
                     </div>
                     <div style={{ fontSize: '13px', color: '#dc2626', fontWeight: 600, marginTop: '4px' }}>
                       NEWS Score: {alert.newsScore}
+                      {patient?.latestNewsResult?.isComplete === false && (
+                        <span style={{ fontSize: '11px', color: '#b45309', fontWeight: 500, marginLeft: '6px' }}>
+                          (ข้อมูล AVPU / O₂ ยังไม่ครบ)
+                        </span>
+                      )}
                     </div>
                     {patient?.chiefComplaint && patient.chiefComplaint !== 'ไม่ระบุ' && (
                       <div style={{
