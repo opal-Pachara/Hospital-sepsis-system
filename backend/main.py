@@ -363,10 +363,14 @@ async def inject_patient_route(payload: InjectPatientRequest):
                     present_params.append(f"{lbl} {val}")
 
         params_str = ", ".join(present_params) if present_params else "ไม่มีสัญญาณชีพ"
+        hn_clean = payload.hn[2:].strip() if payload.hn.upper().startswith("HN") else payload.hn.strip()
+        is_news_complete = news_res.get("isComplete", True)
+        missing_params = news_res.get("missingParameters") or []
+        inc_str = f" • ข้อมูลยังไม่ครบ: {', '.join(missing_params)}" if not is_news_complete and missing_params else ""
 
         record_log(
             "Warning" if score >= 5 else "Note",
-            f"Admin Patient Entry: เพิ่มข้อมูลผู้ป่วย HN {payload.hn} (VN: {vn_val}) เข้าสู่ระบบ — พารามิเตอร์: [{params_str}] (NEWS {score} คะแนน [{risk_lvl.upper()} RISK])",
+            f"Admin Patient Entry: เพิ่มข้อมูลผู้ป่วย HN {hn_clean} (VN: {vn_val}) เข้าสู่ระบบ — พารามิเตอร์: [{params_str}] (NEWS {score} คะแนน [{risk_lvl.upper()} RISK]{inc_str})",
             component="Admin_DB_Insert",
             details={
                 "hn": payload.hn,
@@ -375,6 +379,8 @@ async def inject_patient_route(payload: InjectPatientRequest):
                 "parameters": present_params,
                 "news_score": score,
                 "risk_level": risk_lvl,
+                "is_complete": is_news_complete,
+                "missing_parameters": missing_params,
                 "vitals": {
                     "sbp": payload.sbp,
                     "dbp": payload.dbp,
@@ -437,10 +443,15 @@ async def admin_reset_dashboard():
 
 @app.get("/api/logs")
 @app.get("/api/system/logs")
-async def get_logs_route(limit: int = 50, level: Optional[str] = None, search: Optional[str] = None):
-    """Return database and service timestamp logs."""
+async def get_logs_route(
+    limit: int = 50,
+    level: Optional[str] = None,
+    component: Optional[str] = None,
+    search: Optional[str] = None,
+):
+    """Return database and service timestamp logs with severity, category, and search filtering."""
     from .log_service import get_logs, get_log_summary
-    logs = get_logs(limit=limit, level=level, search=search)
+    logs = get_logs(limit=limit, level=level, component=component, search=search)
     summary = get_log_summary()
     return JSONResponse(content={"logs": logs, "count": len(logs), "summary": summary})
 
@@ -457,13 +468,14 @@ async def get_patients(refresh: bool = False):
     if refresh:
         await process_vitals()
 
-    from .treatment_service import get_all_treatment_statuses
+    from .treatment_service import get_all_treatment_statuses, get_active_treating_hns
     treatment_statuses = await get_all_treatment_statuses()
 
     # If cache is empty (e.g., first request before scheduler ran), fetch immediately
     cache = get_patients_cache()
     if not cache:
-        rows = await fetch_vitals_from_db()
+        active_hns = await get_active_treating_hns()
+        rows = await fetch_vitals_from_db(active_hns=active_hns)
         cache = build_patient_list(rows, treatment_statuses)
 
     # Sort by NEWS score descending

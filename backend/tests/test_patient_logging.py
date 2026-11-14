@@ -341,5 +341,33 @@ class TestPatientLogging(unittest.TestCase):
         self.assertEqual(arch_logs[0]["details"]["archive_table"], "treated_patient_archive")
 
 
+class TestBuildPatientList(unittest.TestCase):
+    def test_build_patient_list_with_treatment_status_gcs(self):
+        """Verify build_patient_list handles GCS updates against treatment_statuses without _safe_int NameError."""
+        rows = [{
+            "hn": "HN69003544",
+            "vn": "VNHN69003544",
+            "gcs": 11,
+            "sbp": 90,
+            "dbp": 58,
+            "heart_rate": 128,
+            "resp_rate": 13,
+            "temperature": 39.5,
+            "spo2": 91,
+        }]
+        treatment_statuses = {
+            "HN69003544": {
+                "recorded_gcs": 13,
+                "assessed_avpu": "A",
+                "avpu_status": "assessed",
+                "supplemental_oxygen": False,
+            }
+        }
+        items = scheduler.build_patient_list(rows, treatment_statuses)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["avpu_status"], "unassessed")
+        self.assertIsNone(items[0]["assessed_avpu"])
+
+
 if __name__ == "__main__":
     unittest.main()

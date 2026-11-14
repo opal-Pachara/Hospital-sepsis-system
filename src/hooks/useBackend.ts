@@ -47,6 +47,15 @@ export function usePatientData() {
       patients.forEach((p) => {
         if (p.treatmentStatus) {
           useRTSASStore.getState().syncServerTreatmentStatus(p.treatmentStatus);
+        } else {
+          // Only purge local treated/ruled-out cache when backend has NO record at all (e.g. dashboard reset),
+          // not while an in-progress status object is transitioning to completed/archived.
+          const localPData =
+            useRTSASStore.getState().patientData[p.id] ||
+            (p.hn ? useRTSASStore.getState().patientData[p.hn] : undefined);
+          if (localPData?.treatmentCompleted || localPData?.sepsisRuledOut) {
+            useRTSASStore.getState().clearTreatedPatients([p.id, p.hn]);
+          }
         }
       });
 

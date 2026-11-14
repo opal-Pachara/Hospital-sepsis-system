@@ -16,6 +16,20 @@ LOG_DB_PATH = os.path.join(DATA_DIR, "timestamp_logs.db")
 
 _lock = Lock()
 
+TEST_LOG_MARKERS = ("TEST_HN_SYNC", "API_TEST_HN_999", "HN_SIM_001", "test_hn")
+
+COMPONENT_GROUPS: Dict[str, tuple] = {
+    "SYNC": ("HOSxP_Sync", "Scheduler"),
+    "CLINICAL": ("Clinical_Treatment", "Dashboard_Archive"),
+    "DB": ("HOSxP_DB", "Failover_Buffer"),
+    "ADMIN": ("Admin_DB_Insert", "Admin_Dashboard", "Admin"),
+}
+
+
+def _is_test_log(message: str, details_str: Optional[str]) -> bool:
+    combined = f"{message or ''} {details_str or ''}".lower()
+    return any(marker.lower() in combined for marker in TEST_LOG_MARKERS)
+
 
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(LOG_DB_PATH, timeout=20.0, check_same_thread=False)
@@ -25,7 +39,7 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_log_db():
-    """Ensure timestamp log database table exists."""
+    """Ensure timestamp log database table exists and purge lingering unit-test noise."""
     with _lock:
         conn = get_connection()
         try:
@@ -42,6 +56,22 @@ def init_log_db():
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ts_logs ON timestamp_logs(timestamp);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_level_logs ON timestamp_logs(level);")
+            conn.execute("""
+            DELETE FROM timestamp_logs
+            WHERE message LIKE '%TEST_HN_SYNC%'
+               OR message LIKE '%API_TEST_HN_999%'
+               OR message LIKE '%HN_SIM_001%'
+               OR LOWER(message) LIKE '%test_hn%'
+               OR COALESCE(details_json, '') LIKE '%TEST_HN_SYNC%'
+               OR COALESCE(details_json, '') LIKE '%API_TEST_HN_999%'
+               OR COALESCE(details_json, '') LIKE '%HN_SIM_001%'
+               OR LOWER(COALESCE(details_json, '')) LIKE '%test_hn%';
+            """)
+            conn.execute("""
+            UPDATE timestamp_logs
+            SET message = REPLACE(message, 'HN HN', 'HN ')
+            WHERE message LIKE '%HN HN%';
+            """)
             conn.commit()
         except Exception as e:
             logger.error(f"Failed to init timestamp log DB: {e}")
@@ -78,6 +108,18 @@ def record_log(
     else:
         lvl_formatted = "ERROR"
 
+    # Isolate automated test traffic so live diagnostic logs stay clean
+    if _is_test_log(message, details_str):
+        return {
+            "id": 0,
+            "timestamp": ts_str,
+            "pid": pid,
+            "level": lvl_formatted,
+            "component": component,
+            "message": message,
+            "details": details or {},
+        }
+
     with _lock:
         conn = get_connection()
         try:
@@ -109,25 +151,32 @@ def get_logs(
     component: Optional[str] = None,
     search: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """Query recent logs with optional filtering."""
+    """Query recent logs with optional filtering (including category groups and JSON details search)."""
     with _lock:
         conn = get_connection()
         try:
             cur = conn.cursor()
             conditions = []
-            params = []
+            params: List[Any] = []
 
             if level and level.upper() != 'ALL':
                 conditions.append("UPPER(level) = ?")
                 params.append(level.upper())
 
             if component and component.upper() != 'ALL':
-                conditions.append("component = ?")
-                params.append(component)
+                group_key = component.upper()
+                if group_key in COMPONENT_GROUPS:
+                    group_comps = COMPONENT_GROUPS[group_key]
+                    placeholders = ", ".join(["?"] * len(group_comps))
+                    conditions.append(f"component IN ({placeholders})")
+                    params.extend(group_comps)
+                else:
+                    conditions.append("component = ?")
+                    params.append(component)
 
             if search:
-                conditions.append("(message LIKE ? OR component LIKE ?)")
-                params.extend([f"%{search}%", f"%{search}%"])
+                conditions.append("(message LIKE ? OR component LIKE ? OR COALESCE(details_json, '') LIKE ?)")
+                params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
 
             where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
             query = f"""
@@ -167,7 +216,7 @@ def get_logs(
 
 
 def get_log_summary() -> Dict[str, Any]:
-    """Summary of log database status and counts."""
+    """Summary of log database status and counts by severity and category."""
     with _lock:
         conn = get_connection()
         try:
@@ -177,6 +226,18 @@ def get_log_summary() -> Dict[str, Any]:
 
             cur.execute("SELECT COUNT(*) FROM timestamp_logs WHERE level = 'ERROR';")
             errors = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM timestamp_logs WHERE level = 'Warning';")
+            warnings = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM timestamp_logs WHERE level = 'Note';")
+            notes = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM timestamp_logs WHERE component IN ('Clinical_Treatment', 'Dashboard_Archive');")
+            clinical_logs = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM timestamp_logs WHERE component IN ('HOSxP_Sync', 'Scheduler');")
+            sync_logs = cur.fetchone()[0]
 
             cur.execute("SELECT timestamp, level, component, message FROM timestamp_logs ORDER BY id DESC LIMIT 1;")
             last_row = cur.fetchone()
@@ -193,12 +254,24 @@ def get_log_summary() -> Dict[str, Any]:
             return {
                 "total_logs": total,
                 "error_logs": errors,
+                "warning_logs": warnings,
+                "note_logs": notes,
+                "clinical_logs": clinical_logs,
+                "sync_logs": sync_logs,
                 "last_entry": last_entry,
                 "log_db_path": LOG_DB_PATH,
             }
         except Exception as e:
             logger.error(f"Failed to get log summary: {e}")
-            return {"total_logs": 0, "error_logs": 0, "last_entry": None}
+            return {
+                "total_logs": 0,
+                "error_logs": 0,
+                "warning_logs": 0,
+                "note_logs": 0,
+                "clinical_logs": 0,
+                "sync_logs": 0,
+                "last_entry": None,
+            }
         finally:
             conn.close()
 

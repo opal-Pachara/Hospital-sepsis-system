@@ -1,25 +1,100 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRTSASStore } from '../../store/useRTSASStore';
-import type { Patient } from '../../types';
+import type { Patient, TimelineEvent } from '../../types';
 import { maskHN } from '../../utils/hnMask';
+
+function findCompletionTimestamp(events?: TimelineEvent[]): string | null {
+  if (!events || events.length === 0) return null;
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const text = events[i]?.actionText || '';
+    if (
+      text.includes('สิ้นสุดการรักษา') ||
+      text.includes('สิ้นสุดกระบวนการ') ||
+      text.includes('รักษาเสร็จสิ้น') ||
+      text.includes('Rule Out') ||
+      text.includes('แพทย์ไม่ยืนยัน')
+    ) {
+      return events[i].timestamp;
+    }
+  }
+  return null;
+}
 
 export default function PatientInfoBar({ patient }: { patient: Patient }) {
   const [erElapsed, setErElapsed] = useState('');
   const [isOldData, setIsOldData] = useState(false);
-  const { patientData, selectPatient } = useRTSASStore();
-  const pData = patientData[patient.id];
-  const isTreatmentCompleted = (pData?.treatmentCompleted ?? false) || (patient.treatmentStatus?.treatment_completed ?? false);
-  const isRuledOut = (pData?.sepsisRuledOut ?? false) || (patient.treatmentStatus?.sepsis_ruled_out ?? false);
+  const frozenEndMsRef = useRef<{ patientId: string; endMs: number } | null>(null);
+  const {
+    patientData,
+    selectPatient,
+    selectedPatient,
+    treatmentCompleted: storeCompleted,
+    treatmentCompletedAt: storeCompletedAt,
+    sepsisRuledOut: storeRuledOut,
+    ruledOutAt: storeRuledOutAt,
+    timeline: storeTimeline,
+  } = useRTSASStore();
+
+  const pData = patientData[patient.id] || (patient.hn ? patientData[patient.hn] : undefined);
+  const isSelectedCurrent = selectedPatient?.id === patient.id || selectedPatient?.hn === patient.hn;
+  const isTreatmentCompleted = Boolean(
+    pData?.treatmentCompleted ||
+    patient.treatmentStatus?.treatment_completed ||
+    (isSelectedCurrent && storeCompleted)
+  );
+  const isRuledOut = Boolean(
+    pData?.sepsisRuledOut ||
+    patient.treatmentStatus?.sepsis_ruled_out ||
+    (isSelectedCurrent && storeRuledOut)
+  );
+  const isFinished = isTreatmentCompleted || isRuledOut;
+
+  const timelineFallbackAt = isFinished
+    ? findCompletionTimestamp(pData?.timeline || (isSelectedCurrent ? storeTimeline : undefined))
+    : null;
+  const completedAtStr = isTreatmentCompleted
+    ? (
+        pData?.treatmentCompletedAt ||
+        patient.treatmentStatus?.treatment_completed_at ||
+        (isSelectedCurrent ? storeCompletedAt : null) ||
+        timelineFallbackAt
+      )
+    : isRuledOut
+      ? (
+          pData?.ruledOutAt ||
+          (isSelectedCurrent ? storeRuledOutAt : null) ||
+          patient.treatmentStatus?.updated_at ||
+          timelineFallbackAt
+        )
+      : null;
 
   useEffect(() => {
     const arrivalMs = new Date(patient.arrivalTime).getTime();
 
+    if (!isFinished) {
+      frozenEndMsRef.current = null;
+    }
+
+    const computeDiffMs = () => {
+      if (isFinished) {
+        let parsedEndMs = completedAtStr ? new Date(completedAtStr).getTime() : NaN;
+        if (!Number.isFinite(parsedEndMs) || parsedEndMs < arrivalMs) {
+          if (!frozenEndMsRef.current || frozenEndMsRef.current.patientId !== patient.id) {
+            frozenEndMsRef.current = { patientId: patient.id, endMs: Date.now() };
+          }
+          parsedEndMs = frozenEndMsRef.current.endMs;
+        }
+        return Math.max(0, parsedEndMs - arrivalMs);
+      }
+      return Math.max(0, Date.now() - arrivalMs);
+    };
+
     const update = () => {
-      const diff = Date.now() - arrivalMs;
+      const diff = computeDiffMs();
       const hours = diff / 3600000;
 
-      if (hours > 24) {
-        // Data is from a previous day — don't show a meaningless elapsed counter
+      if (hours > 24 && Boolean(pData?.isHistoricalArchive) && !isFinished) {
+        // Explicit historical archive open (>24h) — hide ER elapsed counter
         setIsOldData(true);
         setErElapsed('');
       } else {
@@ -31,9 +106,12 @@ export default function PatientInfoBar({ patient }: { patient: Patient }) {
     };
 
     update();
+    if (isFinished) {
+      return;
+    }
     const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
-  }, [patient.arrivalTime]);
+  }, [patient.id, patient.arrivalTime, isFinished, completedAtStr, pData?.isHistoricalArchive]);
 
   const arrivalTimeStr = new Date(patient.arrivalTime).toLocaleTimeString('th-TH', {
     hour: '2-digit',
@@ -198,9 +276,16 @@ export default function PatientInfoBar({ patient }: { patient: Patient }) {
           ) : (
             <>
               <span style={{ fontSize: '9px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                เวลาใน ER
+                {isFinished ? 'เวลาอยู่ในระบบ (รวม)' : 'เวลาใน ER'}
               </span>
-              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#ea580c', fontVariantNumeric: 'tabular-nums' }}>
+              <span
+                style={{
+                  fontSize: '11.5px',
+                  fontWeight: 700,
+                  color: isFinished ? '#059669' : '#ea580c',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
                 {erElapsed} นาที
               </span>
             </>

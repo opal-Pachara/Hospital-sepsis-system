@@ -8,6 +8,11 @@ from .database import db_pool, dashboard_pool
 
 logger = logging.getLogger(__name__)
 
+
+def _format_hn_display(hn: str) -> str:
+    clean = str(hn)[2:].strip() if str(hn).upper().startswith("HN") else str(hn).strip()
+    return f"HN {clean}"
+
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS patient_treatment_status (
     hn VARCHAR(20) PRIMARY KEY,
@@ -127,6 +132,48 @@ def _row_to_status_dict(row: Dict[str, Any]) -> Dict[str, Any]:
         "updated_at": _format_dt(row.get("updated_at")),
     }
 
+def _archive_row_to_status_dict(a_row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "hn": str(a_row.get("hn", "")).strip(),
+        "vn": a_row.get("vn"),
+        "acknowledged": bool(a_row.get("acknowledged_at")),
+        "acknowledged_at": _format_dt(a_row.get("acknowledged_at")),
+        "acknowledged_by": a_row.get("acknowledged_by"),
+        "doctor_confirmed": bool(a_row.get("doctor_confirmed")),
+        "countdown_started_at": _format_dt(a_row.get("countdown_started_at")),
+        "countdown_duration": int(a_row.get("countdown_duration") or 3600),
+        "treatment_completed": bool(a_row.get("treatment_completed")),
+        "treatment_completed_at": _format_dt(a_row.get("treatment_completed_at")),
+        "treatment_completed_by": a_row.get("treatment_completed_by"),
+        "sepsis_ruled_out": bool(a_row.get("sepsis_ruled_out")),
+        "checklist_json": a_row.get("checklist_json"),
+        "updated_at": _format_dt(a_row.get("archived_at")),
+        "is_archived": True,
+    }
+
+
+def _merge_archive_status(active_st: Optional[Dict[str, Any]], archive_st: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure completed or ruled-out archive status is not masked by a partial active row."""
+    if not active_st:
+        return archive_st
+    if (
+        not active_st.get("treatment_completed")
+        and not active_st.get("sepsis_ruled_out")
+        and (archive_st.get("treatment_completed") or archive_st.get("sepsis_ruled_out"))
+    ):
+        return {
+            **archive_st,
+            **active_st,
+            "treatment_completed": archive_st.get("treatment_completed", False),
+            "treatment_completed_at": archive_st.get("treatment_completed_at") or active_st.get("treatment_completed_at"),
+            "treatment_completed_by": archive_st.get("treatment_completed_by") or active_st.get("treatment_completed_by"),
+            "sepsis_ruled_out": archive_st.get("sepsis_ruled_out", False),
+            "checklist_json": active_st.get("checklist_json") or archive_st.get("checklist_json"),
+            "is_archived": True,
+        }
+    return active_st
+
+
 async def get_all_treatment_statuses() -> Dict[str, Dict[str, Any]]:
     """Return all treatment statuses indexed by HN, including archived/ruled-out patients."""
     try:
@@ -141,27 +188,17 @@ async def get_all_treatment_statuses() -> Dict[str, Dict[str, Any]]:
 
                 # Also include archived patients from treated_patient_archive (ruled out or completed)
                 try:
-                    await cur.execute("SELECT * FROM treated_patient_archive;")
+                    await cur.execute("SELECT * FROM treated_patient_archive ORDER BY id ASC;")
                     archive_rows = await cur.fetchall()
                     for a_row in archive_rows:
-                        a_hn = str(a_row.get("hn", "")).strip()
-                        if a_hn and a_hn not in result:
-                            result[a_hn] = {
-                                "hn": a_hn,
-                                "vn": a_row.get("vn"),
-                                "acknowledged": bool(a_row.get("acknowledged_at")),
-                                "acknowledged_at": a_row.get("acknowledged_at").isoformat() if a_row.get("acknowledged_at") else None,
-                                "acknowledged_by": a_row.get("acknowledged_by"),
-                                "doctor_confirmed": bool(a_row.get("doctor_confirmed")),
-                                "countdown_started_at": a_row.get("countdown_started_at").isoformat() if a_row.get("countdown_started_at") else None,
-                                "countdown_duration": a_row.get("countdown_duration", 3600),
-                                "treatment_completed": bool(a_row.get("treatment_completed")),
-                                "treatment_completed_at": a_row.get("treatment_completed_at").isoformat() if a_row.get("treatment_completed_at") else None,
-                                "treatment_completed_by": a_row.get("treatment_completed_by"),
-                                "sepsis_ruled_out": bool(a_row.get("sepsis_ruled_out")),
-                                "checklist_json": a_row.get("checklist_json"),
-                                "is_archived": True,
-                            }
+                        archive_st = _archive_row_to_status_dict(a_row)
+                        a_hn = archive_st["hn"]
+                        if not a_hn:
+                            continue
+                        if a_hn in result:
+                            result[a_hn] = _merge_archive_status(result[a_hn], archive_st)
+                        else:
+                            result[a_hn] = archive_st
                 except Exception as arch_err:
                     logger.warning(f"Error querying treated_patient_archive in get_all_treatment_statuses: {arch_err}")
 
@@ -177,35 +214,64 @@ async def get_treatment_status(hn: str) -> Optional[Dict[str, Any]]:
             async with conn.cursor(DictCursor) as cur:
                 await cur.execute("SELECT * FROM patient_treatment_status WHERE hn = %s LIMIT 1;", (hn,))
                 row = await cur.fetchone()
-                if row:
-                    return _row_to_status_dict(row)
-                # Fallback to treated_patient_archive if archived
+                active_st = _row_to_status_dict(row) if row else None
+
+                # Check treated_patient_archive for completed/ruled-out fallback or precedence
                 try:
                     await cur.execute("SELECT * FROM treated_patient_archive WHERE hn = %s ORDER BY id DESC LIMIT 1;", (hn,))
                     a_row = await cur.fetchone()
                     if a_row:
-                        return {
-                            "hn": hn,
-                            "vn": a_row.get("vn"),
-                            "acknowledged": bool(a_row.get("acknowledged_at")),
-                            "acknowledged_at": a_row.get("acknowledged_at").isoformat() if a_row.get("acknowledged_at") else None,
-                            "acknowledged_by": a_row.get("acknowledged_by"),
-                            "doctor_confirmed": bool(a_row.get("doctor_confirmed")),
-                            "countdown_started_at": a_row.get("countdown_started_at").isoformat() if a_row.get("countdown_started_at") else None,
-                            "countdown_duration": a_row.get("countdown_duration", 3600),
-                            "treatment_completed": bool(a_row.get("treatment_completed")),
-                            "treatment_completed_at": a_row.get("treatment_completed_at").isoformat() if a_row.get("treatment_completed_at") else None,
-                            "treatment_completed_by": a_row.get("treatment_completed_by"),
-                            "sepsis_ruled_out": bool(a_row.get("sepsis_ruled_out")),
-                            "checklist_json": a_row.get("checklist_json"),
-                            "is_archived": True,
-                        }
+                        archive_st = _archive_row_to_status_dict(a_row)
+                        return _merge_archive_status(active_st, archive_st)
                 except Exception:
                     pass
-                return None
+                return active_st
     except Exception as e:
         logger.error(f"Error fetching treatment status for HN {hn}: {e}")
         return None
+
+
+async def get_active_treating_hns() -> list[str]:
+    """Return HNs of patients actively under treatment (not completed and not ruled out)."""
+    if not dashboard_pool.pool or getattr(dashboard_pool.pool, "closed", False):
+        return []
+    try:
+        async with dashboard_pool.get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT hn FROM patient_treatment_status "
+                    "WHERE treatment_completed = 0 AND sepsis_ruled_out = 0;"
+                )
+                active_rows = await cur.fetchall()
+
+                archived_hns: set[str] = set()
+                try:
+                    await cur.execute(
+                        "SELECT DISTINCT hn FROM treated_patient_archive "
+                        "WHERE treatment_completed = 1 OR sepsis_ruled_out = 1;"
+                    )
+                    archive_rows = await cur.fetchall()
+                    for r in archive_rows:
+                        hn_val = r["hn"] if isinstance(r, dict) else r[0]
+                        if hn_val:
+                            archived_hns.add(str(hn_val))
+                except Exception:
+                    pass
+
+                result: list[str] = []
+                seen: set[str] = set()
+                for r in active_rows:
+                    hn_val = r["hn"] if isinstance(r, dict) else r[0]
+                    if hn_val:
+                        hn_str = str(hn_val)
+                        if hn_str not in archived_hns and hn_str not in seen:
+                            seen.add(hn_str)
+                            result.append(hn_str)
+                return result
+    except Exception as e:
+        logger.error(f"Error fetching active treating HNs: {e}")
+        return []
+
 
 async def acknowledge_alert(hn: str, acknowledged_by: str = "Nurse/System", vn: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -232,6 +298,23 @@ async def acknowledge_alert(hn: str, acknowledged_by: str = "Nurse/System", vn: 
             async with conn.cursor() as cur:
                 await cur.execute(query, (hn, vn, now_str, acknowledged_by))
         logger.info(f"Acknowledged alert centrally for HN {hn} by {acknowledged_by}")
+        try:
+            from .log_service import record_log
+            record_log(
+                "Note",
+                f"พยาบาลรับทราบการแจ้งเตือนความเสี่ยง Sepsis (Acknowledge Alert): ผู้ป่วย {_format_hn_display(hn)} โดย {acknowledged_by} (ยังไม่เริ่มนับเวลา 60 นาที จนกว่าแพทย์จะยืนยัน)",
+                component="Clinical_Treatment",
+                details={
+                    "event": "alert_acknowledged",
+                    "hn": hn,
+                    "vn": vn,
+                    "acknowledged_by": acknowledged_by,
+                    "acknowledged_at": now_str,
+                    "timer_started": False,
+                },
+            )
+        except Exception as log_err:
+            logger.error(f"Failed to record acknowledge alert log: {log_err}")
         status = await get_treatment_status(hn)
         return status or {
             "hn": hn,
@@ -287,6 +370,24 @@ async def doctor_confirm_sepsis(
             async with conn.cursor() as cur:
                 await cur.execute(query, (hn, start_str, confirmed_by, start_str))
         logger.info(f"Doctor confirmed sepsis centrally for HN {hn} by {confirmed_by} (physician: {physician}, started_at: {start_str})")
+        try:
+            from .log_service import record_log
+            doc_name = physician or confirmed_by
+            record_log(
+                "Warning",
+                f"แพทย์ยืนยันภาวะสงสัย Sepsis (Start 60-Min Bundle Timer): ผู้ป่วย {_format_hn_display(hn)} — แพทย์: {doc_name} | เริ่มจับเวลา 60 นาที เมื่อ {start_str}",
+                component="Clinical_Treatment",
+                details={
+                    "event": "doctor_confirmed_sepsis",
+                    "hn": hn,
+                    "physician": doc_name,
+                    "confirmed_by": confirmed_by,
+                    "countdown_started_at": start_str,
+                    "countdown_duration_sec": 3600,
+                },
+            )
+        except Exception as log_err:
+            logger.error(f"Failed to record doctor confirm log: {log_err}")
         status = await get_treatment_status(hn)
         return status or {
             "hn": hn,
@@ -407,8 +508,8 @@ async def rule_out_sepsis(hn: str) -> Dict[str, Any]:
         raise e
 
 async def update_checklist_json(hn: str, checklist_json: str) -> Dict[str, Any]:
-    """Save the serialized checklist JSON for a patient."""
-    query = """
+    """Save the serialized checklist JSON without resurrecting archived patients as active."""
+    upsert_active_sql = """
     INSERT INTO patient_treatment_status (hn, checklist_json)
     VALUES (%s, %s)
     ON DUPLICATE KEY UPDATE
@@ -418,7 +519,26 @@ async def update_checklist_json(hn: str, checklist_json: str) -> Dict[str, Any]:
     try:
         async with dashboard_pool.get_connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(query, (hn, checklist_json))
+                await cur.execute(
+                    "SELECT hn FROM patient_treatment_status WHERE hn = %s LIMIT 1;",
+                    (hn,),
+                )
+                active_row = await cur.fetchone()
+                if active_row:
+                    await cur.execute(upsert_active_sql, (hn, checklist_json))
+                else:
+                    await cur.execute(
+                        "SELECT id FROM treated_patient_archive WHERE hn = %s ORDER BY id DESC LIMIT 1;",
+                        (hn,),
+                    )
+                    archived_row = await cur.fetchone()
+                    if archived_row:
+                        await cur.execute(
+                            "UPDATE treated_patient_archive SET checklist_json = %s WHERE id = %s;",
+                            (checklist_json, archived_row[0]),
+                        )
+                    else:
+                        await cur.execute(upsert_active_sql, (hn, checklist_json))
         status = await get_treatment_status(hn)
         return status or {"hn": hn, "checklist_json": checklist_json}
     except Exception as e:
@@ -763,9 +883,9 @@ async def get_archived_stats() -> Dict[str, Any]:
 async def clear_treated_statuses() -> List[str]:
     """
     Clear/remove all treatment completion records from patient_treatment_status
-    where treatment_completed = 1.
+    and treated_patient_archive where treatment is completed or sepsis ruled out.
     Does NOT touch active treatments (treatment_completed = 0) nor raw patient visits.
-    Returns list of cleared HNs.
+    Returns deduplicated list of cleared HNs.
     """
     if not dashboard_pool.pool or getattr(dashboard_pool.pool, '_closed', False):
         logger.warning("Dashboard database pool is not available — skipped clearing patient_treatment_status")
@@ -781,8 +901,21 @@ async def clear_treated_statuses() -> List[str]:
                 cleared_hns = [str(r[0]) for r in rows]
                 if cleared_hns:
                     await cur.execute(query_delete)
-        logger.info(f"Cleared {len(cleared_hns)} treated records from patient_treatment_status: {cleared_hns}")
-        return cleared_hns
+
+                # Also clear archived treated cases from treated_patient_archive
+                try:
+                    await cur.execute("SELECT DISTINCT hn FROM treated_patient_archive;")
+                    arch_rows = await cur.fetchall()
+                    arch_hns = [str(r[0]) for r in arch_rows if r and r[0]]
+                    if arch_hns:
+                        cleared_hns.extend(arch_hns)
+                    await cur.execute("DELETE FROM treated_patient_archive;")
+                except Exception as arch_err:
+                    logger.warning(f"Could not clear treated_patient_archive in clear_treated_statuses: {arch_err}")
+
+        unique_cleared_hns = list(dict.fromkeys(cleared_hns))
+        logger.info(f"Cleared {len(unique_cleared_hns)} treated records across treatment status and archive: {unique_cleared_hns}")
+        return unique_cleared_hns
     except Exception as e:
         logger.warning(f"Could not clear treated statuses from DB: {e}")
         return []
@@ -838,6 +971,31 @@ async def set_avpu_assessment(
             async with conn.cursor() as cur:
                 await cur.execute(query, params)
         logger.info(f"Recorded AVPU assessment for HN {hn}: {avpu} ({avpu_status})")
+        try:
+            from .log_service import record_log
+            avpu_score = 0 if avpu == "A" else 3
+            o2_text = (
+                f" | O₂: {'ใช้ออกซิเจนเสริม (+2)' if supplemental_oxygen else 'Room Air (0)'}"
+                if supplemental_oxygen is not None
+                else ""
+            )
+            record_log(
+                "Warning" if avpu != "A" else "Note",
+                f"ประเมินระดับความรู้สึกตัว (AVPU Assessment): ผู้ป่วย {_format_hn_display(hn)} — AVPU = {avpu} (+{avpu_score} คะแนน){o2_text}",
+                component="Clinical_Treatment",
+                details={
+                    "event": "avpu_assessed",
+                    "hn": hn,
+                    "vn": vn,
+                    "avpu": avpu,
+                    "avpu_score": avpu_score,
+                    "gcs": current_gcs,
+                    "supplemental_oxygen": supplemental_oxygen,
+                    "assessed_at": now_str,
+                },
+            )
+        except Exception as log_err:
+            logger.error(f"Failed to record AVPU assessment log: {log_err}")
         status = await get_treatment_status(hn)
         return status or {
             "hn": hn,
@@ -870,6 +1028,28 @@ async def toggle_oxygen_supplementation(hn: str, supplemental_oxygen: bool, vn: 
             async with conn.cursor() as cur:
                 await cur.execute(query, (hn, vn, val))
         logger.info(f"Updated supplemental oxygen for HN {hn}: {supplemental_oxygen}")
+        try:
+            from .log_service import record_log
+            o2_label = (
+                "ใช้ออกซิเจนเสริม (+2 คะแนน)"
+                if supplemental_oxygen
+                else "ไม่ใช้ออกซิเจนเสริม / Room Air (0 คะแนน)"
+            )
+            record_log(
+                "Note",
+                f"บันทึกสถานะออกซิเจนเสริม (Supplemental O₂): ผู้ป่วย {_format_hn_display(hn)} — {o2_label}",
+                component="Clinical_Treatment",
+                details={
+                    "event": "oxygen_status_updated",
+                    "hn": hn,
+                    "vn": vn,
+                    "supplemental_oxygen": supplemental_oxygen,
+                    "o2_score": 2 if supplemental_oxygen else 0,
+                    "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                },
+            )
+        except Exception as log_err:
+            logger.error(f"Failed to record oxygen status log: {log_err}")
         status = await get_treatment_status(hn)
         return status or {
             "hn": hn,

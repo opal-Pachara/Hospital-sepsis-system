@@ -75,6 +75,7 @@ export default memo(function TreatedDashboard({
   const [dailyHistory, setDailyHistory] = useState<DailySummaryItem[]>([]);
   const [cases, setCases] = useState<TreatedCaseItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [isClearing, setIsClearing] = useState<boolean>(false);
   const [filterType, setFilterType] = useState<'all' | 'completed' | 'ruled_out'>('all');
 
   // In-dashboard Timeline Modal state
@@ -435,159 +436,184 @@ export default memo(function TreatedDashboard({
     showToast('ดาวน์โหลดไฟล์ CSV สรุปสถิติเรียบร้อย', 'success');
   };
 
+  // Clear all treated patients from DB archive, backend status, and client store
+  const handleClearAllTreated = async () => {
+    if (isClearing) return;
+    setIsClearing(true);
+    try {
+      const res = await fetch('/api/admin/reset-dashboard', { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      useRTSASStore.getState().clearTreatedPatients();
+      setAvailableDates([]);
+      setDailyHistory([]);
+      setCases([]);
+      setSelectedDate('');
+      showToast('ล้างข้อมูลผู้ป่วยที่รักษาแล้วทั้งหมดเรียบร้อย', 'success');
+    } catch (err) {
+      console.error('[TreatedDashboard] Failed to clear treated patients:', err);
+      showToast('ไม่สามารถล้างข้อมูลผู้ป่วยที่รักษาแล้วได้', 'error');
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
   return (
     <div
       id="treated-patients-dashboard"
       className="flex-1 overflow-y-auto bg-surface-base"
-      style={{ fontFamily: 'inherit', paddingBottom: '30px' }}
+      style={{ fontFamily: 'inherit', padding: '14px' }}
     >
-      {/* ─── Top Sub-Header Bar (Light Theme matching Header.tsx & AdminPage.tsx) ─── */}
-      <div
-        className="bg-white border-b border-slate-200 px-6 py-3.5 flex items-center justify-between flex-shrink-0 relative overflow-hidden"
-        style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}
-      >
-        {/* Top gradient accent line (3px) */}
+      {/* ─── Main Content Container (matching .detail-panel-col-inner layout) ─── */}
+      <div style={{ maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {/* ─── Top Header Card (PatientInfoBar.tsx style) ─── */}
         <div
-          className="absolute top-0 left-0 right-0 h-[3px]"
-          style={{ background: 'linear-gradient(90deg, #2563eb, #0891b2, #16a34a)' }}
-        />
-
-        {/* Left: Title + Hospital & Date details */}
-        <div className="flex items-center gap-3">
+          className="bg-white border border-[#dde3ed] rounded-xl relative overflow-hidden"
+          style={{ padding: '12px 16px 12px 20px', boxShadow: '0 1px 4px rgba(0,0,0,.06)' }}
+        >
+          {/* Left vertical gradient accent bar */}
           <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold shadow-xs flex-shrink-0"
+            className="absolute left-0 top-0 bottom-0 w-[5px]"
             style={{
-              background: 'linear-gradient(135deg, #eff6ff, #dbeafe)',
-              border: '1px solid #bfdbfe',
-              color: '#2563eb',
+              background: 'linear-gradient(to bottom, #2563eb, #0891b2)',
+              borderRadius: '12px 0 0 12px',
             }}
-          >
-            📊
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-base font-black text-slate-800 tracking-tight">
-                แผงควบคุมสรุปผู้ป่วยที่รักษาแล้ว
-              </span>
-            </div>
-            <div className="text-xs text-slate-500 font-medium mt-0.5">
-              โรงพยาบาลบางคล้า · {selectedDate ? `ข้อมูลสรุปประจำวันที่ ${formatThaiDate(selectedDate)} (${selectedDate})` : 'ระบบพร้อมรองรับข้อมูลการรักษาจริง (Ready for Production)'}
-            </div>
-          </div>
-        </div>
+          />
 
-        {/* Right: Actions (CSV Export & Return to Live Monitoring) */}
-        <div className="flex items-center gap-2.5">
-
-          {onBackToClinical && (
-            <button
-              type="button"
-              id="btn-back-to-clinical"
-              onClick={onBackToClinical}
-              style={{
-                padding: '6px 14px',
-                borderRadius: '8px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                border: '1px solid #bfdbfe',
-                background: '#2563eb',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                boxShadow: '0 2px 6px rgba(37,99,235,0.25)',
-                transition: 'all 0.15s',
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.background = '#1d4ed8';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.background = '#2563eb';
-              }}
-              title="กลับสู่หน้าติดตามผู้ป่วยสด (Bedside Monitoring)"
-            >
-              <span>🔙</span>
-              <span>ติดตามผู้ป่วยกำลังรักษา</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ─── Main Content Container (styled identically to RTSAS layout columns) ─── */}
-      <div style={{ padding: '14px 18px', maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        {/* ─── Production Ready Notice when no data exists ─── */}
-        {dailyHistory.length === 0 && cases.length === 0 && (
-          <div
-            className="bg-emerald-50/90 border border-emerald-200 rounded-xl relative overflow-hidden"
-            style={{ padding: '14px 18px', boxShadow: '0 1px 4px rgba(0,0,0,0.03)' }}
-          >
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <div className="flex items-center gap-3">
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
-                  style={{ background: '#dcfce7', border: '1px solid #86efac', color: '#16a34a' }}
-                >
-                  ✨
-                </div>
-                <div>
-                  <div className="text-sm font-black text-emerald-900 tracking-tight">
-                    เคลียร์ข้อมูลตัวอย่างในหน้านี้ออกหมดเรียบร้อยแล้ว (Ready for Production Deployment)
-                  </div>
-                  <div className="text-xs text-emerald-700 font-medium mt-0.5">
-                    หน้านี้ว่างเปล่าเพื่อรอรับข้อมูลผู้ป่วยจริง — เมื่อมีเคสที่รักษาตาม Sepsis Bundle สำเร็จ หรือ Rule Out ในห้องฉุกเฉิน รายการสรุปและสถิติจะบันทึกที่นี่โดยอัตโนมัติ
-                  </div>
-                </div>
+          {/* Row 1: Title + Action Buttons */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b' }}>
+                สรุปข้อมูลผู้ป่วยที่สิ้นสุดการรักษา (Treated Patients Dashboard)
               </div>
+              <span
+                style={{
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  fontSize: '10.5px',
+                  fontWeight: 700,
+                  background: '#eff6ff',
+                  border: '1px solid #bfdbfe',
+                  color: '#2563eb',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                📊 รายงานสรุป ER
+              </span>
+              {selectedDate && (
+                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+                  · ประจำวันที่ {formatThaiDate(selectedDate)}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {(dailyHistory.length > 0 || cases.length > 0) && (
+                <>
+                  <button
+                    type="button"
+                    id="btn-export-treated-csv"
+                    onClick={handleExportCSV}
+                    style={{
+                      padding: '5px 11px',
+                      borderRadius: '8px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      border: '1px solid #86efac',
+                      background: '#f0fdf4',
+                      color: '#15803d',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      transition: 'all 0.15s',
+                    }}
+                    title="ส่งออกรายงานสรุปเป็นไฟล์ CSV (รองรับภาษาไทย)"
+                  >
+                    <span>📥</span>
+                    <span>ส่งออก CSV</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="btn-clear-all-treated"
+                    onClick={handleClearAllTreated}
+                    disabled={isClearing}
+                    style={{
+                      padding: '5px 11px',
+                      borderRadius: '8px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: isClearing ? 'wait' : 'pointer',
+                      fontFamily: 'inherit',
+                      border: '1px solid #fecaca',
+                      background: '#fef2f2',
+                      color: '#dc2626',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      opacity: isClearing ? 0.65 : 1,
+                      transition: 'all 0.15s',
+                    }}
+                    title="ล้างประวัติผู้ป่วยที่สิ้นสุดการรักษาทั้งหมดออกจากระบบ"
+                  >
+                    <span>🗑️</span>
+                    <span>{isClearing ? 'กำลังล้างข้อมูล...' : 'ล้างข้อมูลผู้ป่วยที่รักษาแล้ว'}</span>
+                  </button>
+                </>
+              )}
+
               {onBackToClinical && (
                 <button
                   type="button"
+                  id="btn-back-to-clinical"
                   onClick={onBackToClinical}
                   style={{
-                    padding: '6px 14px',
+                    padding: '5px 12px',
                     borderRadius: '8px',
                     fontSize: '11px',
                     fontWeight: 700,
                     cursor: 'pointer',
                     fontFamily: 'inherit',
-                    border: '1px solid #86efac',
-                    background: '#16a34a',
+                    border: '1px solid #bfdbfe',
+                    background: '#2563eb',
                     color: '#ffffff',
-                    display: 'flex',
+                    display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '6px',
-                    boxShadow: '0 2px 4px rgba(22, 163, 74, 0.2)',
+                    gap: '5px',
+                    boxShadow: '0 1px 4px rgba(37,99,235,0.2)',
                     transition: 'all 0.15s',
                   }}
                   onMouseOver={(e) => {
-                    e.currentTarget.style.background = '#15803d';
+                    e.currentTarget.style.background = '#1d4ed8';
                   }}
                   onMouseOut={(e) => {
-                    e.currentTarget.style.background = '#16a34a';
+                    e.currentTarget.style.background = '#2563eb';
                   }}
+                  title="กลับสู่หน้าติดตามผู้ป่วยสด (Bedside Monitoring)"
                 >
-                  <span>🏥</span>
-                  <span>ติดตามผู้ป่วยสดที่ห้องฉุกเฉิน (ER)</span>
+                  <span>←</span>
+                  <span>กลับหน้าติดตามผู้ป่วย</span>
                 </button>
               )}
             </div>
           </div>
-        )}
 
-        {/* ─── Date Selection Bar (styled like Sidebar filter pills) ─── */}
-        <div
-          className="bg-white border border-[#dde3ed] rounded-xl relative overflow-hidden"
-          style={{ padding: '10px 14px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
-        >
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-2 flex-wrap">
+          {/* Row 2: Date Filter Strip integrated inside Header Card */}
+          <div
+            className="flex items-center justify-between flex-wrap gap-2"
+            style={{
+              borderTop: '1px solid #f1f5f9',
+              marginTop: '10px',
+              paddingTop: '9px',
+            }}
+          >
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>
-                📅 เลือกวันที่ประเมิน:
+                📅 เลือกวันที่รับบริการ:
               </span>
               {availableDates.length === 0 ? (
-                <span style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic' }}>
-                  ยังไม่มีประวัติวันที่บันทึกการรักษาในระบบ (ข้อมูลตัวอย่างถูกเคลียร์ออกแล้ว)
+                <span style={{ fontSize: '11px', color: '#64748b' }}>
+                  ยังไม่มีประวัติการรักษาที่บันทึกในระบบ
                 </span>
               ) : (
                 availableDates.slice(0, 7).map((d) => {
@@ -599,16 +625,16 @@ export default memo(function TreatedDashboard({
                       type="button"
                       onClick={() => setSelectedDate(d)}
                       style={{
-                        padding: '4px 12px',
+                        padding: '3px 10px',
                         borderRadius: '20px',
-                        fontSize: '11px',
+                        fontSize: '10.5px',
                         fontWeight: isSelected ? 700 : 600,
                         cursor: 'pointer',
                         fontFamily: 'inherit',
                         border: isSelected ? '1px solid #2563eb' : '1px solid #cbd5e1',
                         background: isSelected ? '#2563eb' : '#f8fafc',
                         color: isSelected ? '#ffffff' : '#475569',
-                        boxShadow: isSelected ? '0 2px 4px rgba(37,99,235,0.2)' : 'none',
+                        boxShadow: isSelected ? '0 1px 3px rgba(37,99,235,0.2)' : 'none',
                         transition: 'all 0.15s',
                       }}
                       onMouseOver={(e) => {
@@ -631,15 +657,15 @@ export default memo(function TreatedDashboard({
               )}
             </div>
 
-            <div className="flex items-center gap-2">
-              <span style={{ fontSize: '11px', color: '#64748b' }}>หรือระบุวันที่:</span>
+            <div className="flex items-center gap-1.5">
+              <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#64748b' }}>ระบุวันที่:</span>
               <input
                 type="date"
                 value={selectedDate}
                 onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
                 style={{
                   fontSize: '11px',
-                  padding: '4px 8px',
+                  padding: '3px 8px',
                   borderRadius: '6px',
                   border: '1px solid #cbd5e1',
                   background: '#f8fafc',
@@ -652,139 +678,181 @@ export default memo(function TreatedDashboard({
           </div>
         </div>
 
-        {/* ─── 5 Executive KPI Metric Cards (styled like PatientInfoBar & VitalCards) ─── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
-          {/* Card 1: Total Patients */}
-          <div
-            className="bg-white border border-[#dde3ed] rounded-xl relative overflow-hidden transition-all hover:shadow-md"
-            style={{ padding: '12px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
-          >
-            <div
-              className="absolute left-0 top-0 bottom-0 w-[4px]"
-              style={{ background: '#3b82f6', borderRadius: '12px 0 0 12px' }}
-            />
-            <div className="flex justify-between items-center">
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                ผู้ป่วยตรวจทั้งหมด
-              </span>
-              <span style={{ fontSize: '9px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe' }}>
-                👥 ER
-              </span>
+        {/* ─── KPI Metrics Section (SectionCard + VitalSignsGrid Card style) ─── */}
+        <div className="section-card">
+          <div className="section-card-header">
+            <div className="section-card-title">
+              <span>📊</span> สรุปตัวชี้วัดการดูแลผู้ป่วย Sepsis ประจำวัน
             </div>
-            <div style={{ fontSize: '28px', fontWeight: 900, color: '#1e293b', fontVariantNumeric: 'tabular-nums', marginTop: '2px' }}>
-              {loading ? '...' : currentDayStats.total_cases}
-              <span style={{ fontSize: '12px', fontWeight: 500, color: '#94a3b8', marginLeft: '4px' }}>ราย</span>
-            </div>
-            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
-              ยอดตรวจสะสมประจำวัน
+            <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600 }}>
+              {selectedDate ? `วันที่ ${formatThaiDate(selectedDate)}` : 'รอข้อมูลจากห้องฉุกเฉิน (ER)'}
             </div>
           </div>
 
-          {/* Card 2: Sepsis High Risk */}
-          <div
-            className="bg-white border border-[#fca5a5] rounded-xl relative overflow-hidden transition-all hover:shadow-md"
-            style={{ padding: '12px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
-          >
-            <div
-              className="absolute left-0 top-0 bottom-0 w-[4px]"
-              style={{ background: '#dc2626', borderRadius: '12px 0 0 12px' }}
-            />
-            <div className="flex justify-between items-center">
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                เสี่ยงติดเชื้อ SEPSIS
-              </span>
-              <span style={{ fontSize: '9px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5' }}>
-                🔴 NEWS ≥ 5
-              </span>
-            </div>
-            <div style={{ fontSize: '28px', fontWeight: 900, color: '#dc2626', fontVariantNumeric: 'tabular-nums', marginTop: '2px' }}>
-              {loading ? '...' : currentDayStats.high_risk_cases}
-              <span style={{ fontSize: '12px', fontWeight: 500, color: '#f87171', marginLeft: '4px' }}>ราย</span>
-            </div>
-            <div style={{ fontSize: '10px', color: '#b91c1c', marginTop: '2px' }}>
-              คะแนน NEWS ≥ 5 หรือ Single Alert
-            </div>
-          </div>
-
-          {/* Card 3: Treatment Completed */}
-          <div
-            className="bg-white border border-[#86efac] rounded-xl relative overflow-hidden transition-all hover:shadow-md"
-            style={{ padding: '12px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
-          >
-            <div
-              className="absolute left-0 top-0 bottom-0 w-[4px]"
-              style={{ background: '#16a34a', borderRadius: '12px 0 0 12px' }}
-            />
-            <div className="flex justify-between items-center">
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                รักษาสำเร็จ (BUNDLE DONE)
-              </span>
-              <span style={{ fontSize: '9px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: '#f0fdf4', color: '#15803d', border: '1px solid #86efac' }}>
-                ✓ 60 นาที
-              </span>
-            </div>
-            <div style={{ fontSize: '28px', fontWeight: 900, color: '#16a34a', fontVariantNumeric: 'tabular-nums', marginTop: '2px' }}>
-              {loading ? '...' : currentDayStats.treated_completed}
-              <span style={{ fontSize: '12px', fontWeight: 500, color: '#86efac', marginLeft: '4px' }}>ราย</span>
-            </div>
-            <div style={{ fontSize: '10px', color: '#15803d', marginTop: '2px' }}>
-              ครบตามเกณฑ์ 1-Hour Protocol
-            </div>
-          </div>
-
-          {/* Card 4: Ruled Out Sepsis */}
-          <div
-            className="bg-white border border-[#99f6e4] rounded-xl relative overflow-hidden transition-all hover:shadow-md"
-            style={{ padding: '12px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
-          >
-            <div
-              className="absolute left-0 top-0 bottom-0 w-[4px]"
-              style={{ background: '#0d9488', borderRadius: '12px 0 0 12px' }}
-            />
-            <div className="flex justify-between items-center">
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#0f766e', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                RULE OUT SEPSIS
-              </span>
-              <span style={{ fontSize: '9px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: '#f0fdfa', color: '#0f766e', border: '1px solid #99f6e4' }}>
-                🟢 แพทย์ประเมิน
-              </span>
-            </div>
-            <div style={{ fontSize: '28px', fontWeight: 900, color: '#0f766e', fontVariantNumeric: 'tabular-nums', marginTop: '2px' }}>
-              {loading ? '...' : currentDayStats.ruled_out}
-              <span style={{ fontSize: '12px', fontWeight: 500, color: '#5eead4', marginLeft: '4px' }}>ราย</span>
-            </div>
-            <div style={{ fontSize: '10px', color: '#0f766e', marginTop: '2px' }}>
-              แพทย์วินิจฉัยไม่ใช่ Sepsis
-            </div>
-          </div>
-
-          {/* Card 5: Bundle Compliance */}
-          <div
-            className="bg-white border border-[#ddd6fe] rounded-xl relative overflow-hidden transition-all hover:shadow-md"
-            style={{ padding: '12px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
-          >
-            <div
-              className="absolute left-0 top-0 bottom-0 w-[4px]"
-              style={{ background: '#8b5cf6', borderRadius: '12px 0 0 12px' }}
-            />
-            <div className="flex justify-between items-center">
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#6d28d9', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                BUNDLE COMPLIANCE
-              </span>
-            </div>
-            <div style={{ fontSize: '28px', fontWeight: 900, color: '#6d28d9', fontVariantNumeric: 'tabular-nums', marginTop: '2px' }}>
-              {loading ? '...' : `${currentDayStats.compliance_rate}%`}
-            </div>
-            {/* Progress bar matching ChecklistPanel */}
-            <div style={{ height: '6px', background: '#f1f5f9', borderRadius: '3px', overflow: 'hidden', marginTop: '4px' }}>
+          <div className="section-card-body">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: '8px' }}>
+              {/* Card 1: Total Treated */}
               <div
-                style={{
-                  height: '100%',
-                  borderRadius: '3px',
-                  width: `${Math.min(100, currentDayStats.compliance_rate)}%`,
-                  background: 'linear-gradient(90deg, #8b5cf6, #6d28d9)',
-                }}
-              />
+                className="vital-card rounded-[10px] border border-[#e2e8f0] bg-[#f8fafc] text-center relative overflow-hidden"
+                style={{ padding: '10px 8px' }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '5px',
+                    right: '6px',
+                    fontSize: '8.5px',
+                    fontWeight: 700,
+                    padding: '1px 5px',
+                    borderRadius: '10px',
+                    background: '#eff6ff',
+                    color: '#2563eb',
+                    border: '1px solid #bfdbfe',
+                  }}
+                >
+                  ER
+                </span>
+                <div style={{ fontSize: '9.5px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px', fontWeight: 700 }}>
+                  ผู้ป่วยที่สิ้นสุดการรักษา
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#1e293b', fontVariantNumeric: 'tabular-nums', margin: '4px 0 2px' }}>
+                  {loading ? '...' : currentDayStats.total_cases}
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b', marginLeft: '3px' }}>ราย</span>
+                </div>
+                <div style={{ fontSize: '9.5px', color: '#64748b' }}>เคสที่ปิดการรักษาในวัน</div>
+              </div>
+
+              {/* Card 2: Sepsis High Risk */}
+              <div
+                className="vital-card rounded-[10px] border border-[#fca5a5] bg-[#fef2f2] text-center relative overflow-hidden"
+                style={{ padding: '10px 8px' }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '5px',
+                    right: '6px',
+                    fontSize: '8.5px',
+                    fontWeight: 700,
+                    padding: '1px 5px',
+                    borderRadius: '10px',
+                    background: '#fee2e2',
+                    color: '#dc2626',
+                    border: '1px solid #fca5a5',
+                  }}
+                >
+                  NEWS ≥ 5
+                </span>
+                <div style={{ fontSize: '9.5px', color: '#b91c1c', textTransform: 'uppercase', letterSpacing: '0.4px', fontWeight: 700 }}>
+                  เสี่ยงติดเชื้อ Sepsis
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#dc2626', fontVariantNumeric: 'tabular-nums', margin: '4px 0 2px' }}>
+                  {loading ? '...' : currentDayStats.high_risk_cases}
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#dc2626', marginLeft: '3px' }}>ราย</span>
+                </div>
+                <div style={{ fontSize: '9.5px', color: '#b91c1c' }}>เกณฑ์ประเมินความเสี่ยงสูง</div>
+              </div>
+
+              {/* Card 3: Treatment Completed */}
+              <div
+                className="vital-card rounded-[10px] border border-[#86efac] bg-[#f0fdf4] text-center relative overflow-hidden"
+                style={{ padding: '10px 8px' }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '5px',
+                    right: '6px',
+                    fontSize: '8.5px',
+                    fontWeight: 700,
+                    padding: '1px 5px',
+                    borderRadius: '10px',
+                    background: '#dcfce7',
+                    color: '#15803d',
+                    border: '1px solid #86efac',
+                  }}
+                >
+                  ✓ 60 น.
+                </span>
+                <div style={{ fontSize: '9.5px', color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.4px', fontWeight: 700 }}>
+                  รักษาสำเร็จ (Bundle)
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#16a34a', fontVariantNumeric: 'tabular-nums', margin: '4px 0 2px' }}>
+                  {loading ? '...' : currentDayStats.treated_completed}
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#15803d', marginLeft: '3px' }}>ราย</span>
+                </div>
+                <div style={{ fontSize: '9.5px', color: '#15803d' }}>ครบตามเกณฑ์ 1-Hour Bundle</div>
+              </div>
+
+              {/* Card 4: Ruled Out Sepsis */}
+              <div
+                className="vital-card rounded-[10px] border border-[#99f6e4] bg-[#f0fdfa] text-center relative overflow-hidden"
+                style={{ padding: '10px 8px' }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '5px',
+                    right: '6px',
+                    fontSize: '8.5px',
+                    fontWeight: 700,
+                    padding: '1px 5px',
+                    borderRadius: '10px',
+                    background: '#ccfbf1',
+                    color: '#0f766e',
+                    border: '1px solid #5eead4',
+                  }}
+                >
+                  แพทย์
+                </span>
+                <div style={{ fontSize: '9.5px', color: '#0f766e', textTransform: 'uppercase', letterSpacing: '0.4px', fontWeight: 700 }}>
+                  Rule Out Sepsis
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#0d9488', fontVariantNumeric: 'tabular-nums', margin: '4px 0 2px' }}>
+                  {loading ? '...' : currentDayStats.ruled_out}
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#0f766e', marginLeft: '3px' }}>ราย</span>
+                </div>
+                <div style={{ fontSize: '9.5px', color: '#0f766e' }}>วินิจฉัยไม่ใช่ภาวะ Sepsis</div>
+              </div>
+
+              {/* Card 5: Bundle Compliance */}
+              <div
+                className="vital-card rounded-[10px] border border-[#c4b5fd] bg-[#f5f3ff] text-center relative overflow-hidden"
+                style={{ padding: '10px 8px' }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '5px',
+                    right: '6px',
+                    fontSize: '8.5px',
+                    fontWeight: 700,
+                    padding: '1px 5px',
+                    borderRadius: '10px',
+                    background: '#ede9fe',
+                    color: '#6d28d9',
+                    border: '1px solid #c4b5fd',
+                  }}
+                >
+                  %
+                </span>
+                <div style={{ fontSize: '9.5px', color: '#6d28d9', textTransform: 'uppercase', letterSpacing: '0.4px', fontWeight: 700 }}>
+                  Bundle Compliance
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#6d28d9', fontVariantNumeric: 'tabular-nums', margin: '4px 0 2px' }}>
+                  {loading ? '...' : `${currentDayStats.compliance_rate}%`}
+                </div>
+                <div style={{ height: '5px', background: '#ede9fe', borderRadius: '3px', overflow: 'hidden', margin: '4px 8px 0' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      borderRadius: '3px',
+                      width: `${Math.min(100, currentDayStats.compliance_rate)}%`,
+                      background: 'linear-gradient(90deg, #8b5cf6, #6d28d9)',
+                    }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -802,9 +870,12 @@ export default memo(function TreatedDashboard({
 
           <div className="overflow-x-auto">
             {dailyHistory.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '36px', fontSize: '11px', color: '#94a3b8' }}>
-                <div style={{ fontSize: '24px', marginBottom: '8px' }}>📈</div>
-                ยังไม่มีข้อมูลสรุปเปรียบเทียบสถิติแยกตามวัน — ข้อมูลตัวอย่างถูกเคลียร์ออกเรียบร้อยแล้วเพื่อรอการ Deployment ใช้งานจริง
+              <div className="flex flex-col items-center justify-center py-10 text-text-muted text-center px-4">
+                <div className="text-2xl mb-2 opacity-50">📈</div>
+                <p className="text-xs font-bold text-text-secondary">ยังไม่มีข้อมูลสถิติรายวันในระบบ</p>
+                <p className="text-[11px] mt-1 max-w-[380px] text-text-muted leading-relaxed">
+                  สถิติเปรียบเทียบรายวันจะแสดงผลอัตโนมัติเมื่อมีการบันทึกสิ้นสุดการรักษาหรือ Rule Out Sepsis
+                </p>
               </div>
             ) : (
               <table className="w-full text-left border-collapse" style={{ fontSize: '11px' }}>
@@ -1007,9 +1078,12 @@ export default memo(function TreatedDashboard({
 
           <div className="overflow-x-auto">
             {filteredCases.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '36px', fontSize: '11px', color: '#94a3b8' }}>
-                <div style={{ fontSize: '24px', marginBottom: '8px' }}>📋</div>
-                ยังไม่มีรายชื่อผู้ป่วยที่รักษาแล้วในระบบ — ข้อมูลตัวอย่างถูกเคลียร์ออกเรียบร้อยแล้วเพื่อรอการใช้งานจริง
+              <div className="flex flex-col items-center justify-center py-10 text-text-muted text-center px-4">
+                <div className="text-2xl mb-2 opacity-50">📋</div>
+                <p className="text-xs font-bold text-text-secondary">ยังไม่มีรายชื่อผู้ป่วยที่รักษาแล้ว</p>
+                <p className="text-[11px] mt-1 max-w-[400px] text-text-muted leading-relaxed">
+                  ผู้ป่วยที่ดำเนินการ Sepsis Bundle เสร็จสิ้น หรือแพทย์วินิจฉัย Rule Out Sepsis จะแสดงในตารางนี้โดยอัตโนมัติ
+                </p>
               </div>
             ) : (
               <table className="w-full text-left border-collapse" style={{ fontSize: '11px' }}>

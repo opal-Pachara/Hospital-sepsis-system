@@ -14,6 +14,24 @@ import { maskHN } from '../utils/hnMask';
 import { showToast } from '../components/common/Toast';
 import { extractErrorMessage } from '../utils/errorUtils';
 import SystemLogsModal from '../components/modals/SystemLogsModal';
+import {
+  LOG_CATEGORIES,
+  matchesLogCategory,
+  extractLogSummaryBadges,
+  exportLogsAsCSV,
+  exportLogsAsJSON,
+  type LogCategory,
+  type LogSummaryBadge,
+} from '../utils/logHelpers';
+
+const LIGHT_BADGE_STYLES: Record<LogSummaryBadge['tone'], { bg: string; border: string; color: string }> = {
+  sky: { bg: '#e0f2fe', border: '#bae6fd', color: '#0369a1' },
+  red: { bg: '#fee2e2', border: '#fecaca', color: '#b91c1c' },
+  amber: { bg: '#fef3c7', border: '#fde68a', color: '#b45309' },
+  green: { bg: '#dcfce7', border: '#bbf7d0', color: '#15803d' },
+  purple: { bg: '#f3e8ff', border: '#e9d5ff', color: '#6b21a8' },
+  slate: { bg: '#f1f5f9', border: '#cbd5e1', color: '#475569' },
+};
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -829,6 +847,7 @@ export default function AdminPage({ onBack }: AdminPageProps) {
 
   // Logs controls & filters
   const [logFilter, setLogFilter] = useState<'ALL' | 'ERROR' | 'Warning' | 'Note'>('ALL');
+  const [logComponentFilter, setLogComponentFilter] = useState<LogCategory>('ALL');
   const [logSearchQuery, setLogSearchQuery] = useState('');
   const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
   const [lastLogsRefreshedAt, setLastLogsRefreshedAt] = useState<Date>(new Date());
@@ -968,15 +987,19 @@ export default function AdminPage({ onBack }: AdminPageProps) {
         if (logFilter === 'Warning' && !lvl.includes('WARN')) return false;
         if (logFilter === 'Note' && (lvl !== 'NOTE' && lvl !== 'INFO')) return false;
       }
+      if (!matchesLogCategory(l.component, logComponentFilter)) {
+        return false;
+      }
       if (logSearchQuery.trim()) {
         const q = logSearchQuery.toLowerCase();
         const matchMsg = (l.message || '').toLowerCase().includes(q);
         const matchComp = (l.component || '').toLowerCase().includes(q);
-        return matchMsg || matchComp;
+        const matchDetails = l.details ? JSON.stringify(l.details).toLowerCase().includes(q) : false;
+        return matchMsg || matchComp || matchDetails;
       }
       return true;
     });
-  }, [logs, logFilter, logSearchQuery]);
+  }, [logs, logFilter, logComponentFilter, logSearchQuery]);
 
   useEffect(() => {
     let active = true;
@@ -1417,6 +1440,40 @@ export default function AdminPage({ onBack }: AdminPageProps) {
 
                   <button
                     type="button"
+                    onClick={() => exportLogsAsCSV(filteredLogs)}
+                    disabled={filteredLogs.length === 0}
+                    style={{
+                      padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+                      cursor: filteredLogs.length === 0 ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+                      border: '1px solid #a7f3d0', background: '#ecfdf5', color: '#047857',
+                      display: 'flex', alignItems: 'center', gap: '4px',
+                      opacity: filteredLogs.length === 0 ? 0.5 : 1,
+                    }}
+                    title="ส่งออก Logs เป็น CSV (รองรับ Excel ภาษาไทย)"
+                  >
+                    <span>📥</span>
+                    <span>CSV</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => exportLogsAsJSON(filteredLogs)}
+                    disabled={filteredLogs.length === 0}
+                    style={{
+                      padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+                      cursor: filteredLogs.length === 0 ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+                      border: '1px solid #bfdbfe', background: '#eff6ff', color: '#1d4ed8',
+                      display: 'flex', alignItems: 'center', gap: '4px',
+                      opacity: filteredLogs.length === 0 ? 0.5 : 1,
+                    }}
+                    title="ส่งออก Logs เป็น JSON"
+                  >
+                    <span>📥</span>
+                    <span>JSON</span>
+                  </button>
+
+                  <button
+                    type="button"
                     id="btn-clear-system-logs"
                     onClick={() => setShowConfirmClearLogs(true)}
                     style={{
@@ -1433,69 +1490,97 @@ export default function AdminPage({ onBack }: AdminPageProps) {
               </div>
 
               {/* Filters & Search */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {(['ALL', 'ERROR', 'Warning', 'Note'] as const).map((filter) => {
-                    const count = filter === 'ALL'
-                      ? logs.length
-                      : logs.filter((l) => filter === 'ERROR'
-                          ? l.level.toUpperCase() === 'ERROR'
-                          : filter === 'Warning'
-                            ? l.level.toUpperCase().includes('WARN')
-                            : l.level.toUpperCase() === 'NOTE' || l.level.toUpperCase() === 'INFO'
-                        ).length;
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {(['ALL', 'ERROR', 'Warning', 'Note'] as const).map((filter) => {
+                      const count = filter === 'ALL'
+                        ? logs.length
+                        : logs.filter((l) => filter === 'ERROR'
+                            ? l.level.toUpperCase() === 'ERROR'
+                            : filter === 'Warning'
+                              ? l.level.toUpperCase().includes('WARN')
+                              : l.level.toUpperCase() === 'NOTE' || l.level.toUpperCase() === 'INFO'
+                          ).length;
 
-                    const isSelected = logFilter === filter;
-                    let activeBg = '#1e293b';
-                    let activeColor = '#fff';
-                    if (filter === 'ERROR') { activeBg = '#dc2626'; }
-                    else if (filter === 'Warning') { activeBg = '#d97706'; }
-                    else if (filter === 'Note') { activeBg = '#2563eb'; }
+                      const isSelected = logFilter === filter;
+                      let activeBg = '#1e293b';
+                      const activeColor = '#fff';
+                      if (filter === 'ERROR') { activeBg = '#dc2626'; }
+                      else if (filter === 'Warning') { activeBg = '#d97706'; }
+                      else if (filter === 'Note') { activeBg = '#2563eb'; }
 
+                      return (
+                        <button
+                          key={filter}
+                          type="button"
+                          onClick={() => setLogFilter(filter)}
+                          style={{
+                            padding: '4px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+                            cursor: 'pointer', fontFamily: 'inherit', border: 'none',
+                            background: isSelected ? activeBg : '#f1f5f9',
+                            color: isSelected ? activeColor : '#64748b',
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          {filter === 'ALL' && `ทั้งหมด (${count})`}
+                          {filter === 'ERROR' && `🔴 ERROR (${count})`}
+                          {filter === 'Warning' && `🟡 Warning (${count})`}
+                          {filter === 'Note' && `🟢 Note (${count})`}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="text"
+                      value={logSearchQuery}
+                      onChange={(e) => setLogSearchQuery(e.target.value)}
+                      placeholder="ค้นหาข้อความ, HN, แพทย์, โมดูล..."
+                      style={{
+                        padding: '5px 24px 5px 10px', borderRadius: '8px', border: '1px solid #e2e8f0',
+                        fontSize: '11px', outline: 'none', background: '#f8fafc', width: '240px',
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    {logSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setLogSearchQuery('')}
+                        style={{
+                          position: 'absolute', right: '6px', top: '5px', border: 'none',
+                          background: 'transparent', cursor: 'pointer', fontSize: '11px', color: '#94a3b8',
+                        }}
+                      >✕</button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Category filter pills */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8' }}>หมวดหมู่:</span>
+                  {LOG_CATEGORIES.map((cat) => {
+                    const count = logs.filter((l) => matchesLogCategory(l.component, cat.id)).length;
+                    const active = logComponentFilter === cat.id;
                     return (
                       <button
-                        key={filter}
+                        key={cat.id}
                         type="button"
-                        onClick={() => setLogFilter(filter)}
+                        onClick={() => setLogComponentFilter(cat.id)}
                         style={{
-                          padding: '4px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
-                          cursor: 'pointer', fontFamily: 'inherit', border: 'none',
-                          background: isSelected ? activeBg : '#f1f5f9',
-                          color: isSelected ? activeColor : '#64748b',
+                          padding: '3px 9px', borderRadius: '7px', fontSize: '10.5px', fontWeight: 700,
+                          cursor: 'pointer', fontFamily: 'inherit',
+                          border: `1px solid ${active ? '#0284c7' : '#e2e8f0'}`,
+                          background: active ? '#e0f2fe' : '#f8fafc',
+                          color: active ? '#0369a1' : '#64748b',
                           transition: 'all 0.15s',
                         }}
                       >
-                        {filter === 'ALL' && `ทั้งหมด (${count})`}
-                        {filter === 'ERROR' && `🔴 ERROR (${count})`}
-                        {filter === 'Warning' && `🟡 Warning (${count})`}
-                        {filter === 'Note' && `🟢 Note (${count})`}
+                        {cat.shortLabel} ({count})
                       </button>
                     );
                   })}
-                </div>
-
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="text"
-                    value={logSearchQuery}
-                    onChange={(e) => setLogSearchQuery(e.target.value)}
-                    placeholder="ค้นหาใน Logs..."
-                    style={{
-                      padding: '5px 10px', borderRadius: '8px', border: '1px solid #e2e8f0',
-                      fontSize: '11px', outline: 'none', background: '#f8fafc', width: '220px',
-                      fontFamily: 'inherit',
-                    }}
-                  />
-                  {logSearchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setLogSearchQuery('')}
-                      style={{
-                        position: 'absolute', right: '6px', top: '5px', border: 'none',
-                        background: 'transparent', cursor: 'pointer', fontSize: '11px', color: '#94a3b8',
-                      }}
-                    >✕</button>
-                  )}
                 </div>
               </div>
 
@@ -1552,11 +1637,32 @@ export default function AdminPage({ onBack }: AdminPageProps) {
                               <div style={{ fontWeight: 500, lineHeight: 1.4 }}>{log.message}</div>
                               {log.details && Object.keys(log.details).length > 0 && (
                                 <div style={{ marginTop: '6px' }}>
-                                  {/* Action bar for details */}
+                                  {/* Summary Pills + JSON Actions */}
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                    {/* Pills for patient breakdown */}
+                                    {extractLogSummaryBadges(log.details).map((b) => {
+                                      const st = LIGHT_BADGE_STYLES[b.tone];
+                                      return (
+                                        <span
+                                          key={b.key}
+                                          style={{
+                                            background: st.bg,
+                                            color: st.color,
+                                            border: `1px solid ${st.border}`,
+                                            padding: '1px 6px',
+                                            borderRadius: '4px',
+                                            fontSize: '10px',
+                                            fontWeight: 600,
+                                          }}
+                                        >
+                                          {b.text}
+                                        </span>
+                                      );
+                                    })}
+
+                                    {/* Pills for patient breakdown (batch sync) */}
                                     {log.details.patients_breakdown && Array.isArray(log.details.patients_breakdown) && log.details.patients_breakdown.slice(0, 3).map((p: any, pIdx: number) => {
-                                      const hnStr = p.hn ? (String(p.hn).startsWith('HN') ? p.hn : `HN ${p.hn}`) : '';
+                                      const hnRaw = String(p.hn || '').trim();
+                                      const hnStr = hnRaw ? (hnRaw.toUpperCase().startsWith('HN') ? `HN ${hnRaw.slice(2).trim()}` : `HN ${hnRaw}`) : '';
                                       const params = p.parameters ? (Array.isArray(p.parameters) ? p.parameters.join(', ') : p.parameters) : '';
                                       if (!hnStr) return null;
                                       return (

@@ -255,15 +255,13 @@ export default function AssessmentFormModal() {
       latestNewsResult: fullNews,
       currentRiskLevel: fullNews.riskLevel,
       hasSepsisAlert: fullNews.totalScore >= 5,
-      treatmentStatus: selectedPatient.treatmentStatus
-        ? {
-          ...selectedPatient.treatmentStatus,
-          hn: selectedPatient.hn,
-          treatment_completed: true,
-          treatment_completed_at: now,
-          treatment_completed_by: actor,
-        }
-        : selectedPatient.treatmentStatus,
+      treatmentStatus: {
+        ...(selectedPatient.treatmentStatus || {}),
+        hn: selectedPatient.hn,
+        treatment_completed: true,
+        treatment_completed_at: now,
+        treatment_completed_by: actor,
+      } as typeof selectedPatient.treatmentStatus,
 
     };
 
@@ -314,18 +312,8 @@ export default function AssessmentFormModal() {
       timeline: updatedTimeline,
     });
 
-    // 4. Backend sync
+    // 4. Backend sync: save checklist before complete+archive so checklist never races after archive
     const hn = selectedPatient.hn;
-    fetch('/api/treatment-status/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        hn,
-        completed_by: actor,
-        timeline_json: JSON.stringify(updatedTimeline),
-      }),
-    }).catch((err) => console.warn('Failed to sync complete to backend:', err));
-
     fetch('/api/treatment-status/checklist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -333,7 +321,19 @@ export default function AssessmentFormModal() {
         hn,
         checklist_json: JSON.stringify(checklist),
       }),
-    }).catch((err) => console.warn('Failed to sync checklist to backend:', err));
+    })
+      .catch((err) => console.warn('Failed to sync checklist to backend:', err))
+      .finally(() => {
+        fetch('/api/treatment-status/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hn,
+            completed_by: actor,
+            timeline_json: JSON.stringify(updatedTimeline),
+          }),
+        }).catch((err) => console.warn('Failed to sync complete to backend:', err));
+      });
 
     showToast('✅ สิ้นสุดการรักษาและบันทึกข้อมูลไปยัง Dashboard สำเร็จ', 'success');
     closeModal();

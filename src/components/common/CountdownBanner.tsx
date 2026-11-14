@@ -2,12 +2,27 @@ import { useEffect, useRef } from 'react';
 import { useRTSASStore, isHistoricalPatient } from '../../store/useRTSASStore';
 
 export default function CountdownBanner() {
-  const { countdownTimer, tickCountdown, selectedPatient, patientData } = useRTSASStore();
+  const {
+    countdownTimer,
+    tickCountdown,
+    selectedPatient,
+    patientData,
+    treatmentCompleted,
+    sepsisRuledOut,
+  } = useRTSASStore();
   const intervalRef = useRef<number | null>(null);
 
   const isHistorical = isHistoricalPatient(selectedPatient, patientData);
-  const currentData = selectedPatient ? patientData[selectedPatient.id] : null;
-  const isCompleted = (currentData?.treatmentCompleted ?? false) || (currentData?.sepsisRuledOut ?? false);
+  const currentData = selectedPatient
+    ? (patientData[selectedPatient.id] || (selectedPatient.hn ? patientData[selectedPatient.hn] : null))
+    : null;
+  const isCompleted = Boolean(
+    currentData?.treatmentCompleted ||
+    currentData?.sepsisRuledOut ||
+    selectedPatient?.treatmentStatus?.treatment_completed ||
+    selectedPatient?.treatmentStatus?.sepsis_ruled_out ||
+    (!currentData && (treatmentCompleted || sepsisRuledOut))
+  );
 
   useEffect(() => {
     if ((countdownTimer.isActive || countdownTimer.isExpired) && countdownTimer.startedAt && !isHistorical && !isCompleted) {

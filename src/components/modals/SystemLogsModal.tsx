@@ -1,4 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
+import {
+  LOG_CATEGORIES,
+  extractLogSummaryBadges,
+  exportLogsAsCSV,
+  exportLogsAsJSON,
+  type LogCategory,
+  type LogSummaryBadge,
+} from '../../utils/logHelpers';
 
 interface LogEntry {
   id: number;
@@ -13,6 +21,10 @@ interface LogEntry {
 interface LogSummary {
   total_logs: number;
   error_logs: number;
+  warning_logs?: number;
+  note_logs?: number;
+  clinical_logs?: number;
+  sync_logs?: number;
   last_entry: {
     timestamp: string;
     level: string;
@@ -22,13 +34,22 @@ interface LogSummary {
   log_db_path?: string;
 }
 
+const DARK_BADGE_STYLES: Record<LogSummaryBadge['tone'], { bg: string; border: string; color: string }> = {
+  sky: { bg: 'rgba(56, 189, 248, 0.14)', border: 'rgba(56, 189, 248, 0.35)', color: '#7dd3fc' },
+  red: { bg: 'rgba(239, 68, 68, 0.16)', border: 'rgba(248, 113, 113, 0.38)', color: '#fca5a5' },
+  amber: { bg: 'rgba(245, 158, 11, 0.15)', border: 'rgba(251, 191, 36, 0.35)', color: '#fcd34d' },
+  green: { bg: 'rgba(34, 197, 94, 0.14)', border: 'rgba(74, 222, 128, 0.35)', color: '#86efac' },
+  purple: { bg: 'rgba(168, 85, 247, 0.16)', border: 'rgba(192, 132, 252, 0.35)', color: '#d8b4fe' },
+  slate: { bg: 'rgba(148, 163, 184, 0.14)', border: 'rgba(148, 163, 184, 0.3)', color: '#cbd5e1' },
+};
+
 interface SystemLogsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
 function JsonSyntaxViewer({ data }: { data: Record<string, any> }) {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
   const jsonStr = JSON.stringify(data, null, 2);
@@ -170,6 +191,7 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
   const [dbStatus, setDbStatus] = useState<{ status: string; pool_available: boolean } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [filterLevel, setFilterLevel] = useState<string>('ALL');
+  const [filterComponent, setFilterComponent] = useState<LogCategory>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -182,6 +204,9 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
       url.searchParams.set('limit', '100');
       if (filterLevel !== 'ALL') {
         url.searchParams.set('level', filterLevel);
+      }
+      if (filterComponent !== 'ALL') {
+        url.searchParams.set('component', filterComponent);
       }
       if (searchQuery.trim()) {
         url.searchParams.set('search', searchQuery.trim());
@@ -213,7 +238,7 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
     if (isOpen) {
       fetchLogsData();
     }
-  }, [isOpen, filterLevel, searchQuery]);
+  }, [isOpen, filterLevel, filterComponent, searchQuery]);
 
   useEffect(() => {
     if (isOpen && autoRefresh) {
@@ -225,7 +250,7 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
       if (autoRefreshInterval.current) clearInterval(autoRefreshInterval.current);
       autoRefreshInterval.current = null;
     };
-  }, [isOpen, autoRefresh]);
+  }, [isOpen, autoRefresh, filterLevel, filterComponent, searchQuery]);
 
   if (!isOpen) return null;
 
@@ -482,183 +507,261 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
             background: '#0f172a',
             borderBottom: '1px solid #1e293b',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '12px',
+            flexDirection: 'column',
+            gap: '10px',
             flexShrink: 0,
           }}
         >
-          {/* Left: Filter tabs & Search */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', background: '#1e293b', borderRadius: '8px', padding: '3px', border: '1px solid #334155' }}>
-              {(['ALL', 'ERROR', 'Warning', 'Note'] as const).map((lvl) => (
-                <button
-                  key={lvl}
-                  type="button"
-                  onClick={() => setFilterLevel(lvl)}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '10px',
+            }}
+          >
+            {/* Left: Severity Filter & Search */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', background: '#1e293b', borderRadius: '8px', padding: '3px', border: '1px solid #334155' }}>
+                {(['ALL', 'ERROR', 'Warning', 'Note'] as const).map((lvl) => (
+                  <button
+                    key={lvl}
+                    type="button"
+                    onClick={() => setFilterLevel(lvl)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: 'none',
+                      background: filterLevel === lvl ? '#0284c7' : 'transparent',
+                      color: filterLevel === lvl ? '#ffffff' : '#94a3b8',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {lvl === 'ALL'
+                      ? 'ทั้งหมด'
+                      : lvl === 'ERROR'
+                      ? '🔴 ERROR'
+                      : lvl === 'Warning'
+                      ? '🟡 Warning'
+                      : '🟢 Note'}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  placeholder="ค้นหาข้อความ, HN, แพทย์, component..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                   style={{
-                    padding: '4px 10px',
+                    background: '#1e293b',
+                    border: '1px solid #334155',
+                    borderRadius: '8px',
+                    padding: '6px 26px 6px 12px',
+                    fontSize: '12px',
+                    color: '#ffffff',
+                    outline: 'none',
+                    width: '250px',
+                  }}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    style={{
+                      position: 'absolute',
+                      right: '8px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#94a3b8',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Right: Actions */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '11px',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={autoRefresh}
+                  onChange={(e) => setAutoRefresh(e.target.checked)}
+                  style={{ accentColor: '#0284c7', cursor: 'pointer' }}
+                />
+                Auto-refresh (4s)
+              </label>
+
+              <button
+                type="button"
+                onClick={fetchLogsData}
+                disabled={isLoading}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  background: '#1e293b',
+                  color: '#e2e8f0',
+                  border: '1px solid #334155',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                <span>{isLoading ? '⏳' : '🔄'}</span> รีเฟรช
+              </button>
+
+              <button
+                type="button"
+                onClick={() => exportLogsAsCSV(logs)}
+                disabled={logs.length === 0}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  background: '#065f46',
+                  color: '#ecfdf5',
+                  border: '1px solid #047857',
+                  cursor: logs.length === 0 ? 'not-allowed' : 'pointer',
+                  opacity: logs.length === 0 ? 0.5 : 1,
+                }}
+                title="ส่งออก Logs เป็นไฟล์ CSV (รองรับ Excel ภาษาไทย)"
+              >
+                📥 Export CSV
+              </button>
+
+              <button
+                type="button"
+                onClick={() => exportLogsAsJSON(logs)}
+                disabled={logs.length === 0}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  background: '#1e3a8a',
+                  color: '#eff6ff',
+                  border: '1px solid #1d4ed8',
+                  cursor: logs.length === 0 ? 'not-allowed' : 'pointer',
+                  opacity: logs.length === 0 ? 0.5 : 1,
+                }}
+                title="ส่งออก Logs เป็นไฟล์ JSON"
+              >
+                📥 Export JSON
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopyLogs}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  background: copied ? '#15803d' : '#334155',
+                  color: '#ffffff',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <span>📋</span> {copied ? 'คัดลอกเรียบร้อย!' : 'คัดลอก Log'}
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!window.confirm('ยืนยันการล้าง System Logs ทั้งหมดใช่หรือไม่? ข้อมูลเก่าจะไม่สามารถกู้คืนได้')) return;
+                  try {
+                    setIsLoading(true);
+                    const res = await fetch('/api/system/logs/clear', { method: 'POST' });
+                    if (res.ok) {
+                      setLogs([]);
+                      setSummary({ total_logs: 0, error_logs: 0, last_entry: null });
+                      await fetchLogsData();
+                    }
+                  } catch (err) {
+                    console.error('Failed to clear logs:', err);
+                  } finally {
+                    setIsLoading(false);
+                  }
+                }}
+                disabled={isLoading}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  background: '#dc2626',
+                  color: '#ffffff',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.15s',
+                }}
+                title="ล้าง System Logs ทั้งหมด"
+              >
+                <span>🗑️</span> ล้าง Logs
+              </button>
+            </div>
+          </div>
+
+          {/* Category Filter Bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginRight: '4px' }}>
+              หมวดหมู่:
+            </span>
+            {LOG_CATEGORIES.map((cat) => {
+              const active = filterComponent === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setFilterComponent(cat.id)}
+                  style={{
+                    padding: '3px 10px',
                     borderRadius: '6px',
                     fontSize: '11px',
                     fontWeight: 700,
                     cursor: 'pointer',
-                    border: 'none',
-                    background: filterLevel === lvl ? '#0284c7' : 'transparent',
-                    color: filterLevel === lvl ? '#ffffff' : '#94a3b8',
+                    border: `1px solid ${active ? '#38bdf8' : '#334155'}`,
+                    background: active ? 'rgba(2, 132, 199, 0.28)' : '#1e293b',
+                    color: active ? '#7dd3fc' : '#94a3b8',
                     transition: 'all 0.15s',
                   }}
                 >
-                  {lvl === 'ALL'
-                    ? 'ทั้งหมด'
-                    : lvl === 'ERROR'
-                    ? '🔴 ERROR'
-                    : lvl === 'Warning'
-                    ? '🟡 Warning'
-                    : '🟢 Note'}
+                  {cat.label}
                 </button>
-              ))}
-            </div>
-
-            <div style={{ position: 'relative' }}>
-              <input
-                type="text"
-                placeholder="ค้นหาข้อความ, error, component..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  background: '#1e293b',
-                  border: '1px solid #334155',
-                  borderRadius: '8px',
-                  padding: '6px 12px',
-                  fontSize: '12px',
-                  color: '#ffffff',
-                  outline: 'none',
-                  width: '240px',
-                }}
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  style={{
-                    position: 'absolute',
-                    right: '8px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#94a3b8',
-                    cursor: 'pointer',
-                  }}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Right: Actions */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                fontSize: '11px',
-                color: '#94a3b8',
-                cursor: 'pointer',
-                userSelect: 'none',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={autoRefresh}
-                onChange={(e) => setAutoRefresh(e.target.checked)}
-                style={{ accentColor: '#0284c7', cursor: 'pointer' }}
-              />
-              Auto-refresh (4s)
-            </label>
-
-            <button
-              type="button"
-              onClick={fetchLogsData}
-              disabled={isLoading}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '8px',
-                fontSize: '11px',
-                fontWeight: 600,
-                background: '#1e293b',
-                color: '#e2e8f0',
-                border: '1px solid #334155',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-              }}
-            >
-              <span>{isLoading ? '⏳' : '🔄'}</span> รีเฟรช
-            </button>
-
-            <button
-              type="button"
-              onClick={handleCopyLogs}
-              style={{
-                padding: '6px 14px',
-                borderRadius: '8px',
-                fontSize: '11px',
-                fontWeight: 700,
-                background: copied ? '#15803d' : '#334155',
-                color: '#ffffff',
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                transition: 'all 0.15s',
-              }}
-            >
-              <span>📋</span> {copied ? 'คัดลอกเรียบร้อย!' : 'คัดลอก Log'}
-            </button>
-
-            <button
-              type="button"
-              onClick={async () => {
-                if (!window.confirm('ยืนยันการล้าง System Logs ทั้งหมดใช่หรือไม่? ข้อมูลเก่าจะไม่สามารถกู้คืนได้')) return;
-                try {
-                  setIsLoading(true);
-                  const res = await fetch('/api/system/logs/clear', { method: 'POST' });
-                  if (res.ok) {
-                    setLogs([]);
-                    setSummary({ total_logs: 0, error_logs: 0, last_entry: null });
-                    await fetchLogsData();
-                  }
-                } catch (err) {
-                  console.error('Failed to clear logs:', err);
-                } finally {
-                  setIsLoading(false);
-                }
-              }}
-              disabled={isLoading}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '8px',
-                fontSize: '11px',
-                fontWeight: 700,
-                background: '#dc2626',
-                color: '#ffffff',
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                transition: 'all 0.15s',
-              }}
-              title="ล้าง System Logs ทั้งหมด"
-            >
-              <span>🗑️</span> ล้าง Logs
-            </button>
+              );
+            })}
           </div>
         </div>
 
@@ -700,6 +803,8 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
                 ? 'rgba(234, 179, 8, 0.15)'
                 : 'rgba(56, 189, 248, 0.1)';
 
+              const summaryBadges = extractLogSummaryBadges(log.details);
+
               return (
                 <div
                   key={log.id}
@@ -711,7 +816,7 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
                     borderLeft: `3px solid ${isErr ? '#ef4444' : isWarn ? '#eab308' : '#38bdf8'}`,
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '2px',
+                    gap: '4px',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
@@ -751,7 +856,33 @@ export default function SystemLogsModal({ isOpen, onClose }: SystemLogsModalProp
                     </span>
                   </div>
 
-                  {/* Optional JSON details with syntax highlighting & collapse */}
+                  {/* Readable Clinical & System Summary Pills */}
+                  {summaryBadges.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginLeft: '24px' }}>
+                      {summaryBadges.map((b) => {
+                        const style = DARK_BADGE_STYLES[b.tone];
+                        return (
+                          <span
+                            key={b.key}
+                            style={{
+                              fontSize: '10.5px',
+                              fontWeight: 600,
+                              padding: '1px 7px',
+                              borderRadius: '5px',
+                              background: style.bg,
+                              border: `1px solid ${style.border}`,
+                              color: style.color,
+                              fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+                            }}
+                          >
+                            {b.text}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Optional JSON details collapsed by default */}
                   {log.details && Object.keys(log.details).length > 0 && (
                     <JsonSyntaxViewer data={log.details} />
                   )}

@@ -288,4 +288,341 @@ describe('Historical Patient Record Locking & Audit Trail', () => {
       .find((i) => i.id === 'triage');
     expect(triageItem?.status).not.toBe('completed');
   });
+
+  it('tickCountdown stops timer and does not decrement remainingSeconds when treatmentCompleted or sepsisRuledOut is true', () => {
+    const startedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const initialRemaining = 3000;
+
+    useRTSASStore.setState({
+      patients: [mockActiveTodayPatient],
+      selectedPatient: mockActiveTodayPatient,
+      treatmentCompleted: true,
+      countdownTimer: {
+        isActive: true,
+        startedAt,
+        totalDurationSeconds: 3600,
+        remainingSeconds: initialRemaining,
+        isExpired: false,
+        isWarning: false,
+        isCritical: false,
+      },
+      patientData: {
+        [mockActiveTodayPatient.id]: {
+          checklist: [],
+          timeline: [],
+          countdownTimer: {
+            isActive: true,
+            startedAt,
+            totalDurationSeconds: 3600,
+            remainingSeconds: initialRemaining,
+            isExpired: false,
+            isWarning: false,
+            isCritical: false,
+          },
+          assessmentSchedule: null,
+          sepsisRuledOut: false,
+          ruledOutAt: null,
+          ruledOutBy: null,
+          treatmentCompleted: true,
+          treatmentCompletedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    useRTSASStore.getState().tickCountdown();
+
+    const stateAfterComplete = useRTSASStore.getState();
+    expect(stateAfterComplete.countdownTimer.isActive).toBe(false);
+    expect(stateAfterComplete.countdownTimer.remainingSeconds).toBe(initialRemaining);
+    expect(stateAfterComplete.patientData[mockActiveTodayPatient.id].countdownTimer.isActive).toBe(false);
+    expect(stateAfterComplete.patientData[mockActiveTodayPatient.id].countdownTimer.remainingSeconds).toBe(initialRemaining);
+
+    // Also verify sepsisRuledOut stops active timers without decrementing
+    useRTSASStore.setState({
+      treatmentCompleted: false,
+      sepsisRuledOut: true,
+      countdownTimer: {
+        isActive: true,
+        startedAt,
+        totalDurationSeconds: 3600,
+        remainingSeconds: initialRemaining,
+        isExpired: false,
+        isWarning: false,
+        isCritical: false,
+      },
+      patientData: {
+        [mockActiveTodayPatient.id]: {
+          checklist: [],
+          timeline: [],
+          countdownTimer: {
+            isActive: true,
+            startedAt,
+            totalDurationSeconds: 3600,
+            remainingSeconds: initialRemaining,
+            isExpired: false,
+            isWarning: false,
+            isCritical: false,
+          },
+          assessmentSchedule: null,
+          sepsisRuledOut: true,
+          ruledOutAt: new Date().toISOString(),
+          ruledOutBy: 'Dr. Test',
+          treatmentCompleted: false,
+          treatmentCompletedAt: null,
+        },
+      },
+    });
+
+    useRTSASStore.getState().tickCountdown();
+    const stateAfterRuleOut = useRTSASStore.getState();
+    expect(stateAfterRuleOut.countdownTimer.isActive).toBe(false);
+    expect(stateAfterRuleOut.countdownTimer.remainingSeconds).toBe(initialRemaining);
+    expect(stateAfterRuleOut.patientData[mockActiveTodayPatient.id].countdownTimer.isActive).toBe(false);
+  });
+
+  it('selectPatient keeps countdownTimer inactive for a same-day completed patient', () => {
+    const completedTodayPatient: Patient = {
+      ...mockActiveTodayPatient,
+      id: 'P_TODAY_DONE',
+      hn: '200099',
+      treatmentStatus: {
+        hn: '200099',
+        acknowledged: true,
+        doctor_confirmed: true,
+        countdown_started_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+        countdown_duration: 3600,
+        treatment_completed: true,
+        treatment_completed_at: new Date().toISOString(),
+        sepsis_ruled_out: false,
+      },
+    };
+
+    useRTSASStore.setState({
+      patients: [completedTodayPatient],
+    });
+
+    useRTSASStore.getState().selectPatient(completedTodayPatient.id);
+    const s = useRTSASStore.getState();
+    expect(s.treatmentCompleted).toBe(true);
+    expect(s.countdownTimer.isActive).toBe(false);
+    expect(s.patientData[completedTodayPatient.id].countdownTimer.isActive).toBe(false);
+  });
+});
+
+describe('Cross-day active patient retention in store', () => {
+  it('retains unfinished previous-day active patient when setPatients only receives today arrivals', () => {
+    const yesterdayIso = new Date(Date.now() - 26 * 3600 * 1000).toISOString();
+    const prevDayActive: Patient = {
+      ...mockActiveTodayPatient,
+      id: 'P_XDAY_ACT_1',
+      hn: '900001',
+      arrivalTime: yesterdayIso,
+      treatmentStatus: {
+        hn: '900001',
+        acknowledged: true,
+        doctor_confirmed: false,
+        treatment_completed: false,
+        sepsis_ruled_out: false,
+      },
+    };
+    const prevDayIdle: Patient = {
+      ...mockActiveTodayPatient,
+      id: 'P_XDAY_IDLE_1',
+      hn: '900002',
+      arrivalTime: yesterdayIso,
+      treatmentStatus: undefined,
+    };
+    const prevDayArchived: Patient = {
+      ...mockActiveTodayPatient,
+      id: 'P_XDAY_ARCH_1',
+      hn: '900003',
+      arrivalTime: yesterdayIso,
+      treatmentStatus: undefined,
+    };
+    const todayArrival: Patient = {
+      ...mockActiveTodayPatient,
+      id: 'P_TODAY_NEW_1',
+      hn: '900099',
+      arrivalTime: new Date().toISOString(),
+    };
+
+    useRTSASStore.setState({
+      patients: [prevDayActive, prevDayIdle, prevDayArchived],
+      selectedPatient: prevDayActive,
+      patientData: {
+        P_XDAY_ACT_1: {
+          checklist: [],
+          timeline: [],
+          countdownTimer: {
+            isActive: false,
+            startedAt: null,
+            totalDurationSeconds: 3600,
+            remainingSeconds: 3600,
+            isExpired: false,
+            isWarning: false,
+            isCritical: false,
+          },
+          assessmentSchedule: null,
+          acknowledged: true,
+          treatmentCompleted: false,
+          sepsisRuledOut: false,
+        },
+        P_XDAY_ARCH_1: {
+          checklist: [],
+          timeline: [],
+          countdownTimer: {
+            isActive: false,
+            startedAt: null,
+            totalDurationSeconds: 3600,
+            remainingSeconds: 3600,
+            isExpired: false,
+            isWarning: false,
+            isCritical: false,
+          },
+          assessmentSchedule: null,
+          isHistoricalArchive: true,
+          treatmentCompleted: false,
+          sepsisRuledOut: false,
+        },
+      },
+    });
+
+    // Simulate midnight/next-day poll returning only today's arrival
+    useRTSASStore.getState().setPatients([todayArrival]);
+
+    const idsAfter = useRTSASStore.getState().patients.map((p) => p.id);
+    expect(idsAfter).toContain('P_TODAY_NEW_1');
+    expect(idsAfter).toContain('P_XDAY_ACT_1');
+    expect(idsAfter).not.toContain('P_XDAY_IDLE_1');
+    expect(idsAfter).not.toContain('P_XDAY_ARCH_1');
+  });
+
+  it('drops previous-day active patient on next setPatients poll after completeTreatment or ruleOutSepsis', () => {
+    const yesterdayIso = new Date(Date.now() - 28 * 3600 * 1000).toISOString();
+    const prevDayCompleteTarget: Patient = {
+      ...mockActiveTodayPatient,
+      id: 'P_XDAY_FIN_1',
+      hn: '900011',
+      arrivalTime: yesterdayIso,
+      treatmentStatus: {
+        hn: '900011',
+        acknowledged: true,
+        doctor_confirmed: true,
+        treatment_completed: false,
+        sepsis_ruled_out: false,
+      },
+    };
+    const prevDayRuleOutTarget: Patient = {
+      ...mockActiveTodayPatient,
+      id: 'P_XDAY_FIN_2',
+      hn: '900012',
+      arrivalTime: yesterdayIso,
+      treatmentStatus: {
+        hn: '900012',
+        acknowledged: true,
+        doctor_confirmed: false,
+        treatment_completed: false,
+        sepsis_ruled_out: false,
+      },
+    };
+    const todayArrival: Patient = {
+      ...mockActiveTodayPatient,
+      id: 'P_TODAY_NEW_2',
+      hn: '900100',
+      arrivalTime: new Date().toISOString(),
+    };
+
+    useRTSASStore.setState({
+      patients: [prevDayCompleteTarget, prevDayRuleOutTarget],
+      selectedPatient: prevDayCompleteTarget,
+      treatmentCompleted: false,
+      sepsisRuledOut: false,
+      patientData: {
+        P_XDAY_FIN_1: {
+          checklist: [],
+          timeline: [],
+          countdownTimer: {
+            isActive: true,
+            startedAt: yesterdayIso,
+            totalDurationSeconds: 3600,
+            remainingSeconds: 1800,
+            isExpired: false,
+            isWarning: false,
+            isCritical: false,
+          },
+          assessmentSchedule: null,
+          acknowledged: true,
+          confirmedSepsis: true,
+          treatmentCompleted: false,
+          sepsisRuledOut: false,
+        },
+        P_XDAY_FIN_2: {
+          checklist: [],
+          timeline: [],
+          countdownTimer: {
+            isActive: false,
+            startedAt: null,
+            totalDurationSeconds: 3600,
+            remainingSeconds: 3600,
+            isExpired: false,
+            isWarning: false,
+            isCritical: false,
+          },
+          assessmentSchedule: null,
+          acknowledged: true,
+          treatmentCompleted: false,
+          sepsisRuledOut: false,
+        },
+      },
+    });
+
+    // Complete first patient, select second patient and rule out sepsis
+    useRTSASStore.getState().completeTreatment('Dr. Morning');
+    useRTSASStore.getState().selectPatient('P_XDAY_FIN_2');
+    useRTSASStore.getState().ruleOutSepsis('Dr. Morning');
+
+    expect(useRTSASStore.getState().patientData.P_XDAY_FIN_1.treatmentCompleted).toBe(true);
+    expect(useRTSASStore.getState().patientData.P_XDAY_FIN_2.sepsisRuledOut).toBe(true);
+
+    // Subsequent backend poll omits finished previous-day cases -> store removes both
+    useRTSASStore.getState().setPatients([todayArrival]);
+    const remainingIds = useRTSASStore.getState().patients.map((p) => p.id);
+    expect(remainingIds).toEqual(['P_TODAY_NEW_2']);
+  });
+
+  it('isHistoricalPatient checks both patient.id and patient.hn keys without misclassifying active cases', () => {
+    const prevDayByHn: Patient = {
+      ...mockActiveTodayPatient,
+      id: 'VISIT_ROW_555',
+      hn: '900555',
+      arrivalTime: new Date(Date.now() - 30 * 3600 * 1000).toISOString(),
+      treatmentStatus: undefined,
+    };
+
+    const baseData = {
+      checklist: [],
+      timeline: [],
+      countdownTimer: {
+        isActive: false,
+        startedAt: null,
+        totalDurationSeconds: 3600,
+        remainingSeconds: 3600,
+        isExpired: false,
+        isWarning: false,
+        isCritical: false,
+      },
+      assessmentSchedule: null,
+      acknowledged: true,
+      treatmentCompleted: false,
+      sepsisRuledOut: false,
+    };
+
+    expect(isHistoricalPatient(prevDayByHn, { '900555': baseData })).toBe(false);
+    expect(
+      isHistoricalPatient(prevDayByHn, { '900555': { ...baseData, treatmentCompleted: true } })
+    ).toBe(true);
+    expect(
+      isHistoricalPatient(prevDayByHn, { '900555': { ...baseData, isHistoricalArchive: true } })
+    ).toBe(true);
+  });
 });

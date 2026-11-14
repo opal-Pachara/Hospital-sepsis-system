@@ -214,16 +214,40 @@ LIMIT 200;
 # Fetch from DB (patient_visits first, fallback to opdscreen JOIN)
 # ---------------------------------------------------------------------------
 
-async def fetch_vitals_from_db() -> List[Dict[str, Any]]:
+async def fetch_vitals_from_db(active_hns: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """
     Fetch vital signs from database.
-    If ENABLE_DATE_FALLBACK is False (Production): strictly queries CURDATE().
+    If ENABLE_DATE_FALLBACK is False (Production): strictly queries CURDATE(),
+    while retaining any active treating patients (active_hns) from previous days.
     If ENABLE_DATE_FALLBACK is True (Dev/Staging): falls back to MAX(vstdate).
     """
     global _hosxp_disconnected_at
     enable_fallback = getattr(settings, "ENABLE_DATE_FALLBACK", False)
     query_visits = QUERY_PATIENT_VISITS_FALLBACK if enable_fallback else QUERY_PATIENT_VISITS_TODAY
     query_opd = QUERY_OPDSCREEN_FALLBACK if enable_fallback else QUERY_OPDSCREEN_TODAY
+
+    if active_hns is None and not enable_fallback:
+        from .treatment_service import get_active_treating_hns
+        active_hns = await get_active_treating_hns()
+    clean_active_hns = [str(h).strip() for h in (active_hns or []) if h and str(h).strip()]
+
+    params_visits: tuple[Any, ...] = ()
+    params_opd: tuple[Any, ...] = ()
+    if not enable_fallback and clean_active_hns:
+        placeholders = ", ".join(["%s"] * len(clean_active_hns))
+        query_visits = QUERY_PATIENT_VISITS_TODAY.replace(
+            "WHERE vstdate >= CURDATE()",
+            f"WHERE (vstdate >= CURDATE() OR hn IN ({placeholders}))",
+        )
+        query_opd = QUERY_OPDSCREEN_TODAY.replace(
+            "WHERE o.vstdate >= CURDATE()",
+            f"WHERE (o.vstdate >= CURDATE() OR o.hn IN ({placeholders}))",
+        ).replace(
+            "ORDER BY o.vsttime DESC",
+            "ORDER BY o.vstdate DESC, o.vsttime DESC",
+        )
+        params_visits = tuple(clean_active_hns)
+        params_opd = tuple(clean_active_hns)
 
     try:
         async with db_pool.get_connection() as conn:
@@ -259,7 +283,10 @@ async def fetch_vitals_from_db() -> List[Dict[str, Any]]:
                     _hosxp_disconnected_at = None
 
                 # Try patient_visits first
-                await cursor.execute(query_visits)
+                if params_visits:
+                    await cursor.execute(query_visits, params_visits)
+                else:
+                    await cursor.execute(query_visits)
                 rows = await cursor.fetchall()
 
                 if rows:
@@ -273,7 +300,10 @@ async def fetch_vitals_from_db() -> List[Dict[str, Any]]:
 
                 # Fallback to HOSxP legacy tables
                 logger.info(f"patient_visits is empty — querying opdscreen JOIN er_nursing_detail (fallback={enable_fallback}).")
-                await cursor.execute(query_opd)
+                if params_opd:
+                    await cursor.execute(query_opd, params_opd)
+                else:
+                    await cursor.execute(query_opd)
                 rows = await cursor.fetchall()
                 logger.info(f"Fetched {len(rows)} rows from opdscreen.")
                 result = []
@@ -348,7 +378,7 @@ def build_patient_list(rows: List[Dict[str, Any]], treatment_statuses: Optional[
 
                 # Check if GCS from HOSxP changed compared to recorded_gcs
                 rec_gcs = t_status.get('recorded_gcs')
-                cur_gcs = _safe_int(row.get('gcs'))
+                cur_gcs = _si(row.get('gcs'))
                 if rec_gcs is not None and cur_gcs is not None and cur_gcs != rec_gcs:
                     if cur_gcs == 15:
                         assessed_avpu = 'A'
@@ -407,14 +437,34 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
     global _patients_cache, last_seen_vitals, last_seen_patient_snapshots
 
     logger.info("Polling sepsis_db for new vital signs...")
-    rows = await fetch_vitals_from_db()
+    from .treatment_service import get_all_treatment_statuses, get_active_treating_hns
+    active_hns = await get_active_treating_hns()
+    rows = await fetch_vitals_from_db(active_hns=active_hns)
 
     # Fetch centralized treatment statuses to incorporate AVPU and Oxygen
-    from .treatment_service import get_all_treatment_statuses
     treatment_statuses = await get_all_treatment_statuses()
 
+    # Preserve previous active treating patients in case they are momentarily missing from DB poll
+    previous_cache = list(_patients_cache)
+    new_patients = build_patient_list(rows, treatment_statuses)
+
+    if active_hns:
+        active_hn_set = {str(h).strip() for h in active_hns if h and str(h).strip()}
+        present_hns = {str(p.get("hn", "")).strip() for p in new_patients if p.get("hn")}
+        for prev_p in previous_cache:
+            prev_hn = str(prev_p.get("hn", "")).strip()
+            if prev_hn in active_hn_set and prev_hn not in present_hns:
+                st = treatment_statuses.get(prev_hn)
+                if st and (st.get("treatment_completed") or st.get("sepsis_ruled_out")):
+                    continue
+                retained_p = dict(prev_p)
+                if st:
+                    retained_p["treatmentStatus"] = st
+                new_patients.append(retained_p)
+                present_hns.add(prev_hn)
+
     # Update the cache used by GET /api/patients
-    _patients_cache = build_patient_list(rows, treatment_statuses)
+    _patients_cache = new_patients
 
     # Broadcast new alerts via WebSocket
     from .main import broadcast_message  # imported here to avoid circular imports
@@ -618,6 +668,8 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                 total_score = getattr(r_news, "totalScore", 0) if hasattr(r_news, "totalScore") else (r_news.get("totalScore", 0) if isinstance(r_news, dict) else 0)
                 risk_lvl = getattr(r_news, "riskLevel", "low") if hasattr(r_news, "riskLevel") else (r_news.get("riskLevel", "low") if isinstance(r_news, dict) else "low")
                 single_alert = getattr(r_news, "hasSingleParameterAlert", False) if hasattr(r_news, "hasSingleParameterAlert") else False
+                news_is_complete = getattr(r_news, "isComplete", True) if hasattr(r_news, "isComplete") else (r_news.get("isComplete", True) if isinstance(r_news, dict) else True)
+                news_missing = list(getattr(r_news, "missingParameters", []) or []) if hasattr(r_news, "missingParameters") else (list(r_news.get("missingParameters") or []) if isinstance(r_news, dict) else [])
 
                 parameters_breakdown = {}
                 if hasattr(r_news, "breakdown") and isinstance(r_news.breakdown, list):
@@ -627,12 +679,15 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                         p_sc = getattr(b, "score", 0)
                         parameters_breakdown[p_name] = f"{p_val} ({p_sc} คะแนน)"
 
+                hn_msg = hn[2:].strip() if hn.upper().startswith("HN") else hn
+                news_inc_suffix = f" • ข้อมูล NEWS ยังไม่ครบ: {', '.join(news_missing)}" if not news_is_complete and news_missing else ""
+
                 if is_complete:
-                    msg = f"นำเข้าข้อมูลผู้ป่วยใหม่ HN {hn} (VN: {vn}): สัญญาณชีพ {vitals_summary} | คำนวณ NEWS เสร็จเวลา {calc_time_only} ({calc_duration_ms}ms) ได้ {total_score} คะแนน [{risk_lvl.upper()} RISK]"
+                    msg = f"นำเข้าข้อมูลผู้ป่วยใหม่ HN {hn_msg} (VN: {vn}): สัญญาณชีพ {vitals_summary} | คำนวณ NEWS เสร็จเวลา {calc_time_only} ({calc_duration_ms}ms) ได้ {total_score} คะแนน [{risk_lvl.upper()} RISK]{news_inc_suffix}"
                 else:
                     missing_th = [FIELD_NAMES_TH.get(f, f) for f in missing_fields]
                     missing_str = ", ".join(missing_th)
-                    msg = f"นำเข้าข้อมูลผู้ป่วยใหม่ (สัญญาณชีพไม่ครบ) HN {hn} (VN: {vn}): สัญญาณชีพ {vitals_summary} (ยังขาด {missing_str}) | คำนวณ NEWS เสร็จเวลา {calc_time_only} ({calc_duration_ms}ms) ได้ {total_score} คะแนน [{risk_lvl.upper()} RISK]"
+                    msg = f"นำเข้าข้อมูลผู้ป่วยใหม่ (สัญญาณชีพไม่ครบ) HN {hn_msg} (VN: {vn}): สัญญาณชีพ {vitals_summary} (ยังขาด {missing_str}) | คำนวณ NEWS เสร็จเวลา {calc_time_only} ({calc_duration_ms}ms) ได้ {total_score} คะแนน [{risk_lvl.upper()} RISK]{news_inc_suffix}"
 
                 details = {
                     "event": "new_patient_ingested",
@@ -645,6 +700,8 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                     "news_score": total_score,
                     "risk_level": risk_lvl,
                     "is_complete": is_complete,
+                    "news_is_complete": news_is_complete,
+                    "news_missing_parameters": news_missing,
                     "has_single_alert": single_alert,
                     "parameters_breakdown": parameters_breakdown,
                     "calc_completed_at": calc_completed_at,
@@ -759,6 +816,8 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                     total_score = getattr(r_news, "totalScore", 0) if hasattr(r_news, "totalScore") else (r_news.get("totalScore", 0) if isinstance(r_news, dict) else 0)
                     risk_lvl = getattr(r_news, "riskLevel", "low") if hasattr(r_news, "riskLevel") else (r_news.get("riskLevel", "low") if isinstance(r_news, dict) else "low")
                     single_alert = getattr(r_news, "hasSingleParameterAlert", False) if hasattr(r_news, "hasSingleParameterAlert") else False
+                    news_is_complete = getattr(r_news, "isComplete", True) if hasattr(r_news, "isComplete") else (r_news.get("isComplete", True) if isinstance(r_news, dict) else True)
+                    news_missing = list(getattr(r_news, "missingParameters", []) or []) if hasattr(r_news, "missingParameters") else (list(r_news.get("missingParameters") or []) if isinstance(r_news, dict) else [])
 
                     parameters_breakdown = {}
                     if hasattr(r_news, "breakdown") and isinstance(r_news.breakdown, list):
@@ -784,8 +843,10 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                         diff_parts.append(f"{lbl} {chg['old']} ➔ {chg['new']}")
 
                     diff_summary = ", ".join(diff_parts) if diff_parts else f"รอบเวลา {vsttime_str}"
+                    hn_msg = hn[2:].strip() if hn.upper().startswith("HN") else hn
+                    news_inc_suffix = f" • ข้อมูล NEWS ยังไม่ครบ: {', '.join(news_missing)}" if not news_is_complete and news_missing else ""
 
-                    msg = f"อัปเดตข้อมูลผู้ป่วย HN {hn} (VN: {vn}): ได้รับสัญญาณชีพเพิ่ม [{diff_summary}] | คำนวณ NEWS ใหม่เสร็จเวลา {calc_time_only} ({calc_duration_ms}ms) ได้ {total_score} คะแนน [{risk_lvl.upper()} RISK]"
+                    msg = f"อัปเดตข้อมูลผู้ป่วย HN {hn_msg} (VN: {vn}): ได้รับสัญญาณชีพเพิ่ม [{diff_summary}] | คำนวณ NEWS ใหม่เสร็จเวลา {calc_time_only} ({calc_duration_ms}ms) ได้ {total_score} คะแนน [{risk_lvl.upper()} RISK]{news_inc_suffix}"
 
                     details = {
                         "event": "patient_vitals_updated",
@@ -802,6 +863,8 @@ async def process_vitals(force_log: bool = False, trigger: str = "background_pol
                         "news_score": total_score,
                         "risk_level": risk_lvl,
                         "is_complete": is_complete,
+                        "news_is_complete": news_is_complete,
+                        "news_missing_parameters": news_missing,
                         "has_single_alert": single_alert,
                         "parameters_breakdown": parameters_breakdown,
                         "calc_completed_at": calc_completed_at,
@@ -979,15 +1042,17 @@ async def background_scheduler():
     logger.info("Background scheduler started — polling every 10 seconds.")
     while True:
         try:
-            # Midnight auto-clear: clear last_seen_vitals once per day at midnight
+            # Midnight auto-clear: flush finished/idle cache once per day at midnight while preserving active patients
             today = date.today()
             if _last_clear_date != today:
                 _last_clear_date = today
-                last_seen_vitals.clear()
-                last_seen_patient_snapshots.clear()
-                _save_seen_vitals()
-                _save_patient_snapshots()
-                logger.info(f"Midnight auto-clear: flushed last_seen_vitals for new day {today}")
+                from .treatment_service import get_active_treating_hns
+                active_hns = await get_active_treating_hns()
+                stats = clear_cache(preserve_hns=active_hns)
+                logger.info(
+                    f"Midnight auto-clear: flushed finished/idle cache for new day {today} "
+                    f"(preserved active HNs: {stats.get('preserved_hns', [])})"
+                )
 
             await process_vitals()
         except Exception as e:

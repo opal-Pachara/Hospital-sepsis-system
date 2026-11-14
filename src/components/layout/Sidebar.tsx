@@ -42,22 +42,35 @@ function PatientCard({ patient, isSelected }: { patient: Patient; isSelected: bo
   const [countdownLabel, setCountdownLabel] = useState<string | null>(null);
 
   useEffect(() => {
+    const data = patientData[patient.id] || (patient.hn ? patientData[patient.hn] : undefined);
+    const isCompleted = Boolean(
+      data?.treatmentCompleted ||
+      patient.treatmentStatus?.treatment_completed
+    );
+    const isRuledOut = Boolean(
+      data?.sepsisRuledOut ||
+      patient.treatmentStatus?.sepsis_ruled_out
+    );
+
+    if (isCompleted || isRuledOut) {
+      setCountdownLabel(null);
+      return;
+    }
+
     const updateBadge = () => {
-      const data = patientData[patient.id] || (patient.hn ? patientData[patient.hn] : undefined);
-      const timer = data?.countdownTimer;
-      const isCompleted = Boolean(
-        data?.treatmentCompleted ||
-        patient.treatmentStatus?.treatment_completed
-      );
-      const isRuledOut = Boolean(
-        data?.sepsisRuledOut ||
+      const latestData = patientData[patient.id] || (patient.hn ? patientData[patient.hn] : undefined);
+      const timer = latestData?.countdownTimer;
+      const doneNow = Boolean(
+        latestData?.treatmentCompleted ||
+        latestData?.sepsisRuledOut ||
+        patient.treatmentStatus?.treatment_completed ||
         patient.treatmentStatus?.sepsis_ruled_out
       );
       const startedAt = timer?.startedAt || patient.treatmentStatus?.countdown_started_at;
       const totalDuration = timer?.totalDurationSeconds || patient.treatmentStatus?.countdown_duration || 3600;
       const isTimerActive = Boolean(timer?.isActive || patient.treatmentStatus?.countdown_started_at);
 
-      if (startedAt && isTimerActive && !isCompleted && !isRuledOut) {
+      if (startedAt && isTimerActive && !doneNow) {
         const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
         const remaining = Math.max(0, totalDuration - elapsed);
         if (remaining === 0 || (timer?.isExpired ?? elapsed >= totalDuration)) {
@@ -560,7 +573,7 @@ export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavig
             setFilter('completed');
             onNavigateTreatedDashboard?.();
           }}
-          title={!isDoctorOrNurse ? 'เฉพาะแพทย์และพยาบาลเท่านั้นที่สามารถดู Dashboard ได้' : 'Dashborad ผู้ป่วยรักษาแล้ว'}
+          title={!isDoctorOrNurse ? 'เฉพาะแพทย์และพยาบาลเท่านั้นที่สามารถดู Dashboard ได้' : 'Dashboard ผู้ป่วยรักษาแล้ว'}
           style={{
             padding: '3px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 600,
             cursor: isDoctorOrNurse ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
@@ -570,7 +583,7 @@ export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavig
             opacity: isDoctorOrNurse ? 1 : 0.7,
           }}
         >
-          ✅ Dashborad ผู้ป่วยรักษาแล้ว 
+          ✅ Dashboard ผู้ป่วยรักษาแล้ว
         </button>
       </div>
 
