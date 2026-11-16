@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { isTreatmentTimelineEvent, useRTSASStore } from '../store/useRTSASStore';
+import { extractLogSummaryBadges } from '../utils/logHelpers';
 import type { TimelineEvent } from '../types';
 
 describe('isTreatmentTimelineEvent', () => {
@@ -457,6 +458,122 @@ describe('completeAssessment vital signs parameter timeline logging', () => {
     expect(vsEvent?.actionText).toContain('Temp 39.2°C');
     expect(vsEvent?.actionText).toContain('GCS 14 (V)');
     expect(vsEvent?.actionText).toContain('(NEWS: 16 คะแนน)');
+  });
+});
+
+describe('button action system logging & timeline integration', () => {
+  it('snoozeReminder adds orange timeline entry and sends Warning event to /api/logs/event', () => {
+    const origFetch = globalThis.fetch;
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok' }),
+    });
+    globalThis.fetch = mockFetch as any;
+
+    try {
+      const store = useRTSASStore.getState();
+      const patient: any = {
+        id: 'pt_snooze_log',
+        hn: 'HN69007777',
+        vn: 'VN69007777',
+        fullName: 'ผู้ป่วย ทดสอบเลื่อนประเมิน',
+        currentRiskLevel: 'high',
+        hasSepsisAlert: true,
+        latestNewsScore: 8,
+        arrivalTime: '2026-11-16T10:00:00',
+      };
+      store.setPatients([patient]);
+      store.selectPatient('pt_snooze_log');
+      store.generateSchedule('2026-11-16T10:00:00');
+
+      const entry1 = useRTSASStore.getState().assessmentSchedule!.entries[0];
+      store.snoozeReminder(entry1.id);
+
+      const tl = useRTSASStore.getState().timeline;
+      const snoozeTl = tl.find((e) => e.actionText.includes('เลื่อนการประเมินสัญญาณชีพซ้ำ รอบที่ 1'));
+      expect(snoozeTl).toBeDefined();
+      expect(snoozeTl?.color).toBe('orange');
+
+      const logCall = mockFetch.mock.calls.find(([url]) => url === '/api/logs/event');
+      expect(logCall).toBeDefined();
+      const logBody = JSON.parse(logCall![1].body);
+      expect(logBody.level).toBe('Warning');
+      expect(logBody.component).toBe('Clinical_Treatment');
+      expect(logBody.details.event).toBe('assessment_snoozed');
+      expect(logBody.details.round_sequence).toBe(1);
+      expect(logBody.details.snooze_minutes).toBe(2);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it('completeChecklistItem and skipChecklistItem log structured events to /api/logs/event', () => {
+    const origFetch = globalThis.fetch;
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok' }),
+    });
+    globalThis.fetch = mockFetch as any;
+
+    try {
+      const store = useRTSASStore.getState();
+      const patient: any = {
+        id: 'pt_chk_log',
+        hn: 'HN69008888',
+        vn: 'VN69008888',
+        fullName: 'ผู้ป่วย ทดสอบ Checklist Log',
+        currentRiskLevel: 'high',
+        hasSepsisAlert: true,
+        latestNewsScore: 9,
+        arrivalTime: '2026-11-16T11:00:00',
+      };
+      store.setPatients([patient]);
+      store.selectPatient('pt_chk_log');
+
+      store.completeChecklistItem('triage', 'พยาบาล A');
+      store.skipChecklistItem('antibiotics_2', 'พยาบาล A');
+
+      const logBodies = mockFetch.mock.calls
+        .filter(([url]) => url === '/api/logs/event')
+        .map(([, init]) => JSON.parse(init.body));
+
+      const completeLog = logBodies.find((b) => b.details?.event === 'checklist_item_completed');
+      expect(completeLog).toBeDefined();
+      expect(completeLog.level).toBe('Note');
+      expect(completeLog.details.checklist_item_id).toBe('triage');
+      expect(completeLog.details.actor).toBe('พยาบาล A');
+
+      const skipLog = logBodies.find((b) => b.details?.event === 'checklist_item_skipped');
+      expect(skipLog).toBeDefined();
+      expect(skipLog.level).toBe('Warning');
+      expect(skipLog.details.checklist_item_id).toBe('antibiotics_2');
+      expect(skipLog.details.actor).toBe('พยาบาล A');
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it('extractLogSummaryBadges extracts checklist, round, snooze, MAP, and copied timeline badges', () => {
+    const badges = extractLogSummaryBadges({
+      hn: 'HN69008888',
+      actor: 'พยาบาล ER',
+      checklist_item: 'ให้สารน้ำทางหลอดเลือดดำ',
+      input_value: 'NSS 1000 ml',
+      round_sequence: 2,
+      snooze_minutes: 2,
+      map: 62,
+      copied_steps: 7,
+      event: 'assessment_snoozed',
+    });
+
+    const texts = badges.map((b) => b.text);
+    expect(texts).toContain('👤 พยาบาล ER');
+    expect(texts).toContain('☑️ ให้สารน้ำทางหลอดเลือดดำ: NSS 1000 ml');
+    expect(texts).toContain('🔄 รอบที่ 2');
+    expect(texts).toContain('⏳ เลื่อน +2 นาที');
+    expect(texts).toContain('🩸 MAP 62 mmHg');
+    expect(texts).toContain('📋 คัดลอก 7 ขั้นตอน');
+    expect(badges.find((b) => b.key === 'map')?.tone).toBe('red');
   });
 });
 

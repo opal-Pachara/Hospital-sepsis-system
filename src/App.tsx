@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useRTSASStore, isTreatmentTimelineEvent, isHistoricalPatient } from './store/useRTSASStore';
+import { useRTSASStore, isTreatmentTimelineEvent, isHistoricalPatient, requiresInitialAvpuO2Gate } from './store/useRTSASStore';
 import { useAssessmentReminders, useGlobalCountdownTicker } from './hooks/useTimers';
 import { usePatientData, useWebSocketAlerts } from './hooks/useBackend';
 // Layout & Navigation
@@ -17,6 +17,7 @@ import {
 // Modals
 import {
   AlertModal,
+  SingleParamAlertModal,
   ReminderModal,
   AssessmentFormModal,
   MultiAlertModal,
@@ -60,7 +61,58 @@ function parseUrlRoute(): { view: AppView; adminTab: AdminTab } {
 
 function EmptyState() {
   const patients = useRTSASStore((s) => s.patients);
+  const selectedPatient = useRTSASStore((s) => s.selectedPatient);
+  const patientData = useRTSASStore((s) => s.patientData);
+  const openModal = useRTSASStore((s) => s.openModal);
   const hasPatients = patients && patients.length > 0;
+  const needsGate = Boolean(selectedPatient && requiresInitialAvpuO2Gate(selectedPatient, patientData));
+
+  if (needsGate && selectedPatient) {
+    return (
+      <div className="flex-1 w-full h-full min-w-0 flex flex-col items-center justify-center p-6 md:p-10 bg-gradient-to-b from-[#f8fafc] via-[#f1f5f9]/60 to-[#e2e8f0]/40 relative overflow-hidden select-none">
+        <div
+          className="relative z-10 w-full bg-white/95 backdrop-blur-sm border border-amber-300 rounded-2xl p-8 shadow-xl shadow-slate-200/60 text-center flex-shrink-0 flex flex-col items-center"
+          style={{ maxWidth: '540px' }}
+        >
+          <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-3xl mb-4">
+            🧠
+          </div>
+          <h3 className="text-lg font-bold text-slate-800 mb-2">
+            ต้องประเมิน AVPU และออกซิเจนเสริม (O₂) ก่อนเข้าหน้าประเมินผู้ป่วย
+          </h3>
+          <p className="text-xs sm:text-sm text-slate-500 leading-relaxed mb-5">
+            กรุณาบันทึกข้อมูลระดับความรู้สึกตัว (AVPU) และการได้รับออกซิเจนเสริมของผู้ป่วยรายนี้ให้ครบถ้วนก่อนเปิดหน้าการประเมิน
+          </p>
+          <button
+            type="button"
+            id="btn-open-avpu-o2-gate"
+            onClick={() =>
+              openModal('avpu_assessment', {
+                patientId: selectedPatient.id,
+                hn: selectedPatient.hn,
+                gcs: selectedPatient.latestVitals.gcs,
+                patientName: selectedPatient.fullName,
+                isInitialGate: true,
+              })
+            }
+            style={{
+              padding: '10px 18px',
+              borderRadius: '12px',
+              border: 'none',
+              background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+              color: '#fff',
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)',
+            }}
+          >
+            🧠💨 ประเมิน AVPU และ O₂ เพื่อเข้าสู่หน้าประเมินผู้ป่วย
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 w-full h-full min-w-0 flex flex-col items-center justify-center p-6 md:p-10 bg-gradient-to-b from-[#f8fafc] via-[#f1f5f9]/60 to-[#e2e8f0]/40 relative overflow-hidden select-none">
@@ -301,7 +353,9 @@ export default function App() {
   useWebSocketAlerts();
 
   const selectedPatient = useRTSASStore((s) => s.selectedPatient);
+  const patientData = useRTSASStore((s) => s.patientData);
   const isHistorical = useRTSASStore((s) => isHistoricalPatient(s.selectedPatient, s.patientData));
+  const isGatedByAvpuO2 = Boolean(selectedPatient && requiresInitialAvpuO2Gate(selectedPatient, patientData));
   const currentData = useRTSASStore((s) => (s.selectedPatient ? s.patientData[s.selectedPatient.id] : null));
   const isLoading = useRTSASStore((s) => s.ui.isLoading);
 
@@ -385,14 +439,18 @@ export default function App() {
             )}
 
             <div className="flex-1 flex overflow-hidden min-h-0">
-              {/* CENTER — Checklist/Timeline */}
-              <WorkflowPanel />
+              {/* Gate evaluation panels until initial AVPU + Supplemental O₂ assessment is completed */}
+              {!selectedPatient || isGatedByAvpuO2 ? (
+                <EmptyState />
+              ) : (
+                <>
+                  {/* CENTER — Checklist/Timeline */}
+                  <WorkflowPanel />
 
-              {/* RIGHT — Patient Detail + Vitals + NEWS */}
-              <DetailPanel />
-
-              {/* Show empty state if no patient selected */}
-              {!selectedPatient && <EmptyState />}
+                  {/* RIGHT — Patient Detail + Vitals + NEWS */}
+                  <DetailPanel />
+                </>
+              )}
             </div>
           </main>
         )}
@@ -403,6 +461,7 @@ export default function App() {
 
       {/* Modals */}
       <AlertModal />
+      <SingleParamAlertModal />
       <MultiAlertModal />
       <ReminderModal />
       <AssessmentFormModal />

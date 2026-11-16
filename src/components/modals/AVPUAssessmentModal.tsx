@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
-import { useRTSASStore } from '../../store/useRTSASStore';
+import { useRTSASStore, requiresInitialAvpuO2Gate } from '../../store/useRTSASStore';
 import type { AVPULevel, OxygenStatus } from '../../types';
+import { logClientEvent } from '../../utils/logHelpers';
 
 export default function AVPUAssessmentModal() {
   const { ui, closeModal, assessAVPU, toggleOxygenSupplementation, patients, selectedPatient, patientData } = useRTSASStore();
   const [submitting, setSubmitting] = useState(false);
   const [selectedO2, setSelectedO2] = useState<OxygenStatus>('unassessed');
   const [pendingAvpu, setPendingAvpu] = useState<AVPULevel | null>(null);
+  const [avpuExplicitlyPicked, setAvpuExplicitlyPicked] = useState(false);
 
   const isOpen = ui.modal.activeModal === 'avpu_assessment';
   const modalData = (ui.modal.modalData || {}) as {
@@ -15,6 +17,8 @@ export default function AVPUAssessmentModal() {
     gcs?: number;
     patientName?: string;
     mode?: 'avpu' | 'oxygen';
+    isInitialGate?: boolean;
+    previousPatientId?: string | null;
   };
 
   const patient =
@@ -22,15 +26,25 @@ export default function AVPUAssessmentModal() {
     selectedPatient;
 
   const pData = patient ? (patientData[patient.id] || (patient.hn ? patientData[patient.hn] : undefined)) : undefined;
-  const latestVitals = pData?.latestVitals || patient?.latestVitals;
+  const latestVitals = (pData as { latestVitals?: typeof patient extends { latestVitals: infer V } ? V : never } | undefined)?.latestVitals || patient?.latestVitals;
   const latestNews = pData?.latestNewsResult || patient?.latestNewsResult;
 
   useEffect(() => {
     if (isOpen && latestVitals) {
       setSelectedO2(latestVitals.oxygenSupplementation || 'unassessed');
-      setPendingAvpu(null);
+      const gcsVal = modalData.gcs ?? latestVitals.gcs ?? 15;
+      if (latestVitals.avpuStatus === 'confirmed' && latestVitals.avpu) {
+        setPendingAvpu(latestVitals.avpu);
+        setAvpuExplicitlyPicked(true);
+      } else if (gcsVal === 15) {
+        setPendingAvpu('A');
+        setAvpuExplicitlyPicked(false);
+      } else {
+        setPendingAvpu(null);
+        setAvpuExplicitlyPicked(false);
+      }
     }
-  }, [isOpen, patient?.id, latestVitals?.oxygenSupplementation]);
+  }, [isOpen, patient?.id]);
 
   if (!isOpen) return null;
 
@@ -38,9 +52,7 @@ export default function AVPUAssessmentModal() {
   const hn = patient?.hn ?? modalData.hn ?? '';
   const patientName = patient?.fullName ?? modalData.patientName ?? hn;
 
-  const isOxygenOnlyMode =
-    modalData.mode === 'oxygen' ||
-    (!latestNews?.needsAvpuPrompt && Boolean(latestNews?.needsOxygenPrompt) && gcs === 15 && modalData.mode !== 'avpu');
+  const isOxygenOnlyMode = modalData.mode === 'oxygen';
 
   // Calculate base score without AVPU and without O2
   const currentTotalScore = latestNews?.totalScore ?? 0;
@@ -53,27 +65,62 @@ export default function AVPUAssessmentModal() {
       : 0;
   const baseVitalsScore = Math.max(0, currentTotalScore - currentO2Score - currentAvpuScore);
 
-  const handleSelectAvpu = async (level: AVPULevel) => {
+  const submitCombinedAssessment = async (avpuLevel: AVPULevel, o2Status: 'room_air' | 'supplemental') => {
     if (!patient || submitting) return;
-    const newAvpuScore = level === 'A' ? 0 : 3;
-    const scoreWithoutO2 = baseVitalsScore + newAvpuScore;
-
-    // Rule 3: If score excluding O2 is 3–4 and O2 is still unassessed, require nurse to specify O2 before concluding
-    if (selectedO2 === 'unassessed' && (scoreWithoutO2 === 3 || scoreWithoutO2 === 4)) {
-      setPendingAvpu(level);
-      return;
-    }
-
     setSubmitting(true);
     try {
-      const o2Bool = selectedO2 === 'unassessed' ? undefined : selectedO2 === 'supplemental';
-      await assessAVPU(patient.id, level, o2Bool);
-      closeModal();
+      const isSupp = o2Status === 'supplemental';
+      await assessAVPU(patient.id, avpuLevel, isSupp);
+      const curUser = useRTSASStore.getState().currentUser;
+      const actorName = curUser?.name || 'พยาบาลวิชาชีพ';
+      const cleanHn = hn.toUpperCase().startsWith('HN') ? hn.slice(2).trim() : hn;
+      logClientEvent({
+        level: 'Note',
+        component: 'Clinical_Treatment',
+        message: `ยืนยันผลประเมิน AVPU (${avpuLevel}) และ O₂ (${isSupp ? 'ใช้ออกซิเจนเสริม +2' : 'Room Air 0'}) ก่อนเข้าหน้าประเมิน: ผู้ป่วย HN ${cleanHn || '-'} โดย ${actorName}`,
+        details: {
+          event: 'initial_avpu_o2_gate_completed',
+          hn: hn || undefined,
+          vn: patient.vn || undefined,
+          avpu: avpuLevel,
+          supplemental_oxygen: isSupp,
+          actor: actorName,
+        },
+      });
+      if (useRTSASStore.getState().ui.modal.activeModal === 'avpu_assessment') {
+        closeModal();
+      }
     } catch (err) {
-      console.error('Error assessing AVPU:', err);
+      console.error('Error assessing AVPU + O2:', err);
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleCancel = () => {
+    if (submitting) return;
+    const curState = useRTSASStore.getState();
+    const stillNeedsGate = Boolean(
+      patient &&
+      modalData.mode !== 'oxygen' &&
+      requiresInitialAvpuO2Gate(patient, curState.patientData)
+    );
+    closeModal();
+    if (stillNeedsGate) {
+      curState.selectPatient(modalData.previousPatientId ?? null);
+    }
+  };
+
+  const handleSelectAvpu = async (level: AVPULevel) => {
+    if (!patient || submitting) return;
+    setPendingAvpu(level);
+    setAvpuExplicitlyPicked(true);
+
+    if (selectedO2 === 'unassessed') {
+      return;
+    }
+
+    await submitCombinedAssessment(level, selectedO2);
   };
 
   const handleSelectO2 = async (status: 'room_air' | 'supplemental') => {
@@ -84,24 +131,18 @@ export default function AVPUAssessmentModal() {
       setSubmitting(true);
       try {
         await toggleOxygenSupplementation(patient.id, status === 'supplemental');
-        closeModal();
+        if (useRTSASStore.getState().ui.modal.activeModal === 'avpu_assessment') {
+          closeModal();
+        }
       } finally {
         setSubmitting(false);
       }
       return;
     }
 
-    // If nurse already clicked an AVPU option that was waiting for O2 (score 3-4), submit both now
-    if (pendingAvpu) {
-      setSubmitting(true);
-      try {
-        await assessAVPU(patient.id, pendingAvpu, status === 'supplemental');
-        closeModal();
-      } catch (err) {
-        console.error('Error assessing AVPU + O2:', err);
-      } finally {
-        setSubmitting(false);
-      }
+    // Submit immediately if clinician explicitly chose an AVPU level in this modal
+    if (pendingAvpu && avpuExplicitlyPicked) {
+      await submitCombinedAssessment(pendingAvpu, status);
     }
   };
 
@@ -172,7 +213,7 @@ export default function AVPUAssessmentModal() {
         animation: 'fadeIn 0.15s ease-out',
       }}
       onClick={(e) => {
-        if (e.target === e.currentTarget && !submitting) closeModal();
+        if (e.target === e.currentTarget && !submitting) handleCancel();
       }}
     >
       <div
@@ -215,10 +256,10 @@ export default function AVPUAssessmentModal() {
               {isOxygenOnlyMode ? '💨' : '🧠'}
             </div>
             <div>
-              <h2 style={{ fontSize: '18px', fontWeight: 700, margin: 0 }}>
+              <h2 style={{ fontSize: '17px', fontWeight: 700, margin: 0 }}>
                 {isOxygenOnlyMode
                   ? 'ระบุการได้รับออกซิเจนเสริม (NEWS 2012)'
-                  : 'ประเมินระดับความรู้สึกตัว (AVPU)'}
+                  : 'ประเมิน AVPU และออกซิเจนเสริม (O₂) ก่อนเข้าประเมิน'}
               </h2>
               <div style={{ fontSize: '13px', color: '#94a3b8', marginTop: '2px' }}>
                 ผู้ป่วย: <span style={{ color: '#f8fafc', fontWeight: 600 }}>{patientName}</span>
@@ -241,7 +282,7 @@ export default function AVPUAssessmentModal() {
             </div>
           </div>
           <button
-            onClick={closeModal}
+            onClick={handleCancel}
             disabled={submitting}
             style={{
               background: 'transparent',
@@ -276,11 +317,15 @@ export default function AVPUAssessmentModal() {
               ? baseVitalsScore === 3 || baseVitalsScore === 4
                 ? `ผู้ป่วยมีคะแนนเบื้องต้น ${baseVitalsScore} คะแนน (ช่วง 3–4 คะแนน) โปรดระบุว่าได้รับออกซิเจนเสริมหรือไม่ก่อนสรุปผล`
                 : `ผู้ป่วยมีคะแนนเบื้องต้น ${baseVitalsScore} คะแนน — โปรดระบุสถานะการได้รับออกซิเจนเสริม (O₂) เพื่อคำนวณ NEWS 2012 ให้ครบถ้วน`
-              : pendingAvpu
-              ? `คะแนนรวมเมื่อเลือก [${pendingAvpu}] คือ ${baseVitalsScore + (pendingAvpu === 'A' ? 0 : 3)} คะแนน (ช่วง 3–4 คะแนน) กรุณาระบุการได้รับออกซิเจนเสริมด้านล่างเพื่อสรุปผล`
-              : gcs < 15
-              ? `ผู้ป่วยมีคะแนน GCS ${gcs} (< 15) โปรดประเมิน AVPU เพื่อคำนวณ NEWS 2012 ตามเกณฑ์จริง`
-              : 'โปรดยืนยันระดับความรู้สึกตัวของผู้ป่วย เพื่อความปลอดภัยสูงสุด'}
+              : pendingAvpu && selectedO2 === 'unassessed'
+              ? avpuExplicitlyPicked
+                ? `เลือก AVPU [${pendingAvpu}] แล้ว — กรุณาระบุการได้รับออกซิเจนเสริม (O₂) ด้านล่างเพื่อเข้าสู่หน้าประเมิน`
+                : `GCS = ${gcs} (แนะนำ AVPU = ${pendingAvpu}) — กรุณาเลือกสถานะการได้รับออกซิเจนเสริม (O₂) แล้วกดยืนยันก่อนเข้าหน้าประเมิน`
+              : pendingAvpu && selectedO2 !== 'unassessed'
+              ? `เลือก AVPU [${pendingAvpu}] และ ${selectedO2 === 'supplemental' ? 'ใช้ออกซิเจนเสริม (+2)' : 'ไม่ใช้ออกซิเจนเสริม (0)'} พร้อมเข้าสู่หน้าประเมินแล้ว`
+              : selectedO2 !== 'unassessed'
+              ? 'เลือกสถานะ O₂ แล้ว — กรุณาเลือกระดับความรู้สึกตัว AVPU (A / V / P / U) เพื่อเข้าสู่หน้าประเมิน'
+              : `ผู้ป่วยมี GCS ${gcs} (< 15) — กรุณาประเมินทั้ง AVPU และออกซิเจนเสริม (O₂) ให้ครบถ้วนก่อนเข้าหน้าประเมิน`}
           </span>
         </div>
 
@@ -540,8 +585,21 @@ export default function AVPUAssessmentModal() {
                       {opt.icon}
                     </div>
                     <div>
-                      <div style={{ fontSize: '16px', fontWeight: 700, color: '#1e293b' }}>
-                        [{opt.level}] {opt.title}
+                      <div style={{ fontSize: '16px', fontWeight: 700, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span>[{opt.level}] {opt.title}</span>
+                        {gcs === 15 && opt.level === 'A' && (
+                          <span style={{
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            background: '#dcfce7',
+                            color: '#15803d',
+                            border: '1px solid #86efac',
+                          }}>
+                            แนะนำ (GCS 15)
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
                         {opt.desc}
@@ -576,11 +634,13 @@ export default function AVPUAssessmentModal() {
             padding: '12px 24px 20px',
             display: 'flex',
             justifyContent: 'flex-end',
+            gap: '10px',
             borderTop: '1px solid #f1f5f9',
           }}
         >
           <button
-            onClick={closeModal}
+            type="button"
+            onClick={handleCancel}
             disabled={submitting}
             style={{
               padding: '8px 18px',
@@ -595,6 +655,42 @@ export default function AVPUAssessmentModal() {
           >
             ยกเลิก
           </button>
+          {!isOxygenOnlyMode && (
+            <button
+              id="btn-confirm-avpu-o2"
+              type="button"
+              disabled={submitting || !pendingAvpu || selectedO2 === 'unassessed'}
+              onClick={() => {
+                if (pendingAvpu && selectedO2 !== 'unassessed') {
+                  submitCombinedAssessment(pendingAvpu, selectedO2);
+                }
+              }}
+              style={{
+                padding: '9px 18px',
+                borderRadius: '10px',
+                border: 'none',
+                background:
+                  pendingAvpu && selectedO2 !== 'unassessed'
+                    ? 'linear-gradient(135deg, #2563eb, #1d4ed8)'
+                    : '#e2e8f0',
+                color: pendingAvpu && selectedO2 !== 'unassessed' ? '#ffffff' : '#94a3b8',
+                fontWeight: 700,
+                fontSize: '13px',
+                cursor:
+                  submitting || !pendingAvpu || selectedO2 === 'unassessed'
+                    ? 'not-allowed'
+                    : 'pointer',
+                boxShadow:
+                  pendingAvpu && selectedO2 !== 'unassessed'
+                    ? '0 4px 12px rgba(37, 99, 235, 0.25)'
+                    : 'none',
+              }}
+            >
+              {pendingAvpu && selectedO2 !== 'unassessed'
+                ? `✅ ยืนยันผล AVPU (${pendingAvpu}) + O₂ — เข้าสู่หน้าประเมิน`
+                : 'เลือก AVPU และ O₂ ให้ครบเพื่อเข้าประเมิน'}
+            </button>
+          )}
         </div>
       </div>
     </div>

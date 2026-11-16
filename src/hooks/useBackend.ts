@@ -23,7 +23,7 @@ export interface BackendPatientsResponse {
 export function usePatientData() {
   const { setPatients, selectPatient, setConnectionStatus, setLoading, queueAlert } = useRTSASStore();
   const alertedKeysRef = useRef<Set<string>>(new Set());
-  const promptedKeysRef = useRef<Set<string>>(new Set());
+  const singleParamAlertedKeysRef = useRef<Set<string>>(new Set());
 
   const fetchPatients = useCallback(async (forceRefresh = false) => {
     try {
@@ -88,32 +88,51 @@ export function usePatientData() {
         console.log(`[RTSAS] Refreshed ${data.count} patients.`);
       }
 
-      // 🧠💨 Detect patients needing additional AVPU (GCS < 15 & score < 5) or Oxygen (score 3-4) prompt
-      const currentState = useRTSASStore.getState();
-      if (currentState.ui.modal.activeModal === null && currentState.pendingAlerts.length === 0) {
-        const pendingPromptPatient = patients.find((p) => {
-          const pData = currentState.patientData[p.id] || (p.hn ? currentState.patientData[p.hn] : undefined);
-          if (pData?.treatmentCompleted || pData?.sepsisRuledOut || p.treatmentStatus?.treatment_completed || p.treatmentStatus?.sepsis_ruled_out) return false;
-          const latestNews = pData?.latestNewsResult || p.latestNewsResult;
-          if (!latestNews?.needsAvpuPrompt && !latestNews?.needsOxygenPrompt) return false;
-          const promptKey = `${p.hn}_${p.arrivalTime || ''}_${latestNews.needsAvpuPrompt ? 'avpu' : ''}_${latestNews.needsOxygenPrompt ? 'o2' : ''}`;
-          return !promptedKeysRef.current.has(promptKey);
+      // 🚨 Detect patients with any single parameter = +3 while total NEWS < 5 (separate from Sepsis Alert)
+      const beforeSingleState = useRTSASStore.getState();
+      if (beforeSingleState.ui.modal.activeModal === null && beforeSingleState.pendingAlerts.length === 0) {
+        const singleParamPatient = patients.find((p) => {
+          if (p.latestNewsScore >= 5) return false;
+          const pData = beforeSingleState.patientData[p.id] || (p.hn ? beforeSingleState.patientData[p.hn] : undefined);
+          if (
+            pData?.treatmentCompleted ||
+            pData?.sepsisRuledOut ||
+            p.treatmentStatus?.treatment_completed ||
+            p.treatmentStatus?.sepsis_ruled_out ||
+            p.treatmentStatus?.acknowledged ||
+            p.treatmentStatus?.doctor_confirmed
+          ) {
+            return false;
+          }
+          if (
+            beforeSingleState.dismissedAlertKeys?.[p.hn] ||
+            beforeSingleState.dismissedAlertKeys?.[`single3_${p.hn}`]
+          ) {
+            return false;
+          }
+          const hasSingleThree = Boolean(
+            p.latestNewsResult?.hasSingleParameterAlert ||
+            p.latestNewsResult?.breakdown?.some((b) => b.score === 3)
+          );
+          if (!hasSingleThree) return false;
+          const singleKey = `single3_${p.hn}_${p.arrivalTime || ''}_${p.latestNewsScore}`;
+          return !singleParamAlertedKeysRef.current.has(singleKey);
         });
 
-        if (pendingPromptPatient) {
-          const pData = currentState.patientData[pendingPromptPatient.id] || (pendingPromptPatient.hn ? currentState.patientData[pendingPromptPatient.hn] : undefined);
-          const latestNews = pData?.latestNewsResult || pendingPromptPatient.latestNewsResult;
-          const promptKey = `${pendingPromptPatient.hn}_${pendingPromptPatient.arrivalTime || ''}_${latestNews?.needsAvpuPrompt ? 'avpu' : ''}_${latestNews?.needsOxygenPrompt ? 'o2' : ''}`;
-          promptedKeysRef.current.add(promptKey);
-          useRTSASStore.getState().selectPatient(pendingPromptPatient.id);
-          useRTSASStore.getState().openModal('avpu_assessment', {
-            patientId: pendingPromptPatient.id,
-            hn: pendingPromptPatient.hn,
-            gcs: pendingPromptPatient.latestVitals.gcs,
-            patientName: pendingPromptPatient.fullName,
+        if (singleParamPatient) {
+          const singleKey = `single3_${singleParamPatient.hn}_${singleParamPatient.arrivalTime || ''}_${singleParamPatient.latestNewsScore}`;
+          singleParamAlertedKeysRef.current.add(singleKey);
+          useRTSASStore.getState().openModal('single_param_alert', {
+            hn: singleParamPatient.hn,
+            newsScore: singleParamPatient.latestNewsScore,
+            patientName: singleParamPatient.fullName,
           });
+          useRTSASStore.getState().selectPatient(singleParamPatient.id);
         }
       }
+
+      // NOTE: Do not auto-select unassessed patients on background poll;
+      // clicking a patient or acknowledging an alert opens the AVPU + O₂ gate before entering the screen.
     } catch (err) {
       console.warn('[usePatientData] Backend unavailable:', err);
       setConnectionStatus('disconnected');
@@ -281,20 +300,32 @@ export function useWebSocketAlerts() {
           patient.treatmentStatus?.sepsis_ruled_out
         );
 
+        const wsSingleKey = `single3_${payload.hn}_${bp.arrival_time || ''}_${payload.news_result.totalScore}`;
+        const wsCurState = useRTSASStore.getState();
+        const hasSingleThree = Boolean(
+          payload.news_result.hasSingleParameterAlert ||
+          payload.news_result.breakdown?.some((b) => b.score === 3)
+        );
+
         if (!isFinished && payload.is_new_alert && payload.news_result.totalScore >= 5) {
           // Queue the alert — if modal is already open it will stack, not override
           queueAlert(payload.hn, payload.news_result.totalScore);
         } else if (
           !isFinished &&
-          (patient.latestNewsResult?.needsAvpuPrompt || patient.latestNewsResult?.needsOxygenPrompt) &&
-          useRTSASStore.getState().ui.modal.activeModal === null &&
-          useRTSASStore.getState().pendingAlerts.length === 0
+          payload.news_result.totalScore < 5 &&
+          hasSingleThree &&
+          !patient.treatmentStatus?.acknowledged &&
+          !patient.treatmentStatus?.doctor_confirmed &&
+          !wsCurState.dismissedAlertKeys?.[payload.hn] &&
+          !wsCurState.dismissedAlertKeys?.[`single3_${payload.hn}`] &&
+          !wsCurState.dismissedAlertKeys?.[wsSingleKey] &&
+          wsCurState.ui.modal.activeModal === null &&
+          wsCurState.pendingAlerts.length === 0
         ) {
-          useRTSASStore.getState().selectPatient(patient.id);
-          useRTSASStore.getState().openModal('avpu_assessment', {
-            patientId: patient.id,
+          wsCurState.markAlertDismissed(wsSingleKey);
+          useRTSASStore.getState().openModal('single_param_alert', {
             hn: patient.hn,
-            gcs: patient.latestVitals.gcs,
+            newsScore: patient.latestNewsScore,
             patientName: patient.fullName,
           });
         }

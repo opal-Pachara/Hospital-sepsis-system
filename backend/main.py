@@ -456,6 +456,27 @@ async def get_logs_route(
     return JSONResponse(content={"logs": logs, "count": len(logs), "summary": summary})
 
 
+class ClientLogEventRequest(BaseModel):
+    level: str = "Note"
+    component: str = "Clinical_Treatment"
+    message: str
+    details: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/logs/event")
+@app.post("/api/system/logs")
+async def post_client_log_event(payload: ClientLogEventRequest):
+    """Record a client/UI button action into the centralized SQLite timestamp_logs database."""
+    from .log_service import record_log
+    entry = record_log(
+        level=payload.level,
+        message=payload.message,
+        component=payload.component,
+        details=payload.details,
+    )
+    return JSONResponse(content={"status": "ok", "log": entry})
+
+
 @app.get("/api/patients")
 async def get_patients(refresh: bool = False):
     """

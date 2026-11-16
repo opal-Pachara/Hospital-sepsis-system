@@ -49,12 +49,16 @@ export default function CountdownBanner() {
     : 3600;
   const overdueMins = Math.floor(Math.max(0, elapsedSecs - countdownTimer.totalDurationSeconds) / 60);
 
-  const confirmTimeStr = countdownTimer.startedAt
-    ? new Date(countdownTimer.startedAt).toLocaleTimeString('th-TH', {
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-    : '--:--';
+  const formatTimeTH = (ms: number | null) =>
+    ms !== null && !Number.isNaN(ms)
+      ? new Date(ms).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+      : '--:--';
+
+  const startedAtMs = countdownTimer.startedAt ? new Date(countdownTimer.startedAt).getTime() : null;
+  const confirmTimeStr = formatTimeTH(startedAtMs);
+  const targetTimeStr = formatTimeTH(
+    startedAtMs !== null ? startedAtMs + countdownTimer.totalDurationSeconds * 1000 : null
+  );
 
   const bannerBg = isExpired
     ? 'linear-gradient(135deg, #7f1d1d, #991b1b)'
@@ -62,28 +66,40 @@ export default function CountdownBanner() {
       ? 'linear-gradient(135deg, #7c2d12, #b91c1c)'
       : 'linear-gradient(135deg, #1e293b, #0f3460)';
 
+  const countdownStyle = isWarning || isCritical
+    ? {
+        color: '#ffffff',
+        textShadow: '0 2px 12px rgba(0, 0, 0, 0.45)',
+      }
+    : {
+        color: '#ff5c5c',
+        textShadow: '0 2px 14px rgba(239, 68, 68, 0.4)',
+      };
+
   return (
     <div
-      className="px-3.5 py-2 flex items-center justify-between flex-shrink-0 border-b"
+      className="px-3.5 py-2 flex items-center justify-between gap-3 flex-shrink-0 border-b"
       style={{
         background: bannerBg,
         borderColor: '#334155',
       }}
     >
       <div>
-        <div className="text-xs uppercase tracking-wider" style={{ color: 'rgba(255,255,255,.7)' }}>
+        <div className="text-xs uppercase tracking-wider" style={{ color: 'rgba(255,255,255,.75)' }}>
           {isExpired ? '⚠️ เกินกำหนดเวลา 60 นาที (Sepsis Golden Hour)' : '⏱ เวลาที่เหลือ — เป้าหมายยาปฏิชีวนะ'}
         </div>
-        <div className="text-3xl font-black text-white tabular-nums leading-tight flex items-center gap-2">
+        <div className="text-4xl font-black text-white tabular-nums leading-none tracking-tight flex items-center gap-2.5 mt-1">
           {isExpired ? (
             <>
-              <span>🚨 หมดเวลา!</span>
+              <span className="text-3xl animate-countdown-pulse" style={{ textShadow: '0 2px 12px rgba(0, 0, 0, 0.4)' }}>
+                🚨 หมดเวลา!
+              </span>
               <span
                 style={{
                   fontSize: '11px',
                   fontWeight: 700,
-                  padding: '2px 8px',
-                  borderRadius: '4px',
+                  padding: '3px 9px',
+                  borderRadius: '6px',
                   background: 'rgba(0,0,0,0.4)',
                   border: '1px solid #ef4444',
                   color: '#fecaca',
@@ -93,7 +109,12 @@ export default function CountdownBanner() {
               </span>
             </>
           ) : (
-            `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+            <span
+              className={isCritical || isWarning ? 'animate-countdown-pulse' : ''}
+              style={countdownStyle}
+            >
+              {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
+            </span>
           )}
         </div>
       </div>
@@ -101,7 +122,7 @@ export default function CountdownBanner() {
       <div className="text-right">
         <div className="text-xs" style={{ color: 'rgba(255,255,255,.6)' }}>แพทย์ยืนยัน</div>
         <div className="text-sm font-bold text-right" style={{ color: '#fbbf24' }}>{confirmTimeStr} น.</div>
-        <div className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,.6)' }}>เป้าหมาย ยา ≤ 60 นาที</div>
+        <div className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,.6)' }}>เวลาที่ครบให้ยาปฏิชีวนะ ใน 1 ชั่วโมง ({targetTimeStr} น.)</div>
       </div>
     </div>
   );

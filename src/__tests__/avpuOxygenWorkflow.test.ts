@@ -1,8 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { calculateNEWS, scoreOxygenSupplementation } from '../utils/newsCalculator';
-import { useRTSASStore } from '../store/useRTSASStore';
+import { useRTSASStore, requiresInitialAvpuO2Gate } from '../store/useRTSASStore';
 import { calculateMAP } from '../types';
 import type { Patient, VitalSigns } from '../types';
+import { AlertModalContent } from '../components/modals/AlertModal';
+import { SingleParamAlertModalContent } from '../components/modals/SingleParamAlertModal';
 
 describe('NEWS 2012 AVPU Consciousness Assessment & Supplemental Oxygen Workflow', () => {
   beforeEach(() => {
@@ -258,6 +262,222 @@ describe('NEWS 2012 AVPU Consciousness Assessment & Supplemental Oxygen Workflow
 
       const tl = useRTSASStore.getState().timeline;
       expect(tl.some((e) => e.actionText.includes('MAP 67 mmHg'))).toBe(true);
+    });
+  });
+
+  describe('Single-parameter +3 popup separation and red highlight rules', () => {
+    const baseVitals: VitalSigns = {
+      respiratoryRate: 16,
+      spO2: 98,
+      oxygenSupplementation: 'room_air',
+      temperature: 37.0,
+      systolicBP: 120,
+      diastolicBP: 80,
+      heartRate: 75,
+      gcs: 15,
+      avpu: 'A',
+      isAvpuConfirmed: true,
+      avpuStatus: 'confirmed',
+    };
+
+    beforeEach(() => {
+      useRTSASStore.setState((s) => ({
+        ui: { ...s.ui, modal: { activeModal: null, modalData: null } },
+      }));
+    });
+
+    it('opens separate single_param_alert popup (not Sepsis Alert) when a parameter is +3 and total NEWS < 5', async () => {
+      const patient: Patient = {
+        id: 'p-single3',
+        hn: 'HN-SINGLE3',
+        vn: 'VN-SINGLE3',
+        fullName: 'ผู้ป่วย ทดสอบ +3',
+        age: 50,
+        gender: 'male',
+        triageLevel: 'urgent',
+        arrivalTime: new Date().toISOString(),
+        chiefComplaint: 'หายใจเร็ว',
+        allergies: [],
+        currentRiskLevel: 'incomplete',
+        latestNewsScore: 0,
+        latestVitals: { ...baseVitals, gcs: 13, isAvpuConfirmed: false, avpuStatus: 'pending_assessment' },
+        latestNewsResult: calculateNEWS({ ...baseVitals, gcs: 13, isAvpuConfirmed: false, avpuStatus: 'pending_assessment' }),
+        hasSepsisAlert: false,
+        attendingPhysician: null,
+        primaryNurse: null,
+        location: 'ER',
+      };
+
+      useRTSASStore.setState({ patients: [patient], selectedPatient: patient });
+
+      // 1. assessAVPU('V', false) => AVPU +3, total score = 3 (< 5) -> single_param_alert
+      await useRTSASStore.getState().assessAVPU(patient.id, 'V', false);
+      expect(useRTSASStore.getState().ui.modal.activeModal).toBe('single_param_alert');
+      expect((useRTSASStore.getState().ui.modal.modalData as any)?.newsScore).toBe(3);
+
+      // 2. toggleOxygenSupplementation => +2 O2 makes total score = 5 (>= 5) -> red Sepsis Alert ('alert')
+      await useRTSASStore.getState().toggleOxygenSupplementation(patient.id, true);
+      expect(useRTSASStore.getState().ui.modal.activeModal).toBe('alert');
+      expect((useRTSASStore.getState().ui.modal.modalData as any)?.newsScore).toBe(5);
+
+      // 3. updatePatientVitals with single RR=26 (+3) and others 0 => single_param_alert
+      useRTSASStore.getState().updatePatientVitals(patient.id, { ...baseVitals, respiratoryRate: 26 });
+      expect(useRTSASStore.getState().ui.modal.activeModal).toBe('single_param_alert');
+      expect((useRTSASStore.getState().ui.modal.modalData as any)?.newsScore).toBe(3);
+    });
+
+    it('renders SingleParamAlertModal with red highlight only on <=3 score & +3 parameters while keeping <3 normal', () => {
+      const vitals: VitalSigns = {
+        ...baseVitals,
+        respiratoryRate: 26, // +3
+        temperature: 38.5,   // +1 (total = 4? test <=3 with 37.0 first, plus check <3 with SpO2=95)
+      };
+      // Let's use RR=26 (+3), SpO2=98 (+0), Temp=37.0 (+0), SBP=120 (+0), HR=75 (+0) => total = 3
+      const vitalsScore3: VitalSigns = { ...vitals, temperature: 37.0 };
+      const news3 = calculateNEWS(vitalsScore3);
+
+      const patient: Patient = {
+        id: 'p-ui-3',
+        hn: 'HN-UI-3',
+        vn: 'VN-UI-3',
+        fullName: 'ผู้ป่วย 3 คะแนน',
+        age: 45,
+        gender: 'female',
+        triageLevel: 'urgent',
+        arrivalTime: new Date().toISOString(),
+        chiefComplaint: 'หายใจเหนื่อย',
+        allergies: [],
+        currentRiskLevel: 'low_medium',
+        latestNewsScore: news3.totalScore,
+        latestVitals: vitalsScore3,
+        latestNewsResult: news3,
+        hasSepsisAlert: false,
+        attendingPhysician: null,
+        primaryNurse: null,
+        location: 'ER',
+      };
+
+      const html = renderToStaticMarkup(
+        createElement(SingleParamAlertModalContent, {
+          patient,
+          alertHN: patient.hn,
+          alertNewsScore: news3.totalScore,
+          onAcknowledge: () => {},
+          onAssessPending: () => {},
+          onClose: () => {},
+        })
+      );
+      expect(html).toContain('แจ้งเตือนพารามิเตอร์วิกฤต (+3 คะแนน)');
+      expect(html).toContain('คะแนนรวม ≤ 3 (มีพารามิเตอร์ +3)');
+      expect(html).toContain('data-testid="single-param-critical-box"');
+      expect(html).toContain('อัตราการหายใจ (RR): 26 bpm');
+      expect(html).toContain('data-critical-param="true"');
+      expect(html).toContain('data-critical-param="false"');
+      // Normal parameters (< 3) remain neutral (#475569), NOT highlighted red
+      expect(html).toMatch(/data-critical-param="false"[^>]*style="[^"]*color:#475569/);
+    });
+
+    it('renders AlertModal highlighting only +3 parameters in red while keeping +1/+2/+0 parameters normal', () => {
+      const vitalsHigh: VitalSigns = {
+        ...baseVitals,
+        respiratoryRate: 26, // +3 (should be RED)
+        temperature: 38.5,   // +1 (should stay normal)
+        heartRate: 120,      // +2 (should stay normal)
+      };
+      const newsHigh = calculateNEWS(vitalsHigh); // total = 6 >= 5
+
+      const patient: Patient = {
+        id: 'p-ui-high',
+        hn: 'HN-UI-HIGH',
+        vn: 'VN-UI-HIGH',
+        fullName: 'ผู้ป่วย NEWS 6',
+        age: 70,
+        gender: 'male',
+        triageLevel: 'resuscitation',
+        arrivalTime: new Date().toISOString(),
+        chiefComplaint: 'ไข้สูง หอบเหนื่อย',
+        allergies: [],
+        currentRiskLevel: 'high',
+        latestNewsScore: newsHigh.totalScore,
+        latestVitals: vitalsHigh,
+        latestNewsResult: newsHigh,
+        hasSepsisAlert: true,
+        attendingPhysician: null,
+        primaryNurse: null,
+        location: 'ER',
+      };
+
+      const html = renderToStaticMarkup(
+        createElement(AlertModalContent, {
+          patient,
+          alertNewsScore: newsHigh.totalScore,
+          pendingCount: 0,
+          onAcknowledge: () => {},
+          onClose: () => {},
+        })
+      );
+      expect(html).toContain('เสี่ยงติดเชื้อในกระแสเลือด');
+      expect(html).toContain('data-testid="alert-critical-params-box"');
+      expect(html).toContain('อัตราการหายใจ (RR): 26 bpm');
+      expect(html).toMatch(/data-critical-param="true"[^>]*style="[^"]*color:#b91c1c/);
+      expect(html).toMatch(/data-critical-param="false"[^>]*style="[^"]*color:#475569/);
+    });
+
+    it('requiresInitialAvpuO2Gate blocks entry until both AVPU and O2 are assessed, even when GCS=15', async () => {
+      const patientGcs15UnassessedO2: Patient = {
+        id: 'p-gate-1',
+        hn: 'HN-GATE-1',
+        vn: 'VN-GATE-1',
+        fullName: 'ผู้ป่วย Gate GCS 15',
+        age: 40,
+        gender: 'female',
+        triageLevel: 'semi_urgent',
+        arrivalTime: new Date().toISOString(),
+        chiefComplaint: 'ไข้',
+        allergies: [],
+        currentRiskLevel: 'low',
+        latestNewsScore: 1,
+        latestVitals: {
+          ...baseVitals,
+          gcs: 15,
+          avpu: 'A',
+          isAvpuConfirmed: true,
+          avpuStatus: 'confirmed',
+          oxygenSupplementation: 'unassessed',
+        },
+        latestNewsResult: calculateNEWS({
+          ...baseVitals,
+          gcs: 15,
+          oxygenSupplementation: 'unassessed',
+        }),
+        hasSepsisAlert: false,
+        attendingPhysician: null,
+        primaryNurse: null,
+        location: 'ER',
+      };
+
+      const patientCompleted: Patient = {
+        ...patientGcs15UnassessedO2,
+        id: 'p-gate-done',
+        hn: 'HN-GATE-DONE',
+        treatmentStatus: { hn: 'HN-GATE-DONE', treatment_completed: true },
+      };
+
+      expect(requiresInitialAvpuO2Gate(patientGcs15UnassessedO2)).toBe(true);
+      expect(requiresInitialAvpuO2Gate(patientCompleted)).toBe(false);
+
+      useRTSASStore.setState({ patients: [patientGcs15UnassessedO2], selectedPatient: null });
+      useRTSASStore.getState().selectPatient('p-gate-1');
+
+      const stAfterSelect = useRTSASStore.getState();
+      expect(stAfterSelect.ui.modal.activeModal).toBe('avpu_assessment');
+      expect((stAfterSelect.ui.modal.modalData as any)?.isInitialGate).toBe(true);
+      expect(requiresInitialAvpuO2Gate(stAfterSelect.selectedPatient, stAfterSelect.patientData)).toBe(true);
+
+      // Complete both AVPU and Supplemental O2 -> gate clears
+      await useRTSASStore.getState().assessAVPU('p-gate-1', 'A', false);
+      const stAfterAssess = useRTSASStore.getState();
+      expect(requiresInitialAvpuO2Gate(stAfterAssess.selectedPatient, stAfterAssess.patientData)).toBe(false);
     });
   });
 });

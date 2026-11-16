@@ -776,7 +776,7 @@ function AssessmentScheduleSection({
                 <span style={{ textAlign: 'center' }} title="ระดับความรู้สึกตัว (AVPU: A / V / P / U)">AVPU</span>
                 <span style={{ textAlign: 'center' }} title="การได้รับออกซิเจนเสริม (Supplemental O₂)">O₂</span>
                 <span style={{ textAlign: 'center' }} title="NEWS Score รวม">NEWS</span>
-                <span style={{ textAlign: 'center' }}>สถานะ</span>
+                <span style={{ textAlign: 'center' }}>สถานะการรักษา</span>
               </div>
 
               {/* Table Body */}
@@ -1213,6 +1213,7 @@ function AssessmentScheduleSection({
                       fontSize: '9.5px',
                     }}
                   >
+                    {/* เอา Q15 และ Q30 นาทีออก */}
                     {[
                       { seq: 1, label: 'Q15 ครั้งที่ 1' },
                       { seq: 2, label: 'Q15 ครั้งที่ 2' },

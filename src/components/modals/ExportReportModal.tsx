@@ -15,6 +15,7 @@ import {
   type ShiftName,
 } from '../../utils/exportReport';
 import { showToast } from '../common/Toast';
+import { logClientEvent } from '../../utils/logHelpers';
 
 const SHIFTS: ShiftName[] = [
   'เช้า (07:00–15:00)',
@@ -49,11 +50,35 @@ export default function ExportReportModal({ isOpen, onClose }: ExportReportModal
   const handleExportCSV = () => {
     exportCSV(summary);
     showToast('✅ ดาวน์โหลด CSV เรียบร้อยแล้ว', 'success');
+    const actorName = useRTSASStore.getState().currentUser?.name || 'ผู้ใช้งาน';
+    logClientEvent({
+      level: 'Note',
+      component: 'Admin_Dashboard',
+      message: `กดส่งออกรายงานสรุปประจำ Shift เป็น CSV (${selectedShift}) โดย ${actorName}`,
+      details: {
+        event: 'export_shift_report',
+        format: 'CSV',
+        shift: selectedShift,
+        actor: actorName,
+      },
+    });
   };
 
   const handleExportPDF = () => {
     exportPDF(summary);
     showToast('🖨️ เปิดหน้าต่างพิมพ์ PDF แล้ว', 'success');
+    const actorName = useRTSASStore.getState().currentUser?.name || 'ผู้ใช้งาน';
+    logClientEvent({
+      level: 'Note',
+      component: 'Admin_Dashboard',
+      message: `กดส่งออกรายงานสรุปประจำ Shift เป็น PDF (${selectedShift}) โดย ${actorName}`,
+      details: {
+        event: 'export_shift_report',
+        format: 'PDF',
+        shift: selectedShift,
+        actor: actorName,
+      },
+    });
   };
 
   return (

@@ -1,4 +1,5 @@
 export { default as AlertModal } from './AlertModal';
+export { default as SingleParamAlertModal } from './SingleParamAlertModal';
 export { default as MultiAlertModal } from './MultiAlertModal';
 export { default as AssessmentFormModal } from './AssessmentFormModal';
 export { default as AuthModal } from './AuthModal';

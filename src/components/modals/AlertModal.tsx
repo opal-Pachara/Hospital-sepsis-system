@@ -1,8 +1,101 @@
-import { useRTSASStore } from '../../store/useRTSASStore';
+import { useRTSASStore, requiresInitialAvpuO2Gate } from '../../store/useRTSASStore';
 import { maskHN } from '../../utils/hnMask';
 
+export const PARAM_LABELS_TH: Record<string, string> = {
+  respiratoryRate: 'อัตราการหายใจ (RR)',
+  spO2: 'ความอิ่มตัวออกซิเจน (SpO₂)',
+  oxygenSupplementation: 'ออกซิเจนเสริม (O₂)',
+  temperature: 'อุณหภูมิร่างกาย (Temp)',
+  systolicBP: 'ความดันโลหิตซิสโตลิก (SBP)',
+  heartRate: 'อัตราชีพจร (HR)',
+  avpu: 'ระดับความรู้สึกตัว (AVPU)',
+};
+
+export const CRITICAL_PARAM_THRESHOLDS_TH: Record<string, string> = {
+  respiratoryRate: 'เกณฑ์ +3: ≤8 หรือ ≥25 ครั้ง/นาที',
+  spO2: 'เกณฑ์ +3: ≤91%',
+  temperature: 'เกณฑ์ +3: ≤35.0°C',
+  systolicBP: 'เกณฑ์ +3: ≤90 หรือ ≥220 mmHg',
+  heartRate: 'เกณฑ์ +3: ≤40 หรือ ≥131 ครั้ง/นาที',
+  avpu: 'เกณฑ์ +3: V / P / U (ระดับความรู้สึกตัวลดลง)',
+};
+
+import type { NEWSParameterScore, Patient } from '../../types';
+
+export function filterDisplayBreakdownItems(breakdown?: NEWSParameterScore[]): NEWSParameterScore[] {
+  return (breakdown || []).filter(
+    (p) => !(p.parameter === 'oxygenSupplementation' && (p.displayValue.includes('ยังไม่') || p.displayValue.includes('รอ')))
+  );
+}
+
+/** Parameter chip row highlighting ONLY score === 3 in red; scores < 3 stay normal neutral. */
+export function NewsBreakdownChips({ items, neutralBg = '#f8fafc' }: { items: NEWSParameterScore[]; neutralBg?: string }) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '8px' }}>
+      {items.map((p) => {
+        const isUnassessed =
+          p.displayValue.includes('รอประเมิน') ||
+          p.displayValue.includes('ยังไม่ประเมิน') ||
+          p.displayValue.includes('ยังไม่ระบุ') ||
+          p.displayValue.includes('รอเลือก');
+        const isCriticalParam = !isUnassessed && p.score === 3;
+        return (
+          <span
+            key={p.parameter}
+            data-critical-param={isCriticalParam ? 'true' : 'false'}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '9px',
+              fontWeight: isCriticalParam ? 800 : 600,
+              color: isCriticalParam ? '#b91c1c' : '#475569',
+              background: isCriticalParam ? '#fef2f2' : neutralBg,
+              border: isCriticalParam ? '1.5px solid #dc2626' : '1px solid #cbd5e1',
+              borderRadius: '6px',
+              padding: '2px 6px',
+              whiteSpace: 'nowrap',
+              ...(isCriticalParam ? { boxShadow: '0 0 0 2px rgba(220, 38, 38, 0.12)' } : {}),
+            }}
+          >
+            {isUnassessed ? (
+              `${p.parameter === 'avpu' ? 'AVPU: ยังไม่ประเมิน' : 'O₂: ยังไม่ระบุ'} (—)`
+            ) : isCriticalParam ? (
+              <>
+                <span>{p.displayValue}</span>
+                <span style={{
+                  background: '#dc2626',
+                  color: '#fff',
+                  padding: '0 5px',
+                  borderRadius: '4px',
+                  fontWeight: 800,
+                }}>
+                  +3
+                </span>
+              </>
+            ) : (
+              <>
+                <span>{p.displayValue}</span>
+                <span style={{ opacity: 0.75 }}>+{p.score}</span>
+              </>
+            )}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+export interface AlertModalContentProps {
+  patient: Patient | null | undefined;
+  alertNewsScore: number;
+  pendingCount: number;
+  onAcknowledge: () => void;
+  onClose: () => void;
+}
+
 export default function AlertModal() {
-  const { ui, closeModal, selectedPatient, completeChecklistItem, pendingAlerts, selectPatient } = useRTSASStore();
+  const { ui, closeModal, selectedPatient, pendingAlerts, selectPatient } = useRTSASStore();
 
   if (ui.modal.activeModal !== 'alert') return null;
 
@@ -23,11 +116,6 @@ export default function AlertModal() {
     (p) => p.hn === alertHN || p.id === alertHN || (data.patientName && p.fullName === data.patientName)
   );
   const patient = alertedPatient ?? selectedPatient;
-
-  const genderLabel = patient?.gender === 'male' ? 'เพศชาย' : patient?.gender === 'female' ? 'เพศหญิง' : 'ไม่ระบุ';
-  const arrivalTimeStr = patient
-    ? new Date(patient.arrivalTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    : '--:--:--';
 
   const advanceQueue = () => {
     const targetHn = alertedPatient?.hn ?? alertHN;
@@ -115,6 +203,20 @@ export default function AlertModal() {
     }
 
     advanceQueue();
+
+    if (
+      useRTSASStore.getState().pendingAlerts.length === 0 &&
+      targetPatient &&
+      requiresInitialAvpuO2Gate(targetPatient, useRTSASStore.getState().patientData)
+    ) {
+      useRTSASStore.getState().openModal('avpu_assessment', {
+        patientId: targetPatient.id,
+        hn: targetPatient.hn,
+        gcs: targetPatient.latestVitals.gcs,
+        patientName: targetPatient.fullName,
+        isInitialGate: true,
+      });
+    }
   };
 
   const handleClose = () => {
@@ -123,11 +225,31 @@ export default function AlertModal() {
     advanceQueue();
   };
 
-  // Build breakdown rows from patient's NEWS result (exclude unassessed O₂)
-  const breakdownItems = patient?.latestNewsResult?.breakdown
-    .filter((p) =>
-      !(p.parameter === 'oxygenSupplementation' && (p.displayValue.includes('ยังไม่') || p.displayValue.includes('รอ')))
-    ) || [];
+  return (
+    <AlertModalContent
+      patient={patient}
+      alertNewsScore={alertNewsScore}
+      pendingCount={pendingAlerts.length}
+      onAcknowledge={handleAcknowledge}
+      onClose={handleClose}
+    />
+  );
+}
+
+export function AlertModalContent({
+  patient,
+  alertNewsScore,
+  pendingCount,
+  onAcknowledge,
+  onClose,
+}: AlertModalContentProps) {
+  const genderLabel = patient?.gender === 'male' ? 'เพศชาย' : patient?.gender === 'female' ? 'เพศหญิง' : 'ไม่ระบุ';
+  const arrivalTimeStr = patient
+    ? new Date(patient.arrivalTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '--:--:--';
+
+  const breakdownItems = filterDisplayBreakdownItems(patient?.latestNewsResult?.breakdown);
+  const criticalParams = breakdownItems.filter((p) => p.score === 3);
 
   return (
     <div
@@ -135,7 +257,7 @@ export default function AlertModal() {
       style={{ background: 'rgba(10, 10, 20, 0.7)', backdropFilter: 'blur(8px)' }}
     >
       {/* Queue badge — shows how many more alerts are waiting */}
-      {pendingAlerts.length > 0 && (
+      {pendingCount > 0 && (
         <div style={{
           position: 'absolute', top: '20px', right: '20px',
           background: '#dc2626', color: '#fff',
@@ -144,7 +266,7 @@ export default function AlertModal() {
           boxShadow: '0 4px 12px rgba(220,38,38,.4)',
           zIndex: 110,
         }}>
-          🔔 รอแจ้งเตือนอีก {pendingAlerts.length} ราย
+          🔔 รอแจ้งเตือนอีก {pendingCount} ราย
         </div>
       )}
       <div
@@ -186,7 +308,7 @@ export default function AlertModal() {
             </div>
           </div>
           <button
-            onClick={handleClose}
+            onClick={onClose}
             style={{
               width: '36px', height: '36px', borderRadius: '10px',
               border: '1px solid #fca5a5', background: '#fff',
@@ -273,34 +395,50 @@ export default function AlertModal() {
                   ⚠️ ข้อมูล AVPU / O₂ ยังไม่ครบถ้วน (แจ้งเตือนทันทีจากคะแนนที่มี ≥ 5)
                 </div>
               )}
-              {/* Parameter breakdown chips */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '8px' }}>
-                {breakdownItems.map((p) => {
-                  const isUnassessed =
-                    p.displayValue.includes('รอประเมิน') ||
-                    p.displayValue.includes('ยังไม่ประเมิน') ||
-                    p.displayValue.includes('ยังไม่ระบุ') ||
-                    p.displayValue.includes('รอเลือก');
-                  return (
-                    <span key={p.parameter} style={{
-                      fontSize: '9px',
-                      fontWeight: 600,
-                      color: isUnassessed ? '#64748b' : '#dc2626',
-                      background: isUnassessed ? '#f8fafc' : '#fff',
-                      border: `1px solid ${isUnassessed ? '#cbd5e1' : '#fecaca'}`,
-                      borderRadius: '6px',
-                      padding: '2px 6px',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {isUnassessed
-                        ? `${p.parameter === 'avpu' ? 'AVPU: ยังไม่ประเมิน' : 'O₂: ยังไม่ระบุ'} (—)`
-                        : <>{p.displayValue} <span style={{ opacity: 0.7 }}>+{p.score}</span></>}
-                    </span>
-                  );
-                })}
-              </div>
+              <NewsBreakdownChips items={breakdownItems} />
             </div>
           </div>
+
+          {criticalParams.length > 0 && (
+            <div
+              data-testid="alert-critical-params-box"
+              style={{
+                padding: '10px 14px',
+                borderRadius: '12px',
+                background: '#fef2f2',
+                border: '1.5px solid #dc2626',
+                marginBottom: '14px',
+              }}
+            >
+              <div style={{ fontSize: '11px', fontWeight: 800, color: '#b91c1c', marginBottom: '6px' }}>
+                🚨 พารามิเตอร์ที่เข้าเงื่อนไขวิกฤต (+3 คะแนน):
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {criticalParams.map((cp) => (
+                  <span
+                    key={cp.parameter}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      color: '#b91c1c',
+                      background: '#fff',
+                      border: '1.5px solid #dc2626',
+                      borderRadius: '8px',
+                      padding: '3px 8px',
+                    }}
+                  >
+                    <span>{PARAM_LABELS_TH[cp.parameter] || cp.label}: {cp.displayValue}</span>
+                    <span style={{ background: '#dc2626', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontSize: '10px' }}>
+                      +3
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Alert message */}
           <div style={{
@@ -319,11 +457,22 @@ export default function AlertModal() {
               <strong style={{ color: '#ea580c' }}>ขั้นตอนต่อไป:</strong> ประเมิน AVPU / O₂ ให้ครบถ้วน → นำเข้าห้อง ER → รายงานแพทย์เวร <strong>(เริ่มจับเวลา 60 นาทีเมื่อแพทย์ยืนยัน Sepsis ใน Phase 2)</strong>
             </div>
           </div>
+          <div style={{
+            padding: '12px 14px', borderRadius: '12px',
+            background: 'linear-gradient(135deg, #f6e9a1ff)',
+            border: '1px solid #fed7aa', marginBottom: '18px',
+            position: 'relative', overflow: 'hidden',
+          }}>
+            <div style={{ paddingLeft: '10px', fontSize: '12px', color: '#475569', lineHeight: 1.8 }}>
+              <strong style={{ color: '#000000ff' }}>หมายเหตุ:</strong> คะแนน NEWS เป็นเครื่องมือประเมินความเสี่ยงต่อการทรุดลงทางคลินิก ไม่ใช่เครื่องมือวินิจฉัยภาวะติดเชื้อในกระแสเลือด การวินิจฉัยต้องอาศัยการประเมินของแพทย์<br />
+            </div>
+          </div>
+          
 
           {/* Acknowledge Button */}
           <button
             id="alert-acknowledge-btn"
-            onClick={handleAcknowledge}
+            onClick={onAcknowledge}
             style={{
               width: '100%', padding: '14px', border: 'none', borderRadius: '14px',
               fontSize: '14px', fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',

@@ -369,5 +369,47 @@ class TestBuildPatientList(unittest.TestCase):
         self.assertIsNone(items[0]["assessed_avpu"])
 
 
+class TestClientButtonLogEndpoint(unittest.TestCase):
+    def test_post_logs_event_records_to_sqlite_and_returns_details(self):
+        """Verify POST /api/logs/event persists client button events into timestamp_logs with details."""
+        import os
+        import tempfile
+        from backend.main import ClientLogEventRequest, post_client_log_event, get_logs_route
+        import json
+
+        orig_db_path = log_service.LOG_DB_PATH
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_service.LOG_DB_PATH = os.path.join(tmpdir, "test_client_logs.db")
+            try:
+                log_service.init_log_db()
+                payload = ClientLogEventRequest(
+                    level="Warning",
+                    component="Clinical_Treatment",
+                    message="กดเลื่อนเวลาประเมินสัญญาณชีพซ้ำ (Snooze Assessment +2 นาที): ผู้ป่วย HN 69326362 — รอบที่ 1",
+                    details={
+                        "event": "assessment_snoozed",
+                        "hn": "HN69326362",
+                        "round_sequence": 1,
+                        "snooze_minutes": 2,
+                        "actor": "พยาบาล ER",
+                    },
+                )
+                post_res = asyncio.run(post_client_log_event(payload))
+                post_data = json.loads(post_res.body.decode("utf-8"))
+                self.assertEqual(post_data["status"], "ok")
+                self.assertGreater(post_data["log"]["id"], 0)
+                self.assertEqual(post_data["log"]["level"], "Warning")
+                self.assertEqual(post_data["log"]["component"], "Clinical_Treatment")
+                self.assertEqual(post_data["log"]["details"]["snooze_minutes"], 2)
+
+                get_res = asyncio.run(get_logs_route(limit=10, search="69326362"))
+                get_data = json.loads(get_res.body.decode("utf-8"))
+                self.assertEqual(get_data["count"], 1)
+                self.assertEqual(get_data["logs"][0]["details"]["event"], "assessment_snoozed")
+                self.assertEqual(get_data["logs"][0]["details"]["actor"], "พยาบาล ER")
+            finally:
+                log_service.LOG_DB_PATH = orig_db_path
+
+
 if __name__ == "__main__":
     unittest.main()

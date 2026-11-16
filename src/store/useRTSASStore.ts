@@ -47,6 +47,7 @@ import {
   mapBackendToPatient,
   type BackendPatient,
 } from '../utils/patientMapper';
+import { logClientEvent } from '../utils/logHelpers';
 
 export {
   evaluatePatientTreatmentStatus,
@@ -219,9 +220,62 @@ export function isHistoricalPatient(
   return false;
 }
 
+/**
+ * Returns true if an active (non-historical, non-completed, non-ruled-out) patient
+ * still needs initial AVPU and/or Supplemental O₂ assessment before entering the evaluation view.
+ */
+export function requiresInitialAvpuO2Gate(
+  patient: Patient | null | undefined,
+  patientDataMap?: Record<string, PatientData>
+): boolean {
+  if (!patient || !patient.latestVitals) return false;
+  if (isHistoricalPatient(patient, patientDataMap)) return false;
+
+  const pData = patientDataMap
+    ? (patientDataMap[patient.id] || (patient.hn ? patientDataMap[patient.hn] : null))
+    : null;
+  if (
+    pData?.treatmentCompleted ||
+    pData?.sepsisRuledOut ||
+    patient.treatmentStatus?.treatment_completed ||
+    patient.treatmentStatus?.sepsis_ruled_out
+  ) {
+    return false;
+  }
+
+  const vitals = (pData as PatientData & { latestVitals?: VitalSigns } | null)?.latestVitals || patient.latestVitals;
+  // Guard synthetic unit-test objects where oxygenSupplementation is not defined
+  if (!vitals || typeof vitals.oxygenSupplementation === 'undefined') return false;
+
+  const isO2Unassessed = vitals.oxygenSupplementation === 'unassessed';
+  const isAvpuUnassessed =
+    vitals.avpuStatus === 'pending_assessment' ||
+    vitals.isAvpuConfirmed === false;
+
+  return isO2Unassessed || isAvpuUnassessed;
+}
+
 // ---------------------------------------------------------------------------
 // Default Checklist Template
 // ---------------------------------------------------------------------------
+
+function createVasopressorChecklistItem(isUnlocked = false): ChecklistItem {
+  return {
+    id: 'vasopressor',
+    phase: 'sepsis_bundle',
+    label: 'ยากระตุ้นความดันโลหิต (ถ้ามี)',
+    subLabel: 'ทำเมื่อแพทย์สั่ง (ถ้ามีข้อบ่งชี้)',
+    status: 'pending',
+    completedAt: null,
+    completedBy: null,
+    requiresInput: true,
+    inputValue: null,
+    inputLabel: 'ชนิดยา / ขนาด / อัตราเร็ว:',
+    sortOrder: 6,
+    isUnlocked,
+    isOptional: true,
+  };
+}
 
 function createDefaultChecklist(): ChecklistPhase[] {
   return [
@@ -372,6 +426,7 @@ function createDefaultChecklist(): ChecklistPhase[] {
           isUnlocked: false,
           isOptional: true,
         },
+        createVasopressorChecklistItem(false),
         {
           id: 'foley_cath',
           phase: 'sepsis_bundle',
@@ -383,7 +438,7 @@ function createDefaultChecklist(): ChecklistPhase[] {
           requiresInput: true,
           inputValue: null,
           inputLabel: 'Urine output ที่ได้:',
-          sortOrder: 6,
+          sortOrder: 7,
           isUnlocked: false,
           isOptional: true,
         },
@@ -826,16 +881,17 @@ export const useRTSASStore = create<RTSASState>()(
         dataToLoad.timeline = ensureInitialTimelineEvents(patient, dataToLoad.timeline);
         newPatientDataMap[patientId] = dataToLoad;
 
+        const needsGate = requiresInitialAvpuO2Gate(patient, newPatientDataMap);
         const shouldPromptAdditional =
-          !isHistorical &&
-          !dataToLoad.treatmentCompleted &&
-          !dataToLoad.sepsisRuledOut &&
-          state.ui.modal.activeModal === null &&
-          patient &&
-          Boolean(
-            patient.latestNewsResult?.needsAvpuPrompt ||
-            patient.latestNewsResult?.needsOxygenPrompt
-          );
+          needsGate &&
+          state.ui.modal.activeModal !== 'alert' &&
+          state.ui.modal.activeModal !== 'multi_alert';
+        const prevEligiblePatientId =
+          state.selectedPatient &&
+          state.selectedPatient.id !== patient?.id &&
+          !requiresInitialAvpuO2Gate(state.selectedPatient, newPatientDataMap)
+            ? state.selectedPatient.id
+            : null;
 
         set({
           selectedPatient: patient,
@@ -860,6 +916,8 @@ export const useRTSASStore = create<RTSASState>()(
                     hn: patient.hn,
                     gcs: patient.latestVitals.gcs,
                     patientName: patient.fullName,
+                    isInitialGate: true,
+                    previousPatientId: prevEligiblePatientId,
                   },
                 }
               : state.ui.modal,
@@ -1003,13 +1061,21 @@ export const useRTSASStore = create<RTSASState>()(
               : state.selectedPatient,
         }));
 
-        // Auto-open alert modal for high NEWS scores (>= 5)
+        // Auto-open alert modal for high NEWS scores (>= 5), or separate single-param modal for +3 (< 5)
         if (newsResult.totalScore >= 5) {
           get().openModal('alert', {
             newsScore: newsResult.totalScore,
             riskLevel: newsResult.riskLevel,
             patientName:
               get().patients.find((p) => p.id === patientId)?.fullName ?? '',
+          });
+        } else if (newsResult.hasSingleParameterAlert || newsResult.breakdown.some((b) => b.score === 3)) {
+          const pt = get().patients.find((p) => p.id === patientId);
+          get().openModal('single_param_alert', {
+            hn: pt?.hn ?? patientId,
+            newsScore: newsResult.totalScore,
+            riskLevel: newsResult.riskLevel,
+            patientName: pt?.fullName ?? '',
           });
         }
       },
@@ -1184,13 +1250,33 @@ export const useRTSASStore = create<RTSASState>()(
           patient.id
         );
 
-        if (newsResult.totalScore >= 5) {
-          get().openModal('alert', {
-            hn: patient.hn,
-            newsScore: newsResult.totalScore,
-            riskLevel: newsResult.riskLevel,
-            patientName: patient.fullName,
-          });
+        const stAfterAvpu = get();
+        const isAlreadyAckedOrDismissed = Boolean(
+          stAfterAvpu.dismissedAlertKeys?.[patient.hn] ||
+          stAfterAvpu.dismissedAlertKeys?.[patient.id] ||
+          patient.treatmentStatus?.acknowledged ||
+          patient.treatmentStatus?.doctor_confirmed
+        );
+
+        if (!isAlreadyAckedOrDismissed) {
+          if (newsResult.totalScore >= 5) {
+            get().openModal('alert', {
+              hn: patient.hn,
+              newsScore: newsResult.totalScore,
+              riskLevel: newsResult.riskLevel,
+              patientName: patient.fullName,
+            });
+          } else if (
+            (newsResult.hasSingleParameterAlert || newsResult.breakdown.some((b) => b.score === 3)) &&
+            !stAfterAvpu.dismissedAlertKeys?.[`single3_${patient.hn}`]
+          ) {
+            get().openModal('single_param_alert', {
+              hn: patient.hn,
+              newsScore: newsResult.totalScore,
+              riskLevel: newsResult.riskLevel,
+              patientName: patient.fullName,
+            });
+          }
         }
 
         try {
@@ -1284,13 +1370,33 @@ export const useRTSASStore = create<RTSASState>()(
         );
 
         // Point 3: If adding supplemental oxygen causes total score to reach >= 5, trigger Sepsis Alert immediately!
-        if (newsResult.totalScore >= 5) {
-          get().openModal('alert', {
-            hn: patient.hn,
-            newsScore: newsResult.totalScore,
-            riskLevel: newsResult.riskLevel,
-            patientName: patient.fullName,
-          });
+        const stAfterAvpu = get();
+        const isAlreadyAckedOrDismissed = Boolean(
+          stAfterAvpu.dismissedAlertKeys?.[patient.hn] ||
+          stAfterAvpu.dismissedAlertKeys?.[patient.id] ||
+          patient.treatmentStatus?.acknowledged ||
+          patient.treatmentStatus?.doctor_confirmed
+        );
+
+        if (!isAlreadyAckedOrDismissed) {
+          if (newsResult.totalScore >= 5) {
+            get().openModal('alert', {
+              hn: patient.hn,
+              newsScore: newsResult.totalScore,
+              riskLevel: newsResult.riskLevel,
+              patientName: patient.fullName,
+            });
+          } else if (
+            (newsResult.hasSingleParameterAlert || newsResult.breakdown.some((b) => b.score === 3)) &&
+            !stAfterAvpu.dismissedAlertKeys?.[`single3_${patient.hn}`]
+          ) {
+            get().openModal('single_param_alert', {
+              hn: patient.hn,
+              newsScore: newsResult.totalScore,
+              riskLevel: newsResult.riskLevel,
+              patientName: patient.fullName,
+            });
+          }
         }
 
         try {
@@ -1371,6 +1477,26 @@ export const useRTSASStore = create<RTSASState>()(
           }
 
           get().addTimelineEvent(eventText, 'blue', itemId === 'doctor_confirm' ? 'แพทย์เวร ER' : completedBy);
+
+          if (itemId !== 'doctor_confirm') {
+            const activePt = get().selectedPatient;
+            const hn = activePt?.hn || '';
+            const cleanHn = hn.toUpperCase().startsWith('HN') ? hn.slice(2).trim() : hn;
+            logClientEvent({
+              level: 'Note',
+              component: 'Clinical_Treatment',
+              message: `กดบันทึกสถานะการรักษา (Checklist Completed): ผู้ป่วย HN ${cleanHn || '-'} — ${completedItem.label}${inputValue ? ` (${inputValue})` : ''} โดย ${completedBy}`,
+              details: {
+                event: 'checklist_item_completed',
+                hn: hn || undefined,
+                vn: activePt?.vn || undefined,
+                checklist_item_id: itemId,
+                checklist_item: completedItem.label,
+                input_value: inputValue || null,
+                actor: completedBy,
+              },
+            });
+          }
         }
 
         // Special handling: Doctor Confirmation starts the countdown
@@ -1440,6 +1566,23 @@ export const useRTSASStore = create<RTSASState>()(
             'blue',
             actor
           );
+
+          const activePt = get().selectedPatient;
+          const hn = activePt?.hn || '';
+          const cleanHn = hn.toUpperCase().startsWith('HN') ? hn.slice(2).trim() : hn;
+          logClientEvent({
+            level: 'Warning',
+            component: 'Clinical_Treatment',
+            message: `กดข้ามขั้นตอนการรักษา (Checklist Skipped): ผู้ป่วย HN ${cleanHn || '-'} — ข้าม "${skippedItem.label}" โดย ${actor}`,
+            details: {
+              event: 'checklist_item_skipped',
+              hn: hn || undefined,
+              vn: activePt?.vn || undefined,
+              checklist_item_id: itemId,
+              checklist_item: skippedItem.label,
+              actor,
+            },
+          });
         }
 
         // Sync checklist state centrally to MySQL backend
@@ -2229,6 +2372,27 @@ export const useRTSASStore = create<RTSASState>()(
           { vitals, newsScore: score }
         );
 
+        const activePt = get().selectedPatient;
+        const hn = activePt?.hn || '';
+        const cleanHn = hn.toUpperCase().startsWith('HN') ? hn.slice(2).trim() : hn;
+        logClientEvent({
+          level: score >= 5 || newsResult.hasSingleParameterAlert ? 'Warning' : 'Note',
+          component: 'Clinical_Treatment',
+          message: `กดบันทึกผลประเมินสัญญาณชีพซ้ำ (Phase 4 รอบที่ ${seq}): ผู้ป่วย HN ${cleanHn || '-'} — BP ${sbpStr}/${dbpStr}${mapStr}, HR ${hrStr}, RR ${rrStr}, SpO₂ ${spo2Str}%, Temp ${tempStr}°C, AVPU ${avpuVal}, ${o2Str} → NEWS = ${score} คะแนน โดย ${completedBy}`,
+          details: {
+            event: 'phase4_assessment_recorded',
+            hn: hn || undefined,
+            vn: activePt?.vn || undefined,
+            round_sequence: seq,
+            news_score: score,
+            is_complete: true,
+            avpu: avpuVal,
+            supplemental_oxygen: vitals.oxygenSupplementation === 'supplemental',
+            map: mapVal,
+            actor: completedBy,
+          },
+        });
+
         // Also update the patient's vitals
         const patientId = get().selectedPatient?.id;
         if (patientId) {
@@ -2281,15 +2445,26 @@ export const useRTSASStore = create<RTSASState>()(
 
       snoozeReminder: (entryId) => {
         const now = new Date().toISOString();
+        const entry = get().assessmentSchedule?.entries.find((e) => e.id === entryId);
+        const seq = entry?.sequence ?? '?';
+        const schedTimeStr = entry?.scheduledTime
+          ? new Date(entry.scheduledTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+          : '--:--';
+        const nextRemindStr = new Date(Date.now() + 2 * 60 * 1000).toLocaleTimeString('th-TH', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        const actorName = get().currentUser?.name || 'พยาบาลห้องฉุกเฉิน';
+
         set((state) => {
           if (!state.assessmentSchedule) return state;
 
           const newSchedule = {
             ...state.assessmentSchedule,
-            entries: state.assessmentSchedule.entries.map((entry) =>
-              entry.id === entryId
-                ? { ...entry, lastReminderAt: now }
-                : entry
+            entries: state.assessmentSchedule.entries.map((item) =>
+              item.id === entryId
+                ? { ...item, lastReminderAt: now }
+                : item
             ),
           };
 
@@ -2303,6 +2478,32 @@ export const useRTSASStore = create<RTSASState>()(
               }
             } : state.patientData
           };
+        });
+
+        get().addTimelineEvent(
+          `⏳ เลื่อนการประเมินสัญญาณชีพซ้ำ รอบที่ ${seq} ออกไป 2 นาที (เตือนซ้ำเวลา ${nextRemindStr} น.)`,
+          'orange',
+          actorName,
+          { entryId, sequence: seq, snoozeMinutes: 2 }
+        );
+
+        const activePt = get().selectedPatient;
+        const hn = activePt?.hn || '';
+        const cleanHn = hn.toUpperCase().startsWith('HN') ? hn.slice(2).trim() : hn;
+        logClientEvent({
+          level: 'Warning',
+          component: 'Clinical_Treatment',
+          message: `กดเลื่อนเวลาประเมินสัญญาณชีพซ้ำ (Snooze Assessment +2 นาที): ผู้ป่วย HN ${cleanHn || '-'} — รอบที่ ${seq} (กำหนดเดิม ${schedTimeStr} น. → เตือนซ้ำเวลา ${nextRemindStr} น.) โดย ${actorName}`,
+          details: {
+            event: 'assessment_snoozed',
+            hn: hn || undefined,
+            vn: activePt?.vn || undefined,
+            round_sequence: seq,
+            scheduled_time: entry?.scheduledTime || null,
+            snooze_minutes: 2,
+            next_reminder_time: nextRemindStr,
+            actor: actorName,
+          },
         });
       },
 
@@ -2722,15 +2923,28 @@ export const useRTSASStore = create<RTSASState>()(
       setAuthUser: (user: AuthUser, token: string) => {
         localStorage.setItem('rtsas_token', token);
         set({ isAuthenticated: true, currentUser: user });
+        logClientEvent({
+          level: 'Note',
+          component: 'Admin',
+          message: `เข้าสู่ระบบสำเร็จ (User Login): ${user.name} (สิทธิ์: ${user.role})`,
+          details: { event: 'user_login', actor: user.name, role: user.role },
+        });
       },
 
       logoutUser: () => {
+        const prevUser = get().currentUser;
         // Clear JWT from localStorage
         localStorage.removeItem('rtsas_token');
         set({
           isAuthenticated: false,
           currentUser: null,
           isHNRevealed: false,
+        });
+        logClientEvent({
+          level: 'Note',
+          component: 'Admin',
+          message: `ออกจากระบบ (User Logout): ${prevUser?.name || 'ผู้ใช้งาน'}`,
+          details: { event: 'user_logout', actor: prevUser?.name || 'ผู้ใช้งาน' },
         });
       },
 
@@ -2880,7 +3094,8 @@ export const useRTSASStore = create<RTSASState>()(
         return persistedState;
       },
       onRehydrateStorage: () => (state) => {
-        if (state && Array.isArray(state.patients)) {
+        if (!state) return;
+        if (Array.isArray(state.patients)) {
           const MOCK_IDS = new Set(['P001', 'P002', 'P003', 'P004']);
           const isMock = (p: any) =>
             !p ||
@@ -2895,6 +3110,17 @@ export const useRTSASStore = create<RTSASState>()(
           }
           if (state.selectedPatient && isMock(state.selectedPatient)) {
             state.selectedPatient = null;
+          }
+        }
+        if (Array.isArray(state.checklist) && state.checklist.length > 0) {
+          state.checklist = updatePhaseUnlocking(state.checklist);
+        }
+        if (state.patientData && typeof state.patientData === 'object') {
+          for (const key of Object.keys(state.patientData)) {
+            const entry = state.patientData[key];
+            if (entry && Array.isArray(entry.checklist) && entry.checklist.length > 0) {
+              entry.checklist = updatePhaseUnlocking(entry.checklist);
+            }
           }
         }
       },
@@ -2952,10 +3178,31 @@ function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
   );
 
   return phases.map((phase, index) => {
+    let normalizedItems = phase.items;
+    if (
+      phase.phase === 'sepsis_bundle' &&
+      Array.isArray(phase.items) &&
+      !phase.items.every((i) => i.status === 'completed' || i.status === 'skipped')
+    ) {
+      const hasAbx2 = phase.items.some((i) => i.id === 'antibiotics_2');
+      const hasFoley = phase.items.some((i) => i.id === 'foley_cath');
+      const hasVasopressor = phase.items.some((i) => i.id === 'vasopressor');
+      if (hasAbx2 && hasFoley && !hasVasopressor) {
+        const nextItems: ChecklistItem[] = [];
+        for (const item of phase.items) {
+          nextItems.push(item.id === 'foley_cath' ? { ...item, sortOrder: 7 } : item);
+          if (item.id === 'antibiotics_2') {
+            nextItems.push(createVasopressorChecklistItem(phase.isUnlocked));
+          }
+        }
+        normalizedItems = nextItems;
+      }
+    }
+
     // Check if all items in this phase are completed
     const isCompleted =
-      phase.items.length > 0 &&
-      phase.items.every((item) => item.status === 'completed' || item.status === 'skipped');
+      normalizedItems.length > 0 &&
+      normalizedItems.every((item) => item.status === 'completed' || item.status === 'skipped');
 
     // Determine if this phase should be unlocked
     let isUnlocked = phase.isUnlocked;
@@ -2985,7 +3232,7 @@ function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
       ...phase,
       isCompleted,
       isUnlocked,
-      items: phase.items.map((item) => ({
+      items: normalizedItems.map((item) => ({
         ...item,
         isUnlocked,
       })),

@@ -96,9 +96,49 @@ export function extractLogSummaryBadges(details?: Record<string, any> | null): L
     });
   }
 
-  const actor = details.physician || details.confirmed_by || details.completed_by || details.acknowledged_by;
+  const actor = details.actor || details.physician || details.confirmed_by || details.completed_by || details.acknowledged_by;
   if (actor) {
     badges.push({ key: 'actor', text: `👤 ${actor}`, tone: 'purple' });
+  }
+
+  if (details.checklist_item) {
+    badges.push({
+      key: 'chk',
+      text: `☑️ ${details.checklist_item}${details.input_value ? `: ${details.input_value}` : ''}`,
+      tone: details.event === 'checklist_item_skipped' ? 'amber' : 'green',
+    });
+  }
+
+  if (typeof details.round_sequence === 'number' || typeof details.round_sequence === 'string') {
+    badges.push({
+      key: 'round',
+      text: `🔄 รอบที่ ${details.round_sequence}`,
+      tone: details.event === 'assessment_snoozed' ? 'amber' : 'sky',
+    });
+  }
+
+  if (typeof details.snooze_minutes === 'number') {
+    badges.push({
+      key: 'snooze',
+      text: `⏳ เลื่อน +${details.snooze_minutes} นาที`,
+      tone: 'amber',
+    });
+  }
+
+  if (typeof details.map === 'number') {
+    badges.push({
+      key: 'map',
+      text: `🩸 MAP ${details.map} mmHg`,
+      tone: details.map < 65 ? 'red' : 'green',
+    });
+  }
+
+  if (typeof details.copied_steps === 'number') {
+    badges.push({
+      key: 'copy',
+      text: `📋 คัดลอก ${details.copied_steps} ขั้นตอน`,
+      tone: 'sky',
+    });
   }
 
   if (details.countdown_started_at) {
@@ -112,6 +152,33 @@ export function extractLogSummaryBadges(details?: Record<string, any> | null): L
   }
 
   return badges;
+}
+
+export interface ClientLogEventPayload {
+  level?: 'Note' | 'Warning' | 'ERROR';
+  component?: string;
+  message: string;
+  details?: Record<string, any>;
+}
+
+/** Send a user/button action log event to the backend SQLite log database (non-blocking). */
+export function logClientEvent(payload: ClientLogEventPayload): void {
+  try {
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/logs/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          level: payload.level || 'Note',
+          component: payload.component || 'Clinical_Treatment',
+          message: payload.message,
+          details: payload.details || {},
+        }),
+      }).catch(() => {});
+    }
+  } catch {
+    // Ignore logging transport errors so UI actions never fail
+  }
 }
 
 function triggerFileDownload(blob: Blob, filename: string) {

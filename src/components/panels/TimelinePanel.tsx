@@ -3,6 +3,7 @@ import { useRTSASStore, isTreatmentTimelineEvent, ensureInitialTimelineEvents } 
 import type { TimelineEvent, TimelineEventColor } from '../../types';
 import { showToast } from '../common/Toast';
 import { maskHN } from '../../utils/hnMask';
+import { logClientEvent } from '../../utils/logHelpers';
 
 const dotColorMap: Record<TimelineEventColor, string> = {
   green: '#16a34a',
@@ -343,6 +344,24 @@ export default function TimelinePanel() {
         showToast('คัดลอกขั้นตอนการรักษาสำเร็จ — พร้อมวางใน HIS', 'success');
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
+
+        const curUser = useRTSASStore.getState().currentUser;
+        const actorName = curUser?.name || 'บุคลากรทางการแพทย์';
+        const hn = selectedPatient?.hn || '';
+        const cleanHn = hn.toUpperCase().startsWith('HN') ? hn.slice(2).trim() : hn;
+        logClientEvent({
+          level: 'Note',
+          component: 'Clinical_Treatment',
+          message: `กดคัดลอก Timeline เพื่อวางใน HIS (Copy Timeline): ผู้ป่วย HN ${cleanHn || '-'} — จำนวน ${treatmentEvents.length} ขั้นตอน โดย ${actorName}`,
+          details: {
+            event: 'timeline_copied_his',
+            hn: hn || undefined,
+            vn: selectedPatient?.vn || undefined,
+            copied_steps: treatmentEvents.length,
+            source: 'TimelinePanel',
+            actor: actorName,
+          },
+        });
       })
       .catch(() => {
         showToast('ไม่สามารถคัดลอกอัตโนมัติได้', 'error');

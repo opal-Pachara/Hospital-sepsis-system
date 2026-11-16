@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { useRTSASStore } from '../store/useRTSASStore';
 import { maskHN } from '../utils/hnMask';
 import { showToast } from '../components/common/Toast';
+import { logClientEvent } from '../utils/logHelpers';
 
 export interface DailySummaryItem {
   date: string;
@@ -330,6 +331,14 @@ export default memo(function TreatedDashboard({
   const handleNavigateToBedside = async (patientId: string) => {
     setSelectedTimelineCase(null);
     showToast('🔒 เปิดแฟ้มประวัติในโหมดอ่านอย่างเดียว (Read-Only) — ล็อคการแก้ไขเพื่อรักษาความเป็นกลางของข้อมูล', 'info', 4000);
+    const actorName = currentUser?.name || 'บุคลากรทางการแพทย์';
+    const cleanHn = patientId.replace(/^HN/i, '').trim();
+    logClientEvent({
+      level: 'Note',
+      component: 'Clinical_Treatment',
+      message: `กดเปิดดูแฟ้มประวัติการรักษาย้อนหลัง (Read-Only Archive): ผู้ป่วย HN ${cleanHn} โดย ${actorName}`,
+      details: { event: 'view_historical_record', hn: patientId, actor: actorName },
+    });
     if (onSelectPatientTimeline) {
       onSelectPatientTimeline(patientId);
     } else {
@@ -369,7 +378,22 @@ export default memo(function TreatedDashboard({
 
     const fullText = header + meta + lines.join('\n') + '\n' + sep + `รวมดำเนินการ: ${timelineEvents.length} ขั้นตอน`;
     navigator.clipboard.writeText(fullText)
-      .then(() => showToast('คัดลอกขั้นตอนการรักษาสำเร็จ — พร้อมวางใน HIS', 'success'))
+      .then(() => {
+        showToast('คัดลอกขั้นตอนการรักษาสำเร็จ — พร้อมวางใน HIS', 'success');
+        const actorName = currentUser?.name || 'บุคลากรทางการแพทย์';
+        logClientEvent({
+          level: 'Note',
+          component: 'Clinical_Treatment',
+          message: `กดคัดลอก Timeline จากหน้า Dashboard: ผู้ป่วย ${selectedTimelineCase.masked_hn} — จำนวน ${timelineEvents.length} ขั้นตอน โดย ${actorName}`,
+          details: {
+            event: 'timeline_copied_dashboard',
+            hn: selectedTimelineCase.id || selectedTimelineCase.masked_hn,
+            copied_steps: timelineEvents.length,
+            source: 'TreatedDashboard',
+            actor: actorName,
+          },
+        });
+      })
       .catch(() => showToast('ไม่สามารถคัดลอกได้', 'error'));
   };
 
@@ -434,6 +458,18 @@ export default memo(function TreatedDashboard({
     link.download = `RTSAS_Treated_Dashboard_${selectedDate}.csv`;
     link.click();
     showToast('ดาวน์โหลดไฟล์ CSV สรุปสถิติเรียบร้อย', 'success');
+    const actorName = currentUser?.name || 'บุคลากรทางการแพทย์';
+    logClientEvent({
+      level: 'Note',
+      component: 'Admin_Dashboard',
+      message: `กดดาวน์โหลดไฟล์ CSV สรุปสถิติผู้ป่วยที่รักษาแล้ว (วันที่ ${selectedDate || 'ทั้งหมด'} จำนวน ${filteredCases.length} เคส) โดย ${actorName}`,
+      details: {
+        event: 'export_treated_csv',
+        selected_date: selectedDate,
+        exported_count: filteredCases.length,
+        actor: actorName,
+      },
+    });
   };
 
   // Clear all treated patients from DB archive, backend status, and client store

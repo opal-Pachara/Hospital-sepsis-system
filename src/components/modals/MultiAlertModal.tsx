@@ -1,4 +1,4 @@
-import { useRTSASStore } from '../../store/useRTSASStore';
+import { useRTSASStore, requiresInitialAvpuO2Gate } from '../../store/useRTSASStore';
 
 export default function MultiAlertModal() {
   const { ui, closeModal, patients, pendingAlerts, selectPatient } = useRTSASStore();
@@ -74,9 +74,19 @@ export default function MultiAlertModal() {
       pendingAlerts: s.pendingAlerts.filter(a => a.hn !== hn)
     }));
 
-    // If queue is now empty, close modal
+    // If queue is now empty, close modal and open AVPU+O2 gate if needed
     if (useRTSASStore.getState().pendingAlerts.length === 0) {
       closeModal();
+      const sel = useRTSASStore.getState().selectedPatient;
+      if (sel && requiresInitialAvpuO2Gate(sel, useRTSASStore.getState().patientData)) {
+        useRTSASStore.getState().openModal('avpu_assessment', {
+          patientId: sel.id,
+          hn: sel.hn,
+          gcs: sel.latestVitals.gcs,
+          patientName: sel.fullName,
+          isInitialGate: true,
+        });
+      }
     }
   };
 

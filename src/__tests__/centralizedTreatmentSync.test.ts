@@ -382,6 +382,138 @@ describe('Centralized Treatment & Alert Synchronization', () => {
     expect(useRTSASStore.getState().pendingAlerts).toHaveLength(0);
     expect(useRTSASStore.getState().ui.modal.activeModal).toBeNull();
   });
+
+  it('includes optional vasopressor checkbox in sepsis_bundle right after antibiotics_2 and supports complete/skip', () => {
+    const hn = 'HN-VASO-01';
+    const startedAt = new Date().toISOString();
+
+    const patient = {
+      id: hn,
+      hn,
+      vn: 'VN-VASO-01',
+      fullName: 'ทดสอบ ยากระตุ้นความดัน',
+      age: 64,
+      gender: 'male' as const,
+      triageLevel: 'resuscitation' as const,
+      arrivalTime: startedAt,
+      chiefComplaint: 'ไข้สูง ความดันต่ำ',
+      allergies: [],
+      currentRiskLevel: 'high' as const,
+      latestNewsScore: 10,
+      latestVitals: {} as any,
+      latestNewsResult: {} as any,
+      hasSepsisAlert: true,
+      attendingPhysician: null,
+      primaryNurse: null,
+      location: 'ER',
+      treatmentStatus: {
+        hn,
+        acknowledged: true,
+        doctor_confirmed: true,
+        countdown_started_at: startedAt,
+        countdown_duration: 3600,
+        treatment_completed: false,
+        sepsis_ruled_out: false,
+      },
+    };
+
+    useRTSASStore.setState({ patients: [patient] });
+    useRTSASStore.getState().selectPatient(hn);
+
+    const phase3 = useRTSASStore.getState().checklist.find((p) => p.phase === 'sepsis_bundle');
+    expect(phase3).toBeDefined();
+    expect(phase3?.isUnlocked).toBe(true);
+
+    const ids = phase3!.items.map((i) => i.id);
+    const abx2Idx = ids.indexOf('antibiotics_2');
+    const vasoIdx = ids.indexOf('vasopressor');
+    const foleyIdx = ids.indexOf('foley_cath');
+    expect(abx2Idx).toBeGreaterThanOrEqual(0);
+    expect(vasoIdx).toBe(abx2Idx + 1);
+    expect(foleyIdx).toBe(vasoIdx + 1);
+
+    const vasoItem = phase3!.items[vasoIdx];
+    expect(vasoItem.label).toBe('ยากระตุ้นความดันโลหิต (ถ้ามี)');
+    expect(vasoItem.isOptional).toBe(true);
+    expect(vasoItem.requiresInput).toBe(true);
+
+    // Verify completing vasopressor records input and marks completed
+    useRTSASStore.getState().completeChecklistItem('vasopressor', 'Nurse Test', 'Levophed 4 mg in D5W 100 ml');
+    const afterComplete = useRTSASStore
+      .getState()
+      .checklist.find((p) => p.phase === 'sepsis_bundle')!
+      .items.find((i) => i.id === 'vasopressor');
+    expect(afterComplete?.status).toBe('completed');
+    expect(afterComplete?.inputValue).toBe('Levophed 4 mg in D5W 100 ml');
+
+    // Verify skipping vasopressor works for another patient (as an optional item)
+    const hnSkip = 'HN-VASO-SKIP';
+    const patientSkip = {
+      ...patient,
+      id: hnSkip,
+      hn: hnSkip,
+      vn: 'VN-VASO-SKIP',
+      treatmentStatus: { ...patient.treatmentStatus, hn: hnSkip },
+    };
+    useRTSASStore.setState({ patients: [patient, patientSkip] });
+    useRTSASStore.getState().selectPatient(hnSkip);
+    useRTSASStore.getState().skipChecklistItem('vasopressor', 'Nurse Test');
+    const afterSkip = useRTSASStore
+      .getState()
+      .checklist.find((p) => p.phase === 'sepsis_bundle')!
+      .items.find((i) => i.id === 'vasopressor');
+    expect(afterSkip?.status).toBe('skipped');
+
+    // Verify legacy saved checklist_json (missing vasopressor) gets normalized in place when unfinished
+    const hnLegacy = 'HN-VASO-LEGACY';
+    const legacyChecklistJson = JSON.stringify([
+      {
+        phase: 'initial_response',
+        title: 'ขั้นตอนที่ 1: การประเมินเบื้องต้น',
+        isUnlocked: true,
+        isCompleted: true,
+        items: [{ id: 'triage', phase: 'initial_response', label: 'Triage', status: 'completed', isUnlocked: true }],
+      },
+      {
+        phase: 'doctor_confirmation',
+        title: 'ขั้นตอนที่ 2: แพทย์ยืนยัน',
+        isUnlocked: true,
+        isCompleted: true,
+        items: [{ id: 'doctor_confirm', phase: 'doctor_confirmation', label: 'Confirm', status: 'completed', isUnlocked: true }],
+      },
+      {
+        phase: 'sepsis_bundle',
+        title: 'ขั้นตอนที่ 3: Sepsis Bundle (Hour-1)',
+        isUnlocked: true,
+        isCompleted: false,
+        items: [
+          { id: 'antibiotics_2', phase: 'sepsis_bundle', label: 'ABX2', status: 'pending', isUnlocked: true, sortOrder: 5, isOptional: true },
+          { id: 'foley_cath', phase: 'sepsis_bundle', label: 'Foley', status: 'pending', isUnlocked: true, sortOrder: 6, isOptional: true },
+        ],
+      },
+      {
+        phase: 'assessment_schedule',
+        title: 'ขั้นตอนที่ 4: ประเมินสัญญาณชีพซ้ำ',
+        isUnlocked: false,
+        isCompleted: false,
+        items: [],
+      },
+    ]);
+    const patientLegacy = {
+      ...patient,
+      id: hnLegacy,
+      hn: hnLegacy,
+      vn: 'VN-VASO-LEGACY',
+      treatmentStatus: { ...patient.treatmentStatus, hn: hnLegacy, checklist_json: legacyChecklistJson },
+    };
+    useRTSASStore.setState({ patients: [patient, patientSkip, patientLegacy] });
+    useRTSASStore.getState().selectPatient(hnLegacy);
+    const legacyIds = useRTSASStore
+      .getState()
+      .checklist.find((p) => p.phase === 'sepsis_bundle')!
+      .items.map((i) => i.id);
+    expect(legacyIds).toEqual(['antibiotics_2', 'vasopressor', 'foley_cath']);
+  });
 });
 
 

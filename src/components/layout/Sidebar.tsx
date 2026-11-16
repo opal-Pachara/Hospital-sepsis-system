@@ -3,6 +3,7 @@ import { useRTSASStore } from '../../store/useRTSASStore';
 import type { Patient, RiskLevel } from '../../types';
 import { maskHN } from '../../utils/hnMask';
 import { showToast } from '../common/Toast';
+import { logClientEvent } from '../../utils/logHelpers';
 
 const riskConfig: Record<RiskLevel, { label: string; labelTh: string; badgeBg: string; badgeText: string; badgeBorder: string; barColor: string; chipBg: string; chipText: string; chipBorder: string }> = {
   high: {
@@ -495,6 +496,13 @@ export default function Sidebar({ onRefresh, onNavigateTreatedDashboard, onNavig
                     }
                   }
                   showToast('ดึงข้อมูลล่าสุดเรียบร้อย', 'success');
+                  const actorName = useRTSASStore.getState().currentUser?.name || 'ผู้ใช้งาน';
+                  logClientEvent({
+                    level: 'Note',
+                    component: 'HOSxP_Sync',
+                    message: `ผู้ใช้กดปุ่มดึงข้อมูลผู้ป่วยล่าสุดด้วยตนเอง (Manual Sync Refresh) โดย ${actorName}`,
+                    details: { event: 'manual_sync_refresh', actor: actorName },
+                  });
                 } catch {
                   showToast('ไม่สามารถดึงข้อมูลได้', 'error');
                 } finally {
