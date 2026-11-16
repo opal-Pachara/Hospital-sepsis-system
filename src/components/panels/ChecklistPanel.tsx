@@ -688,7 +688,7 @@ function AssessmentScheduleSection({
   return (
     <div
       id="assessment-schedule-section"
-      className={`transition-opacity duration-200 ${!phase.isUnlocked ? 'opacity-80' : ''}`}
+      className={`transition-opacity duration-200 ${!phase.isUnlocked && entries.length === 0 ? 'opacity-80' : ''}`}
       style={{ marginBottom: '14px' }}
     >
       {/* Phase Header */}
@@ -1029,25 +1029,6 @@ function AssessmentScheduleSection({
                                 }}
                               >
                                 ✓ บันทึกแล้ว
-                              </span>
-                            ) : !phase.isUnlocked ? (
-                              <span
-                                style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  height: '22px',
-                                  padding: '0 8px',
-                                  borderRadius: '12px',
-                                  fontSize: '8.5px',
-                                  fontWeight: 700,
-                                  background: '#f1f5f9',
-                                  color: '#94a3b8',
-                                  border: '1px solid #cbd5e1',
-                                  whiteSpace: 'nowrap',
-                                }}
-                              >
-                                🔒 รอ Phase 3
                               </span>
                             ) : entry.sequence !== firstUncompletedSeq ? (
                               <span

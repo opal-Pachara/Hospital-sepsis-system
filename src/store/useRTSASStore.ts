@@ -3168,7 +3168,7 @@ export const useRTSASStore = create<RTSASState>()(
  *   - Phase 1 is always unlocked.
  *   - Phase 2 unlocks when ALL Phase 1 items are completed.
  *   - Phase 3 unlocks when Phase 2 (doctor confirm) is completed.
- *   - Phase 4 unlocks when Phase 3 is completed.
+ *   - Phase 4 unlocks when Phase 2 (doctor confirm) is completed (does not wait for Phase 3).
  */
 function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
   // If doctor confirmation is already completed or skipped,
@@ -3215,6 +3215,16 @@ function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
         prevPhase.items.length > 0 &&
         prevPhase.items.every((item) => item.status === 'completed' || item.status === 'skipped');
       if (prevCompleted || isDoctorConfirmed) {
+        isUnlocked = true;
+      }
+    } else if (phase.phase === 'assessment_schedule') {
+      // Phase 4 unlocks as soon as Phase 2 (doctor confirmation) is completed — does not wait for Phase 3
+      const phase2 = phases.find((p) => p.phase === 'doctor_confirmation');
+      const phase2Completed =
+        Boolean(phase2) &&
+        phase2!.items.length > 0 &&
+        phase2!.items.every((item) => item.status === 'completed' || item.status === 'skipped');
+      if (phase2Completed || isDoctorConfirmed) {
         isUnlocked = true;
       }
     } else {

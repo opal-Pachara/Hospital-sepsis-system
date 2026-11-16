@@ -227,6 +227,10 @@ describe('Centralized Treatment & Alert Synchronization', () => {
     const phase3 = data.checklist.find((p) => p.phase === 'sepsis_bundle');
     expect(phase3?.isUnlocked).toBe(true);
     expect(phase3?.items.every((i) => i.isUnlocked)).toBe(true);
+
+    // Phase 4 MUST also be unlocked right after doctor confirmation without waiting for Phase 3
+    const phase4 = data.checklist.find((p) => p.phase === 'assessment_schedule');
+    expect(phase4?.isUnlocked).toBe(true);
   });
 
   it('selectPatient correctly restores checklist_json and ensures Phase 3 is unlocked', () => {
@@ -321,6 +325,10 @@ describe('Centralized Treatment & Alert Synchronization', () => {
     // Check that Phase 3 is unlocked
     const phase3 = activeChecklist.find((p) => p.phase === 'sepsis_bundle');
     expect(phase3?.isUnlocked).toBe(true);
+
+    // Check that Phase 4 is unlocked even while Phase 3 is still incomplete
+    const phase4 = activeChecklist.find((p) => p.phase === 'assessment_schedule');
+    expect(phase4?.isUnlocked).toBe(true);
   });
 
   it('vitals update with active countdown keeps selectedPatient in sync and does not trigger duplicate alert', () => {
