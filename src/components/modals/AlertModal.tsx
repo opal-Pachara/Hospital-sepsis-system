@@ -28,6 +28,14 @@ export function filterDisplayBreakdownItems(breakdown?: NEWSParameterScore[]): N
   );
 }
 
+const SHORT_PARAM_PREFIX: Partial<Record<NEWSParameterScore['parameter'], string>> = {
+  respiratoryRate: 'RR',
+  spO2: 'SpO₂',
+  temperature: 'Temp',
+  systolicBP: 'SBP',
+  heartRate: 'HR',
+};
+
 /** Parameter chip row highlighting ONLY score === 3 in red; scores < 3 stay normal neutral. */
 export function NewsBreakdownChips({ items, neutralBg = '#f8fafc' }: { items: NEWSParameterScore[]; neutralBg?: string }) {
   return (
@@ -39,6 +47,8 @@ export function NewsBreakdownChips({ items, neutralBg = '#f8fafc' }: { items: NE
           p.displayValue.includes('ยังไม่ระบุ') ||
           p.displayValue.includes('รอเลือก');
         const isCriticalParam = !isUnassessed && p.score === 3;
+        const prefix = SHORT_PARAM_PREFIX[p.parameter];
+        const valueText = prefix ? `${prefix} ${p.displayValue}` : p.displayValue;
         return (
           <span
             key={p.parameter}
@@ -62,7 +72,7 @@ export function NewsBreakdownChips({ items, neutralBg = '#f8fafc' }: { items: NE
               `${p.parameter === 'avpu' ? 'AVPU: ยังไม่ประเมิน' : 'O₂: ยังไม่ระบุ'} (—)`
             ) : isCriticalParam ? (
               <>
-                <span>{p.displayValue}</span>
+                <span>{valueText}</span>
                 <span style={{
                   background: '#dc2626',
                   color: '#fff',
@@ -75,7 +85,7 @@ export function NewsBreakdownChips({ items, neutralBg = '#f8fafc' }: { items: NE
               </>
             ) : (
               <>
-                <span>{p.displayValue}</span>
+                <span>{valueText}</span>
                 <span style={{ opacity: 0.75 }}>+{p.score}</span>
               </>
             )}

@@ -244,12 +244,12 @@ describe('Historical Patient Record Locking & Audit Trail', () => {
     expect(useRTSASStore.getState().checklist.length).toBeGreaterThan(0);
 
     // 1. Can complete checklist item
-    useRTSASStore.getState().completeChecklistItem('triage', 'Nurse Test');
-    const triageItem = useRTSASStore
+    useRTSASStore.getState().completeChecklistItem('nurse_reassess', 'Nurse Test');
+    const reassessItem = useRTSASStore
       .getState()
       .checklist.flatMap((p) => p.items)
-      .find((i) => i.id === 'triage');
-    expect(triageItem?.status).toBe('completed');
+      .find((i) => i.id === 'nurse_reassess');
+    expect(reassessItem?.status).toBe('completed');
 
     // 2. Can start countdown timer
     const now = new Date().toISOString();
@@ -281,12 +281,12 @@ describe('Historical Patient Record Locking & Audit Trail', () => {
     expect(isHistoricalPatient(mockUncompletedArchivePatient, useRTSASStore.getState().patientData)).toBe(true);
 
     // Checklist modification must be blocked
-    useRTSASStore.getState().completeChecklistItem('triage', 'Nurse Test');
-    const triageItem = useRTSASStore
+    useRTSASStore.getState().completeChecklistItem('nurse_reassess', 'Nurse Test');
+    const reassessItem = useRTSASStore
       .getState()
       .checklist.flatMap((p) => p.items)
-      .find((i) => i.id === 'triage');
-    expect(triageItem?.status).not.toBe('completed');
+      .find((i) => i.id === 'nurse_reassess');
+    expect(reassessItem?.status).not.toBe('completed');
   });
 
   it('tickCountdown stops timer and does not decrement remainingSeconds when treatmentCompleted or sepsisRuledOut is true', () => {

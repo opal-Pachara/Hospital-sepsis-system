@@ -255,6 +255,33 @@ export function requiresInitialAvpuO2Gate(
   return isO2Unassessed || isAvpuUnassessed;
 }
 
+/**
+ * Returns true if the NEWS result has at least one individual parameter scoring 3.
+ * Used to avoid opening SingleParamAlertModal when no +3 parameter exists in breakdown.
+ */
+export function hasCriticalSingleParam(newsResult?: NEWSResult | null): boolean {
+  return Boolean(newsResult?.breakdown?.some((b) => b.score === 3));
+}
+
+/**
+ * Builds consistent modalData for SingleParamAlertModal with the alerted patient's snapshot
+ * so stale/unrelated selectedPatient fallbacks cannot mix another patient's breakdown.
+ */
+export function buildSingleParamModalData(
+  patient: Patient | undefined,
+  fallbackId?: string,
+  newsResult?: NEWSResult | null
+): Record<string, unknown> {
+  const effectiveNews = newsResult ?? patient?.latestNewsResult;
+  return {
+    hn: patient?.hn ?? fallbackId ?? '',
+    newsScore: effectiveNews?.totalScore ?? patient?.latestNewsScore ?? 0,
+    riskLevel: effectiveNews?.riskLevel ?? patient?.currentRiskLevel ?? 'low_medium',
+    patientName: patient?.fullName ?? '',
+    patientSnapshot: patient,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Default Checklist Template
 // ---------------------------------------------------------------------------
@@ -286,19 +313,6 @@ function createDefaultChecklist(): ChecklistPhase[] {
       isCompleted: false,
       items: [
         {
-          id: 'triage',
-          phase: 'initial_response',
-          label: 'ลงทะเบียนผู้ป่วย / Triage',
-          status: 'pending',
-          completedAt: null,
-          completedBy: null,
-          requiresInput: false,
-          inputValue: null,
-          inputLabel: null,
-          sortOrder: 1,
-          isUnlocked: true,
-        },
-        {
           id: 'nurse_reassess',
           phase: 'initial_response',
           label: 'พยาบาลประเมินซ้ำ',
@@ -309,7 +323,7 @@ function createDefaultChecklist(): ChecklistPhase[] {
           requiresInput: false,
           inputValue: null,
           inputLabel: null,
-          sortOrder: 2,
+          sortOrder: 1,
           isUnlocked: true,
         },
         {
@@ -323,7 +337,7 @@ function createDefaultChecklist(): ChecklistPhase[] {
           requiresInput: false,
           inputValue: null,
           inputLabel: null,
-          sortOrder: 3,
+          sortOrder: 2,
           isUnlocked: true,
         },
       ],
@@ -885,7 +899,8 @@ export const useRTSASStore = create<RTSASState>()(
         const shouldPromptAdditional =
           needsGate &&
           state.ui.modal.activeModal !== 'alert' &&
-          state.ui.modal.activeModal !== 'multi_alert';
+          state.ui.modal.activeModal !== 'multi_alert' &&
+          state.ui.modal.activeModal !== 'single_param_alert';
         const prevEligiblePatientId =
           state.selectedPatient &&
           state.selectedPatient.id !== patient?.id &&
@@ -1069,14 +1084,9 @@ export const useRTSASStore = create<RTSASState>()(
             patientName:
               get().patients.find((p) => p.id === patientId)?.fullName ?? '',
           });
-        } else if (newsResult.hasSingleParameterAlert || newsResult.breakdown.some((b) => b.score === 3)) {
+        } else if (hasCriticalSingleParam(newsResult)) {
           const pt = get().patients.find((p) => p.id === patientId);
-          get().openModal('single_param_alert', {
-            hn: pt?.hn ?? patientId,
-            newsScore: newsResult.totalScore,
-            riskLevel: newsResult.riskLevel,
-            patientName: pt?.fullName ?? '',
-          });
+          get().openModal('single_param_alert', buildSingleParamModalData(pt, patientId, newsResult));
         }
       },
 
@@ -1267,15 +1277,11 @@ export const useRTSASStore = create<RTSASState>()(
               patientName: patient.fullName,
             });
           } else if (
-            (newsResult.hasSingleParameterAlert || newsResult.breakdown.some((b) => b.score === 3)) &&
+            hasCriticalSingleParam(newsResult) &&
             !stAfterAvpu.dismissedAlertKeys?.[`single3_${patient.hn}`]
           ) {
-            get().openModal('single_param_alert', {
-              hn: patient.hn,
-              newsScore: newsResult.totalScore,
-              riskLevel: newsResult.riskLevel,
-              patientName: patient.fullName,
-            });
+            const updatedPt = get().patients.find((p) => p.id === patient.id) ?? patient;
+            get().openModal('single_param_alert', buildSingleParamModalData(updatedPt, patient.id, newsResult));
           }
         }
 
@@ -1387,15 +1393,11 @@ export const useRTSASStore = create<RTSASState>()(
               patientName: patient.fullName,
             });
           } else if (
-            (newsResult.hasSingleParameterAlert || newsResult.breakdown.some((b) => b.score === 3)) &&
+            hasCriticalSingleParam(newsResult) &&
             !stAfterAvpu.dismissedAlertKeys?.[`single3_${patient.hn}`]
           ) {
-            get().openModal('single_param_alert', {
-              hn: patient.hn,
-              newsScore: newsResult.totalScore,
-              riskLevel: newsResult.riskLevel,
-              patientName: patient.fullName,
-            });
+            const updatedPt = get().patients.find((p) => p.id === patient.id) ?? patient;
+            get().openModal('single_param_alert', buildSingleParamModalData(updatedPt, patient.id, newsResult));
           }
         }
 
@@ -3177,9 +3179,19 @@ function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
     p.items?.some((i) => i.id === 'doctor_confirm' && (i.status === 'completed' || i.status === 'skipped'))
   );
 
-  return phases.map((phase, index) => {
+  const normalizedPhases = phases.map((phase) => {
     let normalizedItems = phase.items;
     if (
+      phase.phase === 'initial_response' &&
+      Array.isArray(phase.items) &&
+      phase.items.some((i) => i.id === 'triage') &&
+      phase.items.some((i) => i.id !== 'triage') &&
+      !phase.items.every((i) => i.status === 'completed' || i.status === 'skipped')
+    ) {
+      normalizedItems = phase.items
+        .filter((i) => i.id !== 'triage')
+        .map((item, idx) => ({ ...item, sortOrder: idx + 1 }));
+    } else if (
       phase.phase === 'sepsis_bundle' &&
       Array.isArray(phase.items) &&
       !phase.items.every((i) => i.status === 'completed' || i.status === 'skipped')
@@ -3198,6 +3210,11 @@ function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
         normalizedItems = nextItems;
       }
     }
+    return { ...phase, items: normalizedItems };
+  });
+
+  return normalizedPhases.map((phase, index) => {
+    const normalizedItems = phase.items;
 
     // Check if all items in this phase are completed
     const isCompleted =
@@ -3210,7 +3227,7 @@ function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
       isUnlocked = true; // Phase 1 always unlocked
     } else if (index === 1) {
       // Phase 2 (doctor_confirm): unlocked if Phase 1 completed OR if doctor_confirm is already completed
-      const prevPhase = phases[0];
+      const prevPhase = normalizedPhases[0];
       const prevCompleted =
         prevPhase.items.length > 0 &&
         prevPhase.items.every((item) => item.status === 'completed' || item.status === 'skipped');
@@ -3219,7 +3236,7 @@ function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
       }
     } else if (phase.phase === 'assessment_schedule') {
       // Phase 4 unlocks as soon as Phase 2 (doctor confirmation) is completed — does not wait for Phase 3
-      const phase2 = phases.find((p) => p.phase === 'doctor_confirmation');
+      const phase2 = normalizedPhases.find((p) => p.phase === 'doctor_confirmation');
       const phase2Completed =
         Boolean(phase2) &&
         phase2!.items.length > 0 &&
@@ -3229,7 +3246,7 @@ function updatePhaseUnlocking(phases: ChecklistPhase[]): ChecklistPhase[] {
       }
     } else {
       // Unlock if the previous phase is completed
-      const prevPhase = phases[index - 1];
+      const prevPhase = normalizedPhases[index - 1];
       const prevCompleted =
         prevPhase.items.length > 0 &&
         prevPhase.items.every((item) => item.status === 'completed' || item.status === 'skipped');

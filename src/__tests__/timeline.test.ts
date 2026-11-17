@@ -246,7 +246,6 @@ describe('getTimelineText formatting for HIS', () => {
     store.selectPatient('patient_A');
 
     // Complete Phase 1 on Patient A
-    store.completeChecklistItem('triage', 'พยาบาล');
     store.completeChecklistItem('nurse_reassess', 'พยาบาล');
     store.completeChecklistItem('initial_report', 'พยาบาล');
 
@@ -530,7 +529,7 @@ describe('button action system logging & timeline integration', () => {
       store.setPatients([patient]);
       store.selectPatient('pt_chk_log');
 
-      store.completeChecklistItem('triage', 'พยาบาล A');
+      store.completeChecklistItem('nurse_reassess', 'พยาบาล A');
       store.skipChecklistItem('antibiotics_2', 'พยาบาล A');
 
       const logBodies = mockFetch.mock.calls
@@ -540,7 +539,7 @@ describe('button action system logging & timeline integration', () => {
       const completeLog = logBodies.find((b) => b.details?.event === 'checklist_item_completed');
       expect(completeLog).toBeDefined();
       expect(completeLog.level).toBe('Note');
-      expect(completeLog.details.checklist_item_id).toBe('triage');
+      expect(completeLog.details.checklist_item_id).toBe('nurse_reassess');
       expect(completeLog.details.actor).toBe('พยาบาล A');
 
       const skipLog = logBodies.find((b) => b.details?.event === 'checklist_item_skipped');

@@ -7,7 +7,6 @@ import { showToast } from '../common/Toast';
 
 // Thai labels for checklist items
 const thaiLabels: Record<string, string> = {
-  triage: 'ลงทะเบียนผู้ป่วย / Triage',
   nurse_reassess: 'พยาบาลประเมินซ้ำ',
   initial_report: 'รายงานแพทย์เวร',
   doctor_confirm: 'แพทย์เวรยืนยันติดเชื้อ',
@@ -20,7 +19,7 @@ const thaiLabels: Record<string, string> = {
 const thaiPhaseLabels: Record<string, { icon: string; title: string }> = {
   initial_response: { icon: '📍', title: 'การประเมินเบื้องต้น' },
   doctor_confirmation: { icon: '🔬', title: 'แพทย์ยืนยัน — เริ่มนับ 60 นาที' },
-  sepsis_bundle: { icon: '💊', title: 'SEPSIS BUNDLE — ดำเนินการภายใน 60 นาที' },
+  sepsis_bundle: { icon: '💊', title: 'องค์ประกอบที่ระบบติดตาม' },
   assessment_schedule: { icon: '📋', title: 'ประเมินสัญญาณชีพซ้ำ' },
 };
 
@@ -592,23 +591,23 @@ function getParamDetails(
   const o2Detail =
     vitals.oxygenSupplementation === 'unassessed'
       ? {
-          val: '—',
-          color: '#94a3b8',
-          tooltip: 'ยังไม่ระบุการได้รับออกซิเจนเสริม',
-        }
+        val: '—',
+        color: '#94a3b8',
+        tooltip: 'ยังไม่ระบุการได้รับออกซิเจนเสริม',
+      }
       : vitals.oxygenSupplementation === 'supplemental' || o2Score > 0
         ? {
-            val: 'ใช้ O₂',
-            score: 2,
-            color: getColor(2),
-            tooltip: 'การได้รับออกซิเจนเสริม (O₂): ใช้ออกซิเจนเสริม (+2 คะแนน)',
-          }
+          val: 'ใช้ O₂',
+          score: 2,
+          color: getColor(2),
+          tooltip: 'การได้รับออกซิเจนเสริม (O₂): ใช้ออกซิเจนเสริม (+2 คะแนน)',
+        }
         : {
-            val: 'ไม่ใช้',
-            score: 0,
-            color: getColor(0),
-            tooltip: 'การได้รับออกซิเจนเสริม (O₂): ไม่ใช้ออกซิเจนเสริม / Room Air (0 คะแนน)',
-          };
+          val: 'ไม่ใช้',
+          score: 0,
+          color: getColor(0),
+          tooltip: 'การได้รับออกซิเจนเสริม (O₂): ไม่ใช้ออกซิเจนเสริม / Room Air (0 คะแนน)',
+        };
 
   return {
     rr: {
@@ -792,9 +791,9 @@ function AssessmentScheduleSection({
                       const isDue = !isDone && new Date() >= new Date(entry.scheduledTime);
                       const recordedTimeStr = entry.completedAt
                         ? new Date(entry.completedAt).toLocaleTimeString('th-TH', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
                         : null;
 
                       const effectiveNews = entry.newsResult || (entry.vitals ? calculateNEWS(entry.vitals) : null);

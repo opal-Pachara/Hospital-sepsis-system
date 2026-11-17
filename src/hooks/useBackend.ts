@@ -7,7 +7,7 @@
 // =============================================================================
 
 import { useEffect, useRef, useCallback } from 'react';
-import { useRTSASStore } from '../store/useRTSASStore';
+import { useRTSASStore, hasCriticalSingleParam, buildSingleParamModalData } from '../store/useRTSASStore';
 import type { Patient, TreatmentStatus } from '../types';
 import { mapBackendToPatient, type BackendPatient, type BackendNEWSResult } from '../utils/patientMapper';
 
@@ -110,10 +110,7 @@ export function usePatientData() {
           ) {
             return false;
           }
-          const hasSingleThree = Boolean(
-            p.latestNewsResult?.hasSingleParameterAlert ||
-            p.latestNewsResult?.breakdown?.some((b) => b.score === 3)
-          );
+          const hasSingleThree = hasCriticalSingleParam(p.latestNewsResult);
           if (!hasSingleThree) return false;
           const singleKey = `single3_${p.hn}_${p.arrivalTime || ''}_${p.latestNewsScore}`;
           return !singleParamAlertedKeysRef.current.has(singleKey);
@@ -122,11 +119,7 @@ export function usePatientData() {
         if (singleParamPatient) {
           const singleKey = `single3_${singleParamPatient.hn}_${singleParamPatient.arrivalTime || ''}_${singleParamPatient.latestNewsScore}`;
           singleParamAlertedKeysRef.current.add(singleKey);
-          useRTSASStore.getState().openModal('single_param_alert', {
-            hn: singleParamPatient.hn,
-            newsScore: singleParamPatient.latestNewsScore,
-            patientName: singleParamPatient.fullName,
-          });
+          useRTSASStore.getState().openModal('single_param_alert', buildSingleParamModalData(singleParamPatient));
           useRTSASStore.getState().selectPatient(singleParamPatient.id);
         }
       }
@@ -302,10 +295,7 @@ export function useWebSocketAlerts() {
 
         const wsSingleKey = `single3_${payload.hn}_${bp.arrival_time || ''}_${payload.news_result.totalScore}`;
         const wsCurState = useRTSASStore.getState();
-        const hasSingleThree = Boolean(
-          payload.news_result.hasSingleParameterAlert ||
-          payload.news_result.breakdown?.some((b) => b.score === 3)
-        );
+        const hasSingleThree = hasCriticalSingleParam(patient.latestNewsResult);
 
         if (!isFinished && payload.is_new_alert && payload.news_result.totalScore >= 5) {
           // Queue the alert — if modal is already open it will stack, not override
@@ -323,11 +313,7 @@ export function useWebSocketAlerts() {
           wsCurState.pendingAlerts.length === 0
         ) {
           wsCurState.markAlertDismissed(wsSingleKey);
-          useRTSASStore.getState().openModal('single_param_alert', {
-            hn: patient.hn,
-            newsScore: patient.latestNewsScore,
-            patientName: patient.fullName,
-          });
+          useRTSASStore.getState().openModal('single_param_alert', buildSingleParamModalData(patient));
         }
       } catch (err) {
         console.error('[WebSocket] Failed to parse message:', err);

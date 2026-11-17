@@ -18,31 +18,76 @@ export interface SingleParamAlertModalContentProps {
   onClose: () => void;
 }
 
+export interface SingleParamModalData {
+  newsScore: number;
+  patientName?: string;
+  hn?: string;
+  patientSnapshot?: Patient;
+}
+
+/**
+ * Resolves the target patient and score for SingleParamAlertModal without ever falling back
+ * to an unrelated selectedPatient whose HN/ID does not match the alert target.
+ */
+export function resolveSingleParamAlertTarget(
+  data: SingleParamModalData | null,
+  patients: Patient[],
+  selectedPatient: Patient | null
+) {
+  const alertHN = data?.hn || data?.patientName || '';
+  const alertedPatient = data
+    ? patients.find(
+        (p) =>
+          (data.hn ? p.hn === data.hn || p.id === data.hn : false) ||
+          (!data.hn && data.patientName
+            ? p.hn === data.patientName || p.id === data.patientName || p.fullName === data.patientName
+            : false)
+      )
+    : undefined;
+
+  const matchedSelected =
+    selectedPatient &&
+    (!alertHN || selectedPatient.hn === alertHN || selectedPatient.id === alertHN)
+      ? selectedPatient
+      : undefined;
+
+  const useLiveAlerted = Boolean(
+    alertedPatient &&
+      (!data?.patientSnapshot ||
+        alertedPatient.latestNewsResult?.totalScore === data.newsScore ||
+        alertedPatient.latestNewsResult?.breakdown?.some((b) => b.score === 3))
+  );
+
+  const patient = useLiveAlerted
+    ? alertedPatient
+    : (data?.patientSnapshot ?? alertedPatient ?? matchedSelected);
+
+  const alertNewsScore =
+    patient?.latestNewsResult?.totalScore ?? data?.newsScore ?? patient?.latestNewsScore ?? 0;
+
+  const targetHn = patient?.hn ?? alertedPatient?.hn ?? alertHN;
+  const targetPatientId = patient?.id ?? alertedPatient?.id ?? targetHn;
+
+  return { patient, alertNewsScore, targetHn, targetPatientId };
+}
+
 export default function SingleParamAlertModal() {
   const { ui, closeModal, patients, selectedPatient, selectPatient, openModal } = useRTSASStore();
 
   if (ui.modal.activeModal !== 'single_param_alert') return null;
 
-  const data = ui.modal.modalData as {
-    newsScore: number;
-    patientName?: string;
-    hn?: string;
-  } | null;
+  const data = ui.modal.modalData as SingleParamModalData | null;
 
   if (!data) return null;
 
-  const alertHN = data.hn || data.patientName || '';
-  const alertedPatient = patients.find(
-    (p) => p.hn === alertHN || p.id === alertHN || (data.patientName && p.fullName === data.patientName)
+  const { patient, alertNewsScore, targetHn, targetPatientId } = resolveSingleParamAlertTarget(
+    data,
+    patients,
+    selectedPatient
   );
-  const patient = alertedPatient ?? selectedPatient;
-  const alertNewsScore = data.newsScore ?? patient?.latestNewsScore ?? 0;
 
   const breakdownItems = filterDisplayBreakdownItems(patient?.latestNewsResult?.breakdown);
   const criticalParams = breakdownItems.filter((p) => p.score === 3);
-
-  const targetHn = alertedPatient?.hn ?? patient?.hn ?? alertHN;
-  const targetPatientId = alertedPatient?.id ?? patient?.id ?? targetHn;
 
   const dismissSingleAlert = () => {
     if (targetHn) {

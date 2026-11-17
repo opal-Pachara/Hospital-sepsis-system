@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { calculateNEWS, scoreOxygenSupplementation } from '../utils/newsCalculator';
-import { useRTSASStore, requiresInitialAvpuO2Gate } from '../store/useRTSASStore';
+import { useRTSASStore, requiresInitialAvpuO2Gate, hasCriticalSingleParam, buildSingleParamModalData } from '../store/useRTSASStore';
 import { calculateMAP } from '../types';
 import type { Patient, VitalSigns } from '../types';
 import { AlertModalContent } from '../components/modals/AlertModal';
-import { SingleParamAlertModalContent } from '../components/modals/SingleParamAlertModal';
+import { SingleParamAlertModalContent, resolveSingleParamAlertTarget } from '../components/modals/SingleParamAlertModal';
 
 describe('NEWS 2012 AVPU Consciousness Assessment & Supplemental Oxygen Workflow', () => {
   beforeEach(() => {
@@ -478,6 +478,92 @@ describe('NEWS 2012 AVPU Consciousness Assessment & Supplemental Oxygen Workflow
       await useRTSASStore.getState().assessAVPU('p-gate-1', 'A', false);
       const stAfterAssess = useRTSASStore.getState();
       expect(requiresInitialAvpuO2Gate(stAfterAssess.selectedPatient, stAfterAssess.patientData)).toBe(false);
+    });
+
+    it('highlights SpO2 <= 91% (+3) in red with SpO2 label and never falls back to unrelated selectedPatient', () => {
+      const vitalsSpo2Critical: VitalSigns = {
+        ...baseVitals,
+        spO2: 70, // +3
+      };
+      const newsSpo2 = calculateNEWS(vitalsSpo2Critical);
+      expect(newsSpo2.totalScore).toBe(3);
+      expect(hasCriticalSingleParam(newsSpo2)).toBe(true);
+
+      const spo2Patient: Patient = {
+        id: '000391054',
+        hn: '000391054',
+        vn: 'VN-SPO2-3',
+        fullName: 'HN****1054',
+        age: 62,
+        gender: 'male',
+        triageLevel: 'urgent',
+        arrivalTime: new Date().toISOString(),
+        chiefComplaint: 'เหนื่อยหอบ',
+        allergies: [],
+        currentRiskLevel: 'low_medium',
+        latestNewsScore: newsSpo2.totalScore,
+        latestVitals: vitalsSpo2Critical,
+        latestNewsResult: newsSpo2,
+        hasSepsisAlert: false,
+        attendingPhysician: null,
+        primaryNurse: null,
+        location: 'ER',
+      };
+
+      const unrelatedSelected: Patient = {
+        ...spo2Patient,
+        id: '000692457',
+        hn: '000692457',
+        vn: 'VN-OTHER-8',
+        fullName: 'HN****2457',
+        latestNewsScore: 8,
+        latestVitals: { ...baseVitals, respiratoryRate: 22, spO2: 95, oxygenSupplementation: 'supplemental', temperature: 38.5, systolicBP: 108, heartRate: 104 },
+        latestNewsResult: calculateNEWS({ ...baseVitals, respiratoryRate: 22, spO2: 95, oxygenSupplementation: 'supplemental', temperature: 38.5, systolicBP: 108, heartRate: 104 }),
+        hasSepsisAlert: true,
+      };
+      expect(hasCriticalSingleParam(unrelatedSelected.latestNewsResult)).toBe(false);
+
+      // 1. Even if alerted patient disappeared from patients[], snapshot resolves to spo2Patient (never unrelatedSelected)
+      const modalData = buildSingleParamModalData(spo2Patient) as any;
+      const resolvedFromSnapshot = resolveSingleParamAlertTarget(modalData, [unrelatedSelected], unrelatedSelected);
+      expect(resolvedFromSnapshot.patient?.hn).toBe('000391054');
+      expect(resolvedFromSnapshot.alertNewsScore).toBe(3);
+
+      // 2. Without snapshot and missing from patients[], does NOT cross-fallback to unrelatedSelected
+      const resolvedMissing = resolveSingleParamAlertTarget(
+        { hn: '000391054', newsScore: 3, patientName: 'HN****1054' },
+        [unrelatedSelected],
+        unrelatedSelected
+      );
+      expect(resolvedMissing.patient).toBeUndefined();
+
+      // 3. SingleParamAlertModalContent displays SpO2 prefix and red highlight for SpO2 70% (+3)
+      const html = renderToStaticMarkup(
+        createElement(SingleParamAlertModalContent, {
+          patient: spo2Patient,
+          alertHN: spo2Patient.hn,
+          alertNewsScore: spo2Patient.latestNewsScore,
+          onAcknowledge: () => {},
+          onAssessPending: () => {},
+          onClose: () => {},
+        })
+      );
+      expect(html).toContain('SpO₂ 70%');
+      expect(html).toContain('ความอิ่มตัวออกซิเจน (SpO₂): 70%');
+      expect(html).toContain('data-critical-param="true"');
+
+      // 4. selectPatient must NOT clobber an active single_param_alert modal with avpu_assessment
+      const unassessedSpo2Patient: Patient = {
+        ...spo2Patient,
+        id: '000999111',
+        hn: '000999111',
+        latestVitals: { ...vitalsSpo2Critical, oxygenSupplementation: 'unassessed' },
+        latestNewsResult: calculateNEWS({ ...vitalsSpo2Critical, oxygenSupplementation: 'unassessed' }),
+      };
+      useRTSASStore.setState({ patients: [unassessedSpo2Patient], selectedPatient: null });
+      useRTSASStore.getState().openModal('single_param_alert', buildSingleParamModalData(unassessedSpo2Patient));
+      useRTSASStore.getState().selectPatient('000999111');
+      expect(useRTSASStore.getState().ui.modal.activeModal).toBe('single_param_alert');
     });
   });
 });
