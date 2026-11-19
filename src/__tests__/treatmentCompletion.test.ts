@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useRTSASStore } from '../store/useRTSASStore';
+import { useRTSASStore, isTreatmentTimelineEvent } from '../store/useRTSASStore';
 import { calculateNEWS } from '../utils/newsCalculator';
+import { buildErCompletionTimelineEvents } from '../components/modals/AssessmentFormModal';
+import { extractLogSummaryBadges } from '../utils/logHelpers';
 import type { Patient, VitalSigns } from '../types';
 describe('Treatment Completion & Countdown Stop & Dashboard Sync', () => {
   beforeEach(() => {
@@ -311,5 +313,74 @@ describe('Treatment Completion & Countdown Stop & Dashboard Sync', () => {
     expect(reportDoctorTime).toBe('2026-09-14T08:38:00.000Z');
     expect(doctorConfirmTime).toBe('2026-09-14T08:40:00.000Z');
     expect(completedTime).toBe('2026-09-14T09:30:00.000Z');
+  });
+
+  it('builds ER continuation detail timeline event, preserves it in HIS text, and formats log summary badges', () => {
+    const vitals: VitalSigns = {
+      systolicBP: 120,
+      diastolicBP: 80,
+      map: 93,
+      heartRate: 84,
+      respiratoryRate: 18,
+      temperature: 37.0,
+      spO2: 98,
+      gcs: 15,
+      avpu: 'A',
+      oxygenSupplementation: 'room_air',
+    };
+
+    const events = buildErCompletionTimelineEvents({
+      sequence: 2,
+      vitals,
+      newsScore: 0,
+      actor: 'พว.สมศรี',
+      writtenBy: 'นพ.สมชาย',
+      erNote: 'ย้ายเข้าหอผู้ป่วยในอายุรกรรม ให้ยาปฏิชีวนะและสารน้ำต่อเนื่อง',
+      timestamp: '2026-11-17T08:30:00.000Z',
+      baseId: 1000,
+    });
+
+    expect(events).toHaveLength(3);
+    expect(events.every(isTreatmentTimelineEvent)).toBe(true);
+    expect(events[1].actionText).toContain('เขียนรายละเอียดจากห้องฉุกเฉินโดย: นพ.สมชาย');
+    expect(events[1].actionText).toContain('ย้ายเข้าหอผู้ป่วยในอายุรกรรม ให้ยาปฏิชีวนะและสารน้ำต่อเนื่อง');
+    expect(events[1].metadata).toEqual({
+      event: 'er_completion_note',
+      erNote: 'ย้ายเข้าหอผู้ป่วยในอายุรกรรม ให้ยาปฏิชีวนะและสารน้ำต่อเนื่อง',
+      writtenBy: 'นพ.สมชาย',
+    });
+
+    useRTSASStore.setState({
+      selectedPatient: {
+        id: 'pt-er-note',
+        hn: '000999888',
+        fullName: 'HN****9888',
+        age: 60,
+        gender: 'female',
+        arrivalTime: '2026-11-17T07:30:00.000Z',
+        chiefComplaint: 'ไข้สูง',
+        triageLevel: 'urgent',
+        latestNewsScore: 0,
+        latestVitals: vitals,
+        latestNewsResult: calculateNEWS(vitals),
+        hasSepsisAlert: false,
+        attendingPhysician: null,
+        primaryNurse: null,
+        location: 'ER',
+        currentRiskLevel: 'low',
+      } as unknown as Patient,
+      timeline: events,
+    });
+
+    const hisText = useRTSASStore.getState().getTimelineText();
+    expect(hisText).toContain('เขียนรายละเอียดจากห้องฉุกเฉินโดย: นพ.สมชาย — ย้ายเข้าหอผู้ป่วยในอายุรกรรม ให้ยาปฏิชีวนะและสารน้ำต่อเนื่อง');
+
+    const badges = extractLogSummaryBadges({
+      hn: '000999888',
+      written_by: 'นพ.สมชาย',
+      er_note: 'ย้ายเข้าหอผู้ป่วยในอายุรกรรม',
+    });
+    expect(badges.some((b) => b.text.includes('เขียนโดย: นพ.สมชาย'))).toBe(true);
+    expect(badges.some((b) => b.text.includes('ย้ายเข้าหอผู้ป่วยในอายุรกรรม'))).toBe(true);
   });
 });

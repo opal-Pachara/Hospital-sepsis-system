@@ -151,6 +151,14 @@ export function extractLogSummaryBadges(details?: Record<string, any> | null): L
     badges.push({ key: 'outcome', text: String(details.outcome_label), tone: 'green' });
   }
 
+  if (details.written_by) {
+    badges.push({ key: 'written_by', text: `✍️ เขียนโดย: ${details.written_by}`, tone: 'purple' });
+  }
+
+  if (details.er_note) {
+    badges.push({ key: 'er_note', text: `📝 ${details.er_note}`, tone: 'sky' });
+  }
+
   return badges;
 }
 

@@ -788,6 +788,9 @@ class AcknowledgeRequest(BaseModel):
 class CompleteRequest(BaseModel):
     hn: str
     completed_by: Optional[str] = "Nurse/System"
+    timeline_json: Optional[str] = None
+    er_note: Optional[str] = None
+    written_by: Optional[str] = None
 
 class RuleOutRequest(BaseModel):
     hn: str
@@ -855,7 +858,13 @@ async def doctor_confirm_route(body: DoctorConfirmRequest):
 @app.post("/api/treatment-status/complete")
 async def complete_route(body: CompleteRequest):
     from .treatment_service import complete_treatment
-    status = await complete_treatment(body.hn, body.completed_by or "Nurse/System")
+    status = await complete_treatment(
+        body.hn,
+        body.completed_by or "Nurse/System",
+        timeline_json=body.timeline_json,
+        er_note=body.er_note,
+        written_by=body.written_by,
+    )
     # Broadcast completion + archive to all open browsers/tabs in real time!
     await broadcast_message(json.dumps({
         "type": "TREATMENT_STATUS_UPDATE",

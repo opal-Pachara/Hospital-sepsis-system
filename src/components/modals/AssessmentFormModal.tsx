@@ -5,6 +5,7 @@ import { gcsToAVPU, calculateMAP } from '../../types';
 import { showToast } from '../common/Toast';
 import { maskHN } from '../../utils/hnMask';
 import { calculateNEWS } from '../../utils/newsCalculator';
+import { logClientEvent } from '../../utils/logHelpers';
 
 function calcNEWSScore(
   rr: number,
@@ -50,6 +51,68 @@ const unitStyle: React.CSSProperties = {
   fontSize: '10px', fontWeight: 400, color: '#94a3b8',
 };
 
+export interface ErCompletionTimelineParams {
+  sequence: number;
+  vitals: VitalSigns;
+  newsScore: number;
+  actor: string;
+  writtenBy: string;
+  erNote: string;
+  timestamp: string;
+  baseId?: number;
+}
+
+/**
+ * Builds the final vitals, ER continuation note, and treatment completion TimelineEvents.
+ */
+export function buildErCompletionTimelineEvents({
+  sequence,
+  vitals,
+  newsScore,
+  actor,
+  writtenBy,
+  erNote,
+  timestamp,
+  baseId = Date.now(),
+}: ErCompletionTimelineParams): TimelineEvent[] {
+  const o2Str = vitals.oxygenSupplementation === 'supplemental' ? 'O₂ (+2)' : 'Room Air (0)';
+  const mapStr = vitals.map !== null && vitals.map !== undefined ? `, MAP ${vitals.map} mmHg` : '';
+  const dbpDisplay = vitals.diastolicBP !== null && vitals.diastolicBP !== undefined ? vitals.diastolicBP : '—';
+  const effectiveAvpu = vitals.avpu || 'A';
+
+  const timelineEventVitals: TimelineEvent = {
+    id: `tl_vitals_${baseId}`,
+    timestamp,
+    actionText: `🩺 บันทึกสัญญาณชีพสิ้นสุดการรักษา (ครั้งที่ ${sequence}) — BP ${vitals.systolicBP}/${dbpDisplay} mmHg, HR ${vitals.heartRate} bpm, RR ${vitals.respiratoryRate}/min, SpO2 ${vitals.spO2}%, Temp ${vitals.temperature}°C, GCS ${vitals.gcs} (${effectiveAvpu}), ${o2Str}${mapStr} (NEWS: ${newsScore} คะแนน)`,
+    color: newsScore >= 7 ? 'red' : newsScore >= 5 ? 'orange' : 'green',
+    actor,
+    metadata: { vitals, newsScore },
+  };
+
+  const timelineEventERNote: TimelineEvent = {
+    id: `tl_ernote_${baseId + 1}`,
+    timestamp,
+    actionText: `📝 เขียนรายละเอียดจากห้องฉุกเฉินโดย: ${writtenBy} — ${erNote}`,
+    color: 'blue',
+    actor: writtenBy,
+    metadata: {
+      event: 'er_completion_note',
+      erNote,
+      writtenBy,
+    },
+  };
+
+  const timelineEventComplete: TimelineEvent = {
+    id: `tl_comp_${baseId + 2}`,
+    timestamp,
+    actionText: `✅ สิ้นสุดการรักษา — ผู้ป่วยได้รับการรักษาครบถ้วนแล้ว`,
+    color: 'green',
+    actor,
+  };
+
+  return [timelineEventVitals, timelineEventERNote, timelineEventComplete];
+}
+
 export default function AssessmentFormModal() {
   const {
     ui,
@@ -73,7 +136,8 @@ export default function AssessmentFormModal() {
   const [bt, setBT] = useState('');
   const [selectedAvpu, setSelectedAvpu] = useState<AVPULevel | null>(null);
   const [oxygenStatus, setOxygenStatus] = useState<OxygenStatus>('unassessed');
-  const [isConfirmingComplete, setIsConfirmingComplete] = useState(false);
+  const [showCompletionPopup, setShowCompletionPopup] = useState(false);
+  const [erDetailNote, setErDetailNote] = useState('');
 
   if (ui.modal.activeModal !== 'assessment_form') return null;
 
@@ -120,69 +184,67 @@ export default function AssessmentFormModal() {
 
   const filledCount = [rr, spo2, sbp, hr, bt, selectedAvpu, oxygenStatus !== 'unassessed' ? oxygenStatus : ''].filter(Boolean).length;
 
+  const buildFormVitals = (): VitalSigns => ({
+    respiratoryRate: rrN,
+    spO2: spo2N,
+    oxygenSupplementation: oxygenStatus,
+    temperature: btN,
+    systolicBP: sbpN,
+    diastolicBP: !isNaN(dbpN) ? dbpN : null,
+    map: mapN,
+    heartRate: hrN,
+    gcs: gcsN,
+    avpu: effectiveAvpu,
+    isAvpuConfirmed: true,
+    avpuStatus: 'confirmed',
+  });
+
+  const resetFormState = () => {
+    setShowCompletionPopup(false);
+    setErDetailNote('');
+    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT('');
+    setSelectedAvpu(null); setOxygenStatus('unassessed');
+  };
+
   const handleSave = () => {
     if (!allFilled) {
       showToast('กรุณากรอกข้อมูลสัญญาณชีพ AVPU และการได้รับออกซิเจนเสริมให้ครบถ้วน', 'error');
       return;
     }
 
-    const vitals: VitalSigns = {
-      respiratoryRate: rrN,
-      spO2: spo2N,
-      oxygenSupplementation: oxygenStatus,
-      temperature: btN,
-      systolicBP: sbpN,
-      diastolicBP: !isNaN(dbpN) ? dbpN : null,
-      map: mapN,
-      heartRate: hrN,
-      gcs: gcsN,
-      avpu: effectiveAvpu,
-      isAvpuConfirmed: true,
-      avpuStatus: 'confirmed',
-    };
-
     const actor = currentUser?.name || 'พยาบาลห้องฉุกเฉิน';
-    completeAssessment(data.entryId, vitals, actor);
+    completeAssessment(data.entryId, buildFormVitals(), actor);
     showToast(`บันทึกการประเมินครั้งที่ ${data.sequence} สำเร็จ`, 'success');
     closeModal();
-
-    // Reset fields
-    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT('');
-    setSelectedAvpu(null); setOxygenStatus('unassessed');
+    resetFormState();
   };
 
-  const handleCompleteTreatment = () => {
+  const handleOpenCompletionPopup = () => {
+    if (!allFilled) {
+      showToast('กรุณากรอกข้อมูลสัญญาณชีพ AVPU และการได้รับออกซิเจนเสริมให้ครบถ้วนก่อนสิ้นสุดการรักษา', 'error');
+      return;
+    }
+    setErDetailNote('');
+    setShowCompletionPopup(true);
+  };
+
+  const handleConfirmCompleteTreatment = () => {
     if (!allFilled) {
       showToast('กรุณากรอกข้อมูลสัญญาณชีพ AVPU และการได้รับออกซิเจนเสริมให้ครบถ้วนก่อนสิ้นสุดการรักษา', 'error');
       return;
     }
 
-    if (!isConfirmingComplete) {
-      setIsConfirmingComplete(true);
+    const noteTrimmed = erDetailNote.trim();
+    if (!noteTrimmed) {
+      showToast('กรุณากรอกรายละเอียดจากห้องฉุกเฉินก่อนยืนยันเสร็จสิ้น', 'error');
       return;
     }
 
-    const vitals: VitalSigns = {
-      respiratoryRate: rrN,
-      spO2: spo2N,
-      oxygenSupplementation: oxygenStatus,
-      temperature: btN,
-      systolicBP: sbpN,
-      diastolicBP: !isNaN(dbpN) ? dbpN : null,
-      map: mapN,
-      heartRate: hrN,
-      gcs: gcsN,
-      avpu: effectiveAvpu,
-      isAvpuConfirmed: true,
-      avpuStatus: 'confirmed',
-    };
-
-
+    const vitals = buildFormVitals();
     if (!selectedPatient) return;
     const actor = currentUser?.name || 'พยาบาลห้องฉุกเฉิน';
     const now = new Date().toISOString();
     const fullNews = calculateNEWS(vitals);
-
 
     // 1. Update assessmentSchedule: mark current sequence completed, cancel subsequent
     const currentSchedule = patientData[selectedPatient.id]?.assessmentSchedule || assessmentSchedule;
@@ -217,28 +279,19 @@ export default function AssessmentFormModal() {
       };
     }
 
-    // 2. Timeline events
-    const o2Str = oxygenStatus === 'supplemental' ? 'O₂ (+2)' : 'Room Air (0)';
-    const mapStr = mapN !== null ? `, MAP ${mapN} mmHg` : '';
-    const timelineEventVitals: TimelineEvent = {
-      id: `tl_vitals_${Date.now()}`,
-      timestamp: now,
-      actionText: `🩺 บันทึกสัญญาณชีพสิ้นสุดการรักษา (ครั้งที่ ${data.sequence}) — BP ${sbpN}/${!isNaN(dbpN) ? dbp : '—'} mmHg, HR ${hrN} bpm, RR ${rrN}/min, SpO2 ${spo2N}%, Temp ${btN}°C, GCS ${gcsN} (${effectiveAvpu}), ${o2Str}${mapStr} (NEWS: ${fullNews.totalScore} คะแนน)`,
-      color: fullNews.totalScore >= 7 ? 'red' : fullNews.totalScore >= 5 ? 'orange' : 'green',
+    // 2. Timeline events (final vitals + ER continuation detail note + completion)
+    const newTimelineEvents = buildErCompletionTimelineEvents({
+      sequence: data.sequence,
+      vitals,
+      newsScore: fullNews.totalScore,
       actor,
-      metadata: { vitals, newsScore: fullNews.totalScore },
-    };
-
-    const timelineEventComplete: TimelineEvent = {
-      id: `tl_comp_${Date.now() + 1}`,
+      writtenBy: actor,
+      erNote: noteTrimmed,
       timestamp: now,
-      actionText: `✅ สิ้นสุดการรักษา — ผู้ป่วยได้รับการรักษาครบถ้วนแล้ว`,
-      color: 'green',
-      actor,
-    };
+    });
 
     const existingTimeline = timeline || patientData[selectedPatient.id]?.timeline || [];
-    const updatedTimeline = [...existingTimeline, timelineEventVitals, timelineEventComplete];
+    const updatedTimeline = [...existingTimeline, ...newTimelineEvents];
 
     // 3. Stop countdown timer and update patient
     const patientId = selectedPatient.id;
@@ -262,7 +315,6 @@ export default function AssessmentFormModal() {
         treatment_completed_at: now,
         treatment_completed_by: actor,
       } as typeof selectedPatient.treatmentStatus,
-
     };
 
     const updatedPatients = (patients || []).map((p) =>
@@ -312,8 +364,25 @@ export default function AssessmentFormModal() {
       timeline: updatedTimeline,
     });
 
-    // 4. Backend sync: save checklist before complete+archive so checklist never races after archive
+    // 4. Record ER continuation detail log into SQLite System Logs
     const hn = selectedPatient.hn;
+    const cleanHn = hn.toUpperCase().startsWith('HN') ? hn.slice(2).trim() : hn;
+    logClientEvent({
+      level: 'Note',
+      component: 'Clinical_Treatment',
+      message: `เขียนรายละเอียดจากห้องฉุกเฉินโดย ${actor}: ผู้ป่วย HN ${cleanHn || '-'} — ${noteTrimmed}`,
+      details: {
+        event: 'er_completion_note',
+        hn: hn || undefined,
+        vn: selectedPatient.vn || undefined,
+        er_note: noteTrimmed,
+        written_by: actor,
+        completed_by: actor,
+        actor,
+      },
+    });
+
+    // 5. Backend sync: save checklist before complete+archive so checklist never races after archive
     fetch('/api/treatment-status/checklist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -331,22 +400,20 @@ export default function AssessmentFormModal() {
             hn,
             completed_by: actor,
             timeline_json: JSON.stringify(updatedTimeline),
+            er_note: noteTrimmed,
+            written_by: actor,
           }),
         }).catch((err) => console.warn('Failed to sync complete to backend:', err));
       });
 
-    showToast('✅ สิ้นสุดการรักษาและบันทึกข้อมูลไปยัง Dashboard สำเร็จ', 'success');
+    showToast('✅ สิ้นสุดการรักษาและบันทึกรายละเอียดจากห้องฉุกเฉินสำเร็จ', 'success');
     closeModal();
-    setIsConfirmingComplete(false);
-    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT('');
-    setSelectedAvpu(null); setOxygenStatus('unassessed');
+    resetFormState();
   };
 
   const handleClose = () => {
     closeModal();
-    setIsConfirmingComplete(false);
-    setRR(''); setSpo2(''); setSBP(''); setDBP(''); setHR(''); setBT('');
-    setSelectedAvpu(null); setOxygenStatus('unassessed');
+    resetFormState();
   };
 
   const handleInputFocus = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -362,7 +429,7 @@ export default function AssessmentFormModal() {
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center animate-fade-in"
       style={{ background: 'rgba(10, 10, 20, 0.7)', backdropFilter: 'blur(8px)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
+      onClick={(e) => { if (e.target === e.currentTarget && !showCompletionPopup) handleClose(); }}
     >
       <div
         className="animate-slideUp"
@@ -818,59 +885,192 @@ export default function AssessmentFormModal() {
             >
               💾 บันทึกการประเมิน
             </button>
-            {isConfirmingComplete ? (
-              <div style={{ display: 'flex', gap: '6px', flex: 2 }}>
-                <button
-                  type="button"
-                  id="btn-confirm-complete-treatment"
-                  onClick={handleCompleteTreatment}
-                  style={{
-                    flex: 1, padding: '14px 6px', borderRadius: '14px',
-                    fontSize: '12px', fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
-                    color: '#fff', border: 'none',
-                    background: 'linear-gradient(135deg, #ef4444, #dc2626)',
-                    boxShadow: '0 4px 14px rgba(220, 38, 38, .4)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                  }}
+            <button
+              type="button"
+              id="btn-trigger-complete-treatment"
+              onClick={handleOpenCompletionPopup}
+              style={{
+                flex: 2, padding: '14px', borderRadius: '14px',
+                fontSize: '14px', fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
+                color: '#fff', border: 'none',
+                background: 'linear-gradient(135deg, #10b981, #059669)',
+                boxShadow: '0 6px 20px -4px rgba(16, 185, 129, .4)',
+                transition: 'all 0.25s ease',
+                letterSpacing: '-0.2px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+              }}
+              onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 8px 28px -4px rgba(16, 185, 129, .5)'; }}
+              onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 6px 20px -4px rgba(16, 185, 129, .4)'; }}
+            >
+              ✅ รักษาเสร็จแล้ว
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Stacked PopUp: ER Continuation Detail & Confirm Completion ─── */}
+      {showCompletionPopup && (
+        <div
+          id="er-completion-detail-popup"
+          className="fixed inset-0 z-[250] flex items-center justify-center animate-fade-in"
+          style={{ background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCompletionPopup(false); }}
+        >
+          <div
+            className="animate-slideUp"
+            style={{
+              width: '460px',
+              maxWidth: '94vw',
+              background: '#fff',
+              borderRadius: '18px',
+              overflow: 'hidden',
+              boxShadow: '0 25px 60px -12px rgba(5, 150, 105, 0.35), 0 0 0 1px rgba(16, 185, 129, 0.2)',
+            }}
+          >
+            <div style={{ height: '4px', background: 'linear-gradient(90deg, #10b981, #059669, #0891b2)' }} />
+            <div
+              style={{
+                padding: '16px 20px 14px',
+                background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 60%, #ecfdf5 100%)',
+                borderBottom: '1px solid #a7f3d0',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '12px',
+              }}
+            >
+              <div
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '12px',
+                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '20px',
+                  flexShrink: 0,
+                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.35)',
+                }}
+              >
+                📝
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '15.5px', fontWeight: 900, color: '#065f46', lineHeight: 1.3 }}>
+                  ยืนยันรักษาเสร็จสิ้น — รายละเอียดจากห้องฉุกเฉิน
+                </div>
+                <div style={{ fontSize: '11px', color: '#047857', marginTop: '3px' }}>
+                  {maskHN(selectedPatient?.hn || 'N/A')} · บันทึกข้อความส่งต่อ/รักษาต่อเนื่องลง Timeline และ Logs
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCompletionPopup(false)}
+                style={{
+                  width: '30px',
+                  height: '30px',
+                  borderRadius: '8px',
+                  border: '1px solid #6ee7b7',
+                  background: '#fff',
+                  color: '#059669',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontFamily: 'inherit',
+                  flexShrink: 0,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: '18px 20px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label
+                  htmlFor="er-detail-note-input"
+                  style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}
                 >
-                  ⚠️ ยืนยันเสร็จสิ้น
-                </button>
+                  รายละเอียดการจำหน่ายออกจากห้องฉุกเฉิน : <span style={{ color: '#dc2626' }}>*</span>
+                </label>
+                <textarea
+                  id="er-detail-note-input"
+                  rows={4}
+                  autoFocus
+                  value={erDetailNote}
+                  onChange={(e) => setErDetailNote(e.target.value)}
+                  placeholder="เช่น รับไว้เป็นผู้ป่วยใน/ส่งรักษาต่อ/ปฏิเสธการรักษา/เสียชีวิต..."
+                  style={{
+                    ...inputStyle,
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    lineHeight: 1.55,
+                    resize: 'vertical',
+                    minHeight: '96px',
+                  }}
+                />
+              </div>
+
+              <div
+                style={{
+                  fontSize: '10.5px',
+                  color: '#0369a1',
+                  background: '#f0f9ff',
+                  border: '1px solid #bae6fd',
+                  borderRadius: '10px',
+                  padding: '8px 10px',
+                  lineHeight: 1.5,
+                }}
+              >
+                ℹ️ รายละเอียดนี้จะถูกบันทึกเข้าสู่ <strong>Timeline การรักษา</strong> (พร้อมคัดลอกลง HIS Note ได้) และ <strong>System Logs</strong> โดยอัตโนมัติ
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '2px' }}>
                 <button
                   type="button"
-                  onClick={() => setIsConfirmingComplete(false)}
+                  id="btn-cancel-er-completion-popup"
+                  onClick={() => setShowCompletionPopup(false)}
                   style={{
-                    padding: '14px 8px', borderRadius: '14px',
-                    fontSize: '11px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-                    color: '#64748b', border: '1px solid #cbd5e1', background: '#f8fafc',
+                    flex: 1,
+                    padding: '12px',
+                    borderRadius: '12px',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    color: '#475569',
+                    border: '1px solid #cbd5e1',
+                    background: '#f8fafc',
                   }}
                 >
                   ยกเลิก
                 </button>
+                <button
+                  type="button"
+                  id="btn-confirm-complete-treatment"
+                  onClick={handleConfirmCompleteTreatment}
+                  style={{
+                    flex: 2,
+                    padding: '12px',
+                    borderRadius: '12px',
+                    fontSize: '13.5px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    color: '#fff',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #10b981, #059669)',
+                    boxShadow: '0 6px 18px -4px rgba(16, 185, 129, 0.45)',
+                  }}
+                >
+                  ✅ ยืนยันเสร็จสิ้น & บันทึก
+                </button>
               </div>
-            ) : (
-              <button
-                type="button"
-                id="btn-trigger-complete-treatment"
-                onClick={handleCompleteTreatment}
-                style={{
-                  flex: 2, padding: '14px', borderRadius: '14px',
-                  fontSize: '14px', fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
-                  color: '#fff', border: 'none',
-                  background: 'linear-gradient(135deg, #10b981, #059669)',
-                  boxShadow: '0 6px 20px -4px rgba(16, 185, 129, .4)',
-                  transition: 'all 0.25s ease',
-                  letterSpacing: '-0.2px',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                }}
-                onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 8px 28px -4px rgba(16, 185, 129, .5)'; }}
-                onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 6px 20px -4px rgba(16, 185, 129, .4)'; }}
-              >
-                ✅ รักษาเสร็จแล้ว
-              </button>
-            )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

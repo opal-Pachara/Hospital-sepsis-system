@@ -325,12 +325,20 @@ class TestPatientLogging(unittest.TestCase):
              patch("backend.database.db_pool.get_connection", return_value=mock_conn_ctx), \
              patch("backend.database.dashboard_pool.get_connection", return_value=mock_conn_ctx), \
              patch("backend.treatment_service.get_treatment_status", new=AsyncMock(return_value={"hn": "HN555", "treatment_completed": True})):
-            asyncio.run(ts.complete_treatment("HN555", completed_by="พยาบาลวิชาชีพ"))
+            asyncio.run(ts.complete_treatment(
+                "HN555",
+                completed_by="พยาบาลวิชาชีพ",
+                er_note="ส่งต่อ Ward อายุรกรรม ให้ยาต่อเนื่อง",
+                written_by="นพ.ทดสอบ",
+            ))
 
         # Verify Stage 1: Clinical_Treatment log
         clin_logs = [l for l in recorded_logs if l["component"] == "Clinical_Treatment"]
         self.assertEqual(len(clin_logs), 1)
         self.assertIn("HN 555", clin_logs[0]["message"])
+        self.assertIn("ส่งต่อ Ward อายุรกรรม", clin_logs[0]["message"])
+        self.assertEqual(clin_logs[0]["details"]["er_note"], "ส่งต่อ Ward อายุรกรรม ให้ยาต่อเนื่อง")
+        self.assertEqual(clin_logs[0]["details"]["written_by"], "นพ.ทดสอบ")
         self.assertIn("พยาบาลวิชาชีพ", clin_logs[0]["details"]["completed_by"])
 
         # Verify Stage 2: Dashboard_Archive log

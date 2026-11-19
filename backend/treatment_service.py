@@ -405,7 +405,13 @@ async def doctor_confirm_sepsis(
         raise e
 
 
-async def complete_treatment(hn: str, completed_by: str = "Nurse/System", timeline_json: Optional[str] = None) -> Dict[str, Any]:
+async def complete_treatment(
+    hn: str,
+    completed_by: str = "Nurse/System",
+    timeline_json: Optional[str] = None,
+    er_note: Optional[str] = None,
+    written_by: Optional[str] = None,
+) -> Dict[str, Any]:
     """Mark a patient's treatment as completed, then archive to separate table."""
     now = datetime.now()
     now_str = now.strftime('%Y-%m-%d %H:%M:%S')
@@ -432,15 +438,22 @@ async def complete_treatment(hn: str, completed_by: str = "Nurse/System", timeli
             from .log_service import record_log
             hn_clean = str(hn)[2:].strip() if str(hn).upper().startswith("HN") else str(hn).strip()
             hn_display = f"HN {hn_clean}"
+            note_clean = str(er_note).strip() if er_note else ""
+            author_clean = str(written_by).strip() if written_by else completed_by
+            er_suffix = f" | รายละเอียดจากห้องฉุกเฉินโดย {author_clean}: {note_clean}" if note_clean else ""
+            log_details = {
+                "hn": hn,
+                "completed_by": completed_by,
+                "completed_at": now_str,
+            }
+            if note_clean:
+                log_details["er_note"] = note_clean
+                log_details["written_by"] = author_clean
             record_log(
                 "Note",
-                f"บันทึกสิ้นสุดการรักษา (Complete 1-Hour Sepsis Bundle): ผู้ป่วย {hn_display} โดย {completed_by}",
+                f"บันทึกสิ้นสุดการรักษา (Complete 1-Hour Sepsis Bundle): ผู้ป่วย {hn_display} โดย {completed_by}{er_suffix}",
                 component="Clinical_Treatment",
-                details={
-                    "hn": hn,
-                    "completed_by": completed_by,
-                    "completed_at": now_str,
-                }
+                details=log_details,
             )
         except Exception as log_err:
             logger.error(f"Failed to record complete treatment log: {log_err}")
